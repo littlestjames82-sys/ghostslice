@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GhostSlice - Agent Context Optimizer</title>
+<style>
+  :root { --violet:#6716f3; --bg:#121016; --panel:#1b1822; --panel2:#241f31; --text:#ece8f5; --muted:#a79fc0; --line:#342c4a; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--text); }
+  header { padding:16px 20px; border-bottom:1px solid var(--line); display:flex; gap:16px; align-items:center; flex-wrap:wrap; background:var(--panel); }
+  header h1 { font-size:20px; margin:0; } header h1 span { color:var(--violet); }
+  header .sub { color:var(--muted); font-size:13px; }
+  main { padding:16px 20px; display:grid; grid-template-columns:minmax(520px,3fr) minmax(320px,2fr); gap:16px; }
+  @media (max-width:1000px){ main{grid-template-columns:1fr;} }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  .totals { display:flex; gap:18px; flex-wrap:wrap; font-size:14px; }
+  .totals b { font-size:19px; display:block; }
+  .totals .accent { color:#b794ff; }
+  select, button, input { background:var(--panel2); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 9px; font-size:13px; }
+  button.primary { background:var(--violet); border-color:var(--violet); color:#fff; cursor:pointer; font-weight:600; }
+  button { cursor:pointer; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:middle; }
+  th { color:var(--muted); font-weight:600; }
+  td.tokens { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .bar { height:8px; border-radius:4px; min-width:4px; }
+  .path { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; word-break:break-all; }
+  .tag { font-size:11px; color:var(--muted); border:1px solid var(--line); border-radius:8px; padding:1px 6px; margin-left:6px; }
+  tr.excluded { opacity:.38; }
+  pre { background:#0d0b12; border:1px solid var(--line); border-radius:8px; padding:10px; overflow:auto; max-height:520px; font-size:12px; white-space:pre-wrap; word-break:break-word; }
+  .muted { color:var(--muted); font-size:12px; }
+  #status { margin-top:10px; font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>👻 <span>GhostSlice</span></h1>
+  <div class="sub">See what your agent will read, before it runs. Token counts are estimates.</div>
+  <div style="margin-left:auto; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    <label class="muted" for="model">Model</label>
+    <select id="model"></select>
+    <button class="primary" id="exportBtn">Export .claude_context bundle</button>
+  </div>
+</header>
+<main>
+  <section class="card">
+    <div class="totals" id="totals"></div>
+    <p class="muted" id="priceNote"></p>
+    <table>
+      <thead><tr><th></th><th>File (heatmap by token cost)</th><th>Mode</th><th style="text-align:right">Tokens</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </section>
+  <section class="card">
+    <h3 style="margin-top:0">Slice preview</h3>
+    <div class="muted" id="previewMeta">Click a file row to preview its slice.</div>
+    <pre id="preview">No file selected.</pre>
+    <div id="status"></div>
+  </section>
+</main>
+<script>
+let FILES = [], PRICES = null, MODEL = null;
+const $ = (id) => document.getElementById(id);
+
+function fmt(n){ return n.toLocaleString('en-US'); }
+function cost(tokens){ if(!MODEL) return 0; return tokens/1000000 * MODEL.input_per_mtok_usd; }
+function heat(tokens, max){
+  const r = max ? tokens/max : 0;
+  // violet-to-red intensity bar + row tint driven by share of the biggest file
+  return { width: Math.max(4, Math.round(r*100)) + '%',
+           color: r > .66 ? '#e5484d' : (r > .33 ? '#f76b15' : '#6716f3'),
+           alpha: 0.08 + r*0.25 };
+}
+function currentTokens(f){ return f.mode_tokens[f.mode] ?? f.tokens; }
+
+function render(){
+  const max = Math.max(1, ...FILES.map(f => f.tokens));
+  const before = FILES.reduce((s,f)=>s+f.tokens,0);
+  const after  = FILES.reduce((s,f)=>s+currentTokens(f),0);
+  $('totals').innerHTML =
+    `<div>Before<b>${fmt(before)} tokens</b><span class="muted">~$${cost(before).toFixed(4)}</span></div>` +
+    `<div>After pruning<b class="accent">${fmt(after)} tokens</b><span class="muted">~$${cost(after).toFixed(4)}</span></div>` +
+    `<div>Saved<b>${fmt(before-after)} tokens</b><span class="muted">~$${(cost(before)-cost(after)).toFixed(4)}</span></div>` +
+    `<div>Files<b>${FILES.length}</b></div>`;
+  if (PRICES) $('priceNote').textContent = 'Prices from local prices.json dated ' + PRICES.as_of + ' (not live). Pre-flight cost is input/context cost only.';
+  const tbody = $('rows'); tbody.innerHTML = '';
+  FILES.forEach((f, idx) => {
+    const h = heat(f.tokens, max);
+    const tr = document.createElement('tr');
+    if (f.mode === 'exclude') tr.className = 'excluded';
+    tr.innerHTML =
+      `<td><input type="checkbox" ${f.mode==='exclude'?'':'checked'} data-act="toggle"></td>` +
+      `<td><div class="bar" style="width:${h.width};background:${h.color}"></div>` +
+      `<span class="path">${f.path}</span>${f.is_test?'<span class="tag">test</span>':''}${f.is_lockfile?'<span class="tag">lockfile</span>':''}` +
+      `<div class="muted">${f.language} · ${f.lines} lines</div></td>` +
+      `<td><select data-act="mode">${['full','signatures','interfaces','strip-tests','exclude'].map(m=>`<option ${m===f.mode?'selected':''}>${m}</option>`).join('')}</select></td>` +
+      `<td class="tokens">${fmt(currentTokens(f))}<div class="muted">of ${fmt(f.tokens)}</div></td>`;
+    tr.querySelector('[data-act="toggle"]').addEventListener('change', (e)=>{
+      f.mode = e.target.checked ? f.prev_mode || f.default_mode : 'exclude';
+      if (e.target.checked) f.prev_mode = f.mode; render();
+    });
+    tr.querySelector('[data-act="mode"]').addEventListener('change', (e)=>{ f.mode = e.target.value; render(); preview(f); });
+    tr.addEventListener('click', (e)=>{ if(e.target.tagName!=='SELECT' && e.target.tagName!=='INPUT') preview(f); });
+    tbody.appendChild(tr);
+  });
+}
+
+async function preview(f){
+  $('previewMeta').textContent = 'Loading ' + f.path + ' (' + f.mode + ')...';
+  const r = await fetch('/api/preview?path=' + encodeURIComponent(f.path) + '&mode=' + encodeURIComponent(f.mode));
+  const d = await r.json();
+  $('previewMeta').textContent = `${d.path} · ${d.mode} · ${fmt(d.original_tokens)} → ${fmt(d.sliced_tokens)} estimated tokens (saved ${fmt(d.saved_tokens)})`;
+  $('preview').textContent = d.text || '(empty slice)';
+}
+
+async function init(){
+  const [scanR, pricesR] = await Promise.all([fetch('/api/scan'), fetch('/api/prices')]);
+  const scan = await scanR.json(); PRICES = await pricesR.json();
+  FILES = scan.files;
+  const sel = $('model');
+  PRICES.models.forEach(m => { const o=document.createElement('option'); o.value=m.id; o.textContent=m.name; sel.appendChild(o); });
+  MODEL = PRICES.models[0];
+  sel.addEventListener('change', ()=>{ MODEL = PRICES.models.find(m=>m.id===sel.value); render(); });
+  $('exportBtn').addEventListener('click', async ()=>{
+    const selections = {}; FILES.forEach(f=>selections[f.path]=f.mode);
+    $('status').textContent = 'Exporting...';
+    const r = await fetch('/api/export', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({selections})});
+    const d = await r.json();
+    $('status').textContent = d.ok ? ('Bundle written to ' + d.bundle + ' · ' + fmt(d.total_sliced_tokens) + ' estimated tokens (was ' + fmt(d.total_original_tokens) + ')') : ('Export failed: ' + (d.error||'unknown'));
+  });
+  render();
+}
+init();
+</script>
+</body>
+</html>
