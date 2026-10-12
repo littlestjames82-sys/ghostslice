@@ -161,7 +161,8 @@ def _class_signature(node: ast.ClassDef, indent: str = "") -> list[str]:
 
 
 def _is_type_alias(node) -> bool:
-    if isinstance(node, ast.TypeAlias):  # Python 3.12+
+    type_alias = getattr(ast, "TypeAlias", None)  # Python 3.12+ only
+    if type_alias is not None and isinstance(node, type_alias):
         return True
     if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
         return True

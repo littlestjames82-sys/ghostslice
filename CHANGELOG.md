@@ -3,6 +3,13 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [0.3.1] - 2026-10-12
+### Fixed
+- Python 3.10/3.11 crash in the Python slicer: `_is_type_alias` touched
+  `ast.TypeAlias`, which only exists on 3.12+. CI (added in 0.2.0) caught
+  it on the 3.10/3.11 matrix jobs while 3.12 passed. Guarded with getattr
+  and verified by simulating the missing attribute.
+
 ## [0.3.0] - 2026-10-12
 ### Added
 - MCP server (`ghostslice mcp`): stdlib stdio JSON-RPC with tools
