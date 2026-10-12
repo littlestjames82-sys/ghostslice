@@ -57,6 +57,10 @@
     <div class="muted" id="previewMeta">Click a file row to preview its slice.</div>
     <pre id="preview">No file selected.</pre>
     <div id="status"></div>
+    <h3>Prune recommendations</h3>
+    <div class="muted" id="recs">Loading...</div>
+    <h3>Savings ledger</h3>
+    <div class="muted" id="history">Loading...</div>
   </section>
 </main>
 <script>
@@ -118,6 +122,13 @@ async function init(){
   const [scanR, pricesR] = await Promise.all([fetch('/api/scan'), fetch('/api/prices')]);
   const scan = await scanR.json(); PRICES = await pricesR.json();
   FILES = scan.files;
+  const recs = scan.recommendations || [];
+  $('recs').innerHTML = recs.length ? recs.slice(0,10).map(r =>
+    `<div><span class="path">${r.path}</span> <span class="tag">${fmt(r.tokens)} tokens</span><br>${r.reason}</div>`).join('')
+    : 'No prune candidates found.';
+  const hist = scan.history || {runs:0,total_saved_tokens:0};
+  $('history').textContent = hist.runs ? `${hist.runs} recorded export(s), ${fmt(hist.total_saved_tokens)} estimated tokens saved in total.`
+    : 'No exports recorded for this project yet.';
   const sel = $('model');
   PRICES.models.forEach(m => { const o=document.createElement('option'); o.value=m.id; o.textContent=m.name; sel.appendChild(o); });
   MODEL = PRICES.models[0];

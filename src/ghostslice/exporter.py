@@ -13,6 +13,8 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import __version__
+from .ledger import append_record
 from .scanner import ScanResult, scan
 from .slicer import MODES, slice_text
 from .tokens import METHOD, estimate_tokens
@@ -32,10 +34,33 @@ def default_mode_for(entry) -> str:
 
 def build_bundle(root: str | Path, out: str | Path,
                  selections: dict[str, str] | None = None,
-                 default_mode: str | None = None) -> dict:
-    """Slice `root` into bundle dir `out`. Returns the manifest dict."""
+                 default_mode: str | None = None,
+                 profile=None,
+                 include: set[str] | None = None,
+                 preset: str | None = None,
+                 record_history: bool = True) -> dict:
+    """Slice `root` into bundle dir `out`. Returns the manifest dict.
+
+    Mode precedence: explicit `selections` > profile modes (`.ghostslice.json`)
+    > `default_mode` > built-in defaults. Files outside `include` (when given)
+    are recorded in the manifest with mode `exclude`.
+
+    Presets only change the bundle's convenience artifacts, not its core
+    layout (manifest.json + PROMPT.md + files/), so `ghostslice check`
+    works for every preset:
+      - claude-code: the bundle as-is, meant to be dropped in as a
+        .claude_context directory / pasted PROMPT.md.
+      - aider: also writes aider-files.txt, one sliced file per line as a
+        path inside the bundle, suitable for `aider --read <file>` entries
+        or pasting into an Aider session. Aider has no bundle format of its
+        own that we rely on; this is a documented plain file list.
+      - generic: also writes prompt.md (lowercase) as a copy of PROMPT.md
+        for tools that expect a single prompt file.
+    """
     selections = selections or {}
-    result: ScanResult = scan(root)
+    preset = preset or (profile.preset if profile else None) or "claude-code"
+    ignore_matcher = profile.is_ignored if (profile and profile.path) else None
+    result: ScanResult = scan(root, ignore_matcher=ignore_matcher)
     out = Path(out)
     files_dir = out / "files"
     files_dir.mkdir(parents=True, exist_ok=True)
@@ -46,7 +71,12 @@ def build_bundle(root: str | Path, out: str | Path,
     total_after = 0
 
     for entry in result.files:
-        mode = selections.get(entry.path)
+        if include is not None and entry.path not in include:
+            mode = "exclude"
+        else:
+            mode = selections.get(entry.path)
+        if mode is None and profile is not None:
+            mode = profile.mode_for(entry.path)
         if mode is None:
             if default_mode and entry.language in SLICABLE and not entry.is_test:
                 mode = default_mode
@@ -78,7 +108,8 @@ def build_bundle(root: str | Path, out: str | Path,
 
     manifest = {
         "tool": "ghostslice",
-        "version": "0.1.0",
+        "version": __version__,
+        "preset": preset,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "root": str(Path(root).resolve()),
         "token_method": METHOD,
@@ -95,7 +126,51 @@ def build_bundle(root: str | Path, out: str | Path,
         + "".join(prompt_parts)
     )
     (out / "PROMPT.md").write_text(prompt, encoding="utf-8")
+    if preset == "generic":
+        (out / "prompt.md").write_text(prompt, encoding="utf-8")
+    elif preset == "aider":
+        written = [f["path"] for f in manifest_files
+                   if f["mode"] != "exclude" and f["sliced_tokens"] > 0]
+        listing = "\n".join(f"files/{p}" for p in written)
+        (out / "aider-files.txt").write_text(
+            "# GhostSlice bundle for Aider: pass these sliced files as read-only\n"
+            "# context, e.g. `aider --read files/<path>` for each line, or paste\n"
+            "# PROMPT.md into the session instead. Plain file list, no magic format.\n"
+            + listing + ("\n" if listing else ""), encoding="utf-8")
+    if record_history:
+        try:
+            append_record(root, "export", total_before, total_after, bundle=str(out))
+        except OSError:
+            pass
     return manifest
+
+
+def estimate_context_tokens(root: str | Path, profile=None,
+                            default_mode: str | None = None) -> tuple[int, int]:
+    """(total original, total sliced) tokens for the default/profile selection."""
+    ignore_matcher = profile.is_ignored if (profile and profile.path) else None
+    result: ScanResult = scan(root, ignore_matcher=ignore_matcher)
+    before = after = 0
+    for entry in result.files:
+        mode = profile.mode_for(entry.path) if profile is not None else None
+        if mode is None:
+            if default_mode and entry.language in SLICABLE and not entry.is_test:
+                mode = default_mode
+            elif default_mode and entry.is_test:
+                mode = "strip-tests"
+            else:
+                mode = default_mode_for(entry)
+        if mode == "full":
+            before += entry.tokens
+            after += entry.tokens
+        elif mode == "exclude":
+            before += entry.tokens
+        else:
+            source = Path(entry.abspath).read_text(encoding="utf-8", errors="replace")
+            r = slice_text(entry.path, source, mode)
+            before += r.original_tokens
+            after += r.sliced_tokens
+    return before, after
 
 
 def validate_bundle(bundle: str | Path) -> dict:

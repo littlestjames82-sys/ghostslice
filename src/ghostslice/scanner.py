@@ -42,6 +42,7 @@ LANGUAGE_BY_EXT = {
     ".js": "javascript", ".jsx": "javascript",
     ".mjs": "javascript", ".cjs": "javascript",
     ".md": "markdown", ".txt": "text", ".json": "json",
+    ".go": "go", ".rs": "rust", ".java": "java", ".cs": "csharp",
 }
 
 
@@ -73,51 +74,76 @@ class Gitignore:
     trailing / (dirs only), patterns without a slash matching any
     basename, patterns with a slash matching the relative path, and
     fnmatch globs (*, ?, ** treated like *).
+
+    Rules carry a base directory (posix path relative to the project
+    root, "" for the root). A rule only applies to paths under its base,
+    and matching is done on the path relative to that base. Later rules
+    win, so a nested .gitignore can override a parent rule for its own
+    subtree (a simplification of real git semantics, which are close
+    enough for scanning: last matching rule in load order decides).
     """
 
     def __init__(self, root: Path):
         self.root = root
-        self.rules: list[tuple[bool, str, bool]] = []  # (negate, pattern, dir_only)
-        gi = root / ".gitignore"
-        if gi.is_file():
-            try:
-                lines = gi.read_text(encoding="utf-8", errors="ignore").splitlines()
-            except OSError:
-                lines = []
-            for raw in lines:
-                line = raw.strip()
-                if not line or line.startswith("#"):
-                    continue
-                negate = line.startswith("!")
-                if negate:
-                    line = line[1:]
-                dir_only = line.endswith("/")
-                line = line.rstrip("/").lstrip("/")
-                if line:
-                    self.rules.append((negate, line, dir_only))
+        # (base, negate, pattern, dir_only)
+        self.rules: list[tuple[str, bool, str, bool]] = []
+        self._loaded: set[str] = set()
+        self.load_dir("")
+
+    def load_dir(self, base: str) -> None:
+        """Load <root>/<base>/.gitignore if present (idempotent)."""
+        if base in self._loaded:
+            return
+        self._loaded.add(base)
+        gi = self.root / base / ".gitignore" if base else self.root / ".gitignore"
+        if not gi.is_file():
+            return
+        try:
+            lines = gi.read_text(encoding="utf-8", errors="ignore").splitlines()
+        except OSError:
+            lines = []
+        for raw in lines:
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            negate = line.startswith("!")
+            if negate:
+                line = line[1:]
+            dir_only = line.endswith("/")
+            line = line.rstrip("/").lstrip("/")
+            if line:
+                self.rules.append((base, negate, line, dir_only))
 
     def ignored(self, rel: str, is_dir: bool = False) -> bool:
         result = False
         rel_posix = rel.replace(os.sep, "/")
-        basename = Path(rel_posix).name
-        for negate, pat, dir_only in self.rules:
+        for base, negate, pat, dir_only in self.rules:
+            if base:
+                if not (rel_posix == base or rel_posix.startswith(base + "/")):
+                    continue
+                sub = rel_posix[len(base) + 1:] if rel_posix != base else ""
+                if not sub:
+                    continue
+            else:
+                sub = rel_posix
+            basename = Path(sub).name
             if dir_only and not is_dir:
                 # A dir pattern also ignores everything under that dir.
                 if "/" not in pat:
-                    if pat in Path(rel_posix).parts:
+                    if pat in Path(sub).parts:
                         result = not negate
                         continue
-                elif rel_posix == pat or rel_posix.startswith(pat + "/"):
+                elif sub == pat or sub.startswith(pat + "/"):
                     result = not negate
                     continue
                 else:
                     continue
             if "/" in pat:
-                if fnmatch.fnmatch(rel_posix, pat) or fnmatch.fnmatch(rel_posix, pat + "/*") \
-                        or rel_posix == pat:
+                if fnmatch.fnmatch(sub, pat) or fnmatch.fnmatch(sub, pat + "/*") \
+                        or sub == pat:
                     result = not negate
             else:
-                if fnmatch.fnmatch(basename, pat) or pat in Path(rel_posix).parts:
+                if fnmatch.fnmatch(basename, pat) or pat in Path(sub).parts:
                     result = not negate
         return result
 
@@ -164,14 +190,19 @@ def _looks_binary(data: bytes) -> bool:
     return b"\x00" in data[:8192]
 
 
-def scan(root: str | Path) -> ScanResult:
+DEFAULT_IGNORE_FILES = {".ghostslice-history.jsonl"}
+
+# Optional profile hook: scan(root, ignore_matcher=callable) where the
+# callable takes a posix rel path and returns True to exclude the file.
+# Kept as a plain callable to avoid an import cycle with profile.py.
+
+def scan(root: str | Path, ignore_matcher=None) -> ScanResult:
     root = Path(root).expanduser().resolve()
     if not root.exists():
         raise FileNotFoundError(str(root))
     result = ScanResult(root=str(root))
     if root.is_file():
         candidates = [(root, root.name)]
-        gitignore = Gitignore(root.parent)
         for abspath, rel in candidates:
             _add_file(result, abspath, rel)
         return result
@@ -180,21 +211,30 @@ def scan(root: str | Path) -> ScanResult:
     for dirpath, dirnames, filenames in os.walk(root):
         dirpath_p = Path(dirpath)
         rel_dir = dirpath_p.relative_to(root)
+        rel_dir_posix = "" if str(rel_dir) == "." else rel_dir.as_posix()
+        # Load this directory's own .gitignore before judging its contents.
+        gitignore.load_dir(rel_dir_posix)
         # prune dirs in place
         keep = []
         for d in sorted(dirnames):
             rel = str(rel_dir / d) if str(rel_dir) != "." else d
             if d in DEFAULT_IGNORE_DIRS:
                 continue
-            if gitignore.ignored(rel, is_dir=True):
+            if gitignore.ignored(rel.replace(os.sep, "/"), is_dir=True):
+                continue
+            if ignore_matcher and ignore_matcher(rel.replace(os.sep, "/")):
                 continue
             keep.append(d)
         dirnames[:] = keep
         for name in sorted(filenames):
+            if name in DEFAULT_IGNORE_FILES:
+                continue
             abspath = dirpath_p / name
             rel = str(rel_dir / name) if str(rel_dir) != "." else name
             rel_posix = rel.replace(os.sep, "/")
             if gitignore.ignored(rel_posix, is_dir=False):
+                continue
+            if ignore_matcher and ignore_matcher(rel_posix):
                 continue
             _add_file(result, abspath, rel_posix)
     result.files.sort(key=lambda f: f.tokens, reverse=True)

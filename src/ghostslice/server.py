@@ -8,7 +8,10 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from .exporter import SLICABLE, build_bundle
+from .graph import build_graph, recommendations
+from .ledger import summary as ledger_summary
 from .pricing import load_prices
+from .profile import load_profile
 from .scanner import scan
 from .slicer import MODES, slice_text
 
@@ -28,7 +31,11 @@ def _default_mode(entry) -> str:
 class _State:
     def __init__(self, root: str):
         self.root = Path(root).resolve()
-        self.scan = scan(self.root)
+        self.profile = load_profile(self.root)
+        matcher = self.profile.is_ignored if self.profile.path else None
+        self.scan = scan(self.root, ignore_matcher=matcher)
+        self.graph = build_graph(self.scan)
+        self.recommendations = recommendations(self.scan, self.graph, self.profile)
         self.by_path = {f.path: f for f in self.scan.files}
         self._mode_tokens_cache: dict[tuple[str, str], int] = {}
 
@@ -59,6 +66,9 @@ class _State:
             "file_count": len(files),
             "token_method": "estimates (see README); not exact tokenizer counts",
             "files": files,
+            "profile": self.profile.to_dict(),
+            "recommendations": self.recommendations,
+            "history": ledger_summary(self.root),
         }
 
 
@@ -92,6 +102,11 @@ def make_server(root: str, port: int = 8765, host: str = "127.0.0.1"):
             elif parsed.path == "/api/prices":
                 payload = {k: v for k, v in prices.items() if not k.startswith("_")}
                 self._json(200, payload)
+            elif parsed.path == "/api/graph":
+                self._json(200, {"graph": state.graph,
+                                 "recommendations": state.recommendations})
+            elif parsed.path == "/api/history":
+                self._json(200, ledger_summary(state.root))
             elif parsed.path == "/api/preview":
                 rel = (qs.get("path") or [""])[0]
                 mode = (qs.get("mode") or ["signatures"])[0]

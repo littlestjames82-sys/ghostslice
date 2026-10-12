@@ -1,5 +1,10 @@
 # GhostSlice
 
+[![CI](https://github.com/littlestjames82-sys/ghostslice/actions/workflows/ci.yml/badge.svg)](https://github.com/littlestjames82-sys/ghostslice/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/littlestjames82-sys/ghostslice)](https://github.com/littlestjames82-sys/ghostslice/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
+
 **See what your agent will read, before it runs.**
 
 Developers running autonomous CLI agents (Claude Code, Aider, OpenClaw) burn
@@ -89,6 +94,68 @@ A bundle contains:
 `ghostslice check` re-reads the bundle and verifies that every hash and
 token total in `manifest.json` matches what is actually on disk.
 
+### Graph: dependency map + prune recommendations (v0.2)
+
+```bash
+ghostslice graph ~/my-project          # who imports whom, plus prune candidates
+ghostslice scan ~/my-project           # scan output now ends with recommendations
+```
+
+GhostSlice builds an import graph (Python via `ast`, TS/JS parser-lite)
+and flags code files that are unreachable from your entry points (or,
+with no entry points known, imported by nothing). Candidates carry their
+token cost so you can see the saving before you act. They are
+recommendations to review, never automatic deletions: dynamic imports,
+framework wiring, and config-referenced entry files can look dead when
+they are not.
+
+### Task-focused context (v0.2)
+
+```bash
+# keyword-scored file selection within a sliced-token budget
+ghostslice task ~/my-project --task "fix billing payments" --budget 20000 -o /tmp/task-bundle
+
+# git-changed files plus their direct dependencies
+ghostslice task ~/my-project --diff -o /tmp/diff-bundle
+```
+
+Both export a validated bundle containing only the selection (everything
+else is recorded as `exclude` in the manifest).
+
+### Profiles: `.ghostslice.json` (v0.2)
+
+Drop this in a project root and every command picks it up automatically:
+
+```json
+{
+  "ignore": ["vendor/**", "*.snap"],
+  "modes": {"src/**": "signatures", "docs/**": "full"},
+  "model": "claude-sonnet",
+  "budget_tokens": 50000,
+  "entry_points": ["src/main.py"],
+  "preset": "claude-code"
+}
+```
+
+Export presets: `claude-code` (the `.claude_context` bundle), `aider`
+(adds `aider-files.txt`, a plain list of the sliced files to pass to
+Aider with `--read`), and `generic` (adds a lowercase `prompt.md`).
+Nested `.gitignore` files in subdirectories are honoured, scoped to
+their subtree.
+
+### Budget gate for CI (v0.2)
+
+```bash
+ghostslice check-budget ~/my-project --max-tokens 50000   # or profile budget_tokens
+echo $?   # 1 when the selected (sliced) context exceeds the budget
+```
+
+### Savings ledger (v0.2)
+
+Every export appends one line to `.ghostslice-history.jsonl` in the
+project (scanner-ignored). `ghostslice history ~/my-project` and the
+dashboard total the estimated savings across runs.
+
 ### Dashboard: visual context tree
 
 ```bash
@@ -133,10 +200,15 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 ```
 src/ghostslice/
   tokens.py     token estimator (documented method)
-  scanner.py    .gitignore-aware project scanner
-  slicer.py     Python ast slicer + TS/JS parser-lite slicer
+  scanner.py    .gitignore-aware project scanner (nested .gitignore support)
+  slicer.py     Python ast slicer + TS/JS parser-lite slicer (+ Go/Rust/Java/C# lite in v0.3)
+  graph.py      import graph + prune recommendations + git changed-files
+  profile.py    .ghostslice.json profile loader
+  selection.py  task keyword / git-diff context selection
+  ledger.py     .ghostslice-history.jsonl savings ledger
+  mcp_server.py stdio MCP server (v0.3)
   pricing.py    local prices.json loader + cost estimator
-  exporter.py   .claude_context bundle builder + validator
+  exporter.py   bundle builder + validator (presets: claude-code/aider/generic)
   server.py     stdlib http.server dashboard API
   dashboard.html  single-page dashboard UI (violet accent #6716f3)
   cli.py        ghostslice command line
