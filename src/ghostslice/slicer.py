@@ -73,6 +73,8 @@ def slice_source(source: str, language: str, mode: str, path: str = "") -> str:
         return _slice_python(source, mode)
     if language in ("typescript", "javascript"):
         return _slice_ts(source, mode)
+    if language in ("go", "rust", "java", "csharp"):
+        return _slice_brace_lite(source, mode, language, path)
     # Other languages: only full / exclude / strip-tests (test files) apply.
     return source
 
@@ -462,3 +464,259 @@ def _slice_ts(source: str, mode: str) -> str:
         return source
     text = "\n".join(out).strip()
     return text + ("\n" if text else "")
+
+
+# ---------------------------------------------------------------------------
+# Go / Rust / Java / C# (parser-lite, v0.3)
+#
+# Same honesty label as TS: line scanning + brace matching for
+# conventional formatting (one declaration per line, opening brace on
+# the declaration line). Guaranteed mode is `signatures`; `interfaces`
+# keeps type declarations (Go/Rust: struct/interface/trait/enum blocks
+# in full; Java/C#: interface/enum in full, classes reduced to member
+# signatures). `strip-tests` removes test files wholesale (handled in
+# slice_source) and test functions/blocks:
+#   Go:   func TestXxx / BenchmarkXxx / ExampleXxx
+#   Rust: #[test] functions and `mod tests { ... }` blocks
+#   Java: @Test methods
+#   C#:   [Test] / [Fact] / [Theory] methods
+# ---------------------------------------------------------------------------
+
+_GO_FUNC_RE = re.compile(r"^\s*func\s+(\([^)]*\)\s*)?[A-Za-z_]\w*\s*\(")
+_GO_TYPE_RE = re.compile(r"^\s*type\s+[A-Za-z_]\w*\s+(struct|interface)\b")
+_RS_FN_RE = re.compile(r"^\s*(#\[.*\]\s*)?(pub(\s*\([^)]*\))?\s+)?(async\s+|unsafe\s+|const\s+)*fn\s+[A-Za-z_]\w*\s*[<(]")
+_RS_TYPE_RE = re.compile(r"^\s*(pub(\s*\([^)]*\))?\s+)?(struct|enum|trait|union)\s+[A-Za-z_]\w*")
+_RS_IMPL_RE = re.compile(r"^\s*(unsafe\s+)?impl\b")
+_JV_TYPE_RE = re.compile(r"^\s*(public\s+|private\s+|protected\s+|abstract\s+|final\s+|static\s+|sealed\s+|partial\s+|async\s+|unsafe\s+|readonly\s+|ref\s+)*(class|interface|enum|record|struct)\s+[A-Za-z_]\w*")
+_JV_METHOD_RE = re.compile(r"^\s*(public\s+|private\s+|protected\s+|internal\s+|static\s+|abstract\s+|virtual\s+|override\s+|sealed\s+|async\s+|final\s+|synchronized\s+|native\s+|extern\s+|new\s+)*[A-Za-z_][\w<>\[\],.? ]*\s+[A-Za-z_]\w*\s*\(.*\)\s*(throws\s+[\w, ]+)?[{;]\s*$")
+_IMPORT_LINE_RES = {
+    "go": re.compile(r"^\s*(package|import)\b"),
+    "rust": re.compile(r"^\s*(use|mod|extern\s+crate)\b"),
+    "java": re.compile(r"^\s*(package|import)\b"),
+    "csharp": re.compile(r"^\s*(using|namespace)\b"),
+}
+_TEST_FN_RES = {
+    "go": re.compile(r"^\s*func\s+(Test|Benchmark|Example|Fuzz)[A-Z]\w*\s*\("),
+    "java": re.compile(r"^\s*@Test\b"),
+    "csharp": re.compile(r"^\s*\[(Test|Fact|Theory|TestMethod|TestCase)\b"),
+}
+
+
+def _block_end(lines, start):
+    return _brace_end(lines, start, body_col=lines[start].find("{"))
+
+
+def _lite_type_kind(line: str, lang: str) -> str | None:
+    if lang == "go":
+        m = _GO_TYPE_RE.match(line)
+        return m.group(1) if m else None
+    if lang == "rust":
+        if _RS_TYPE_RE.match(line):
+            m = re.search(r"\b(struct|enum|trait|union)\s+[A-Za-z_]\w*", line)
+            return m.group(1) if m else None
+        return None
+    m = _JV_TYPE_RE.match(line)
+    return m.group(2) if m else None
+
+
+def _lite_is_func(line: str, lang: str) -> bool:
+    if lang == "go":
+        return bool(_GO_FUNC_RE.match(line))
+    if lang == "rust":
+        return bool(_RS_FN_RE.match(line))
+    return bool(_JV_METHOD_RE.match(line)) and not _JV_TYPE_RE.match(line)
+
+
+def _lite_keep_full_type(kind: str | None, lang: str, mode: str) -> bool:
+    if kind is None:
+        return False
+    if mode == "interfaces":
+        return True
+    # signatures: declaration-style types are surface in Go/Rust; Java/C#
+    # classes are reduced to member signatures instead.
+    if lang in ("go", "rust"):
+        return True
+    return kind in ("interface", "enum", "record")
+
+
+def _lite_class_members(lines, start, lang):
+    """Member signatures of a class/impl block starting at `start`."""
+    end = _block_end(lines, start)
+    header = _sig_before_body(lines[start]) + " {"
+    out = [header]
+    i = start + 1
+    while i < end:
+        line = lines[i]
+        stripped = line.strip()
+        if _lite_is_func(line, lang):
+            if "{" in line:
+                out.append(_sig_before_body(line) + " { /* ... */ }")
+                i = _block_end(lines, i) + 1
+            else:  # abstract / interface method ending in ;
+                out.append(line.rstrip())
+                i += 1
+        elif _lite_type_kind(line, lang) or _JV_TYPE_RE.match(line):
+            kind = _lite_type_kind(line, lang)
+            if "{" in line and _lite_keep_full_type(kind, lang, "signatures"):
+                bend = _block_end(lines, i)
+                out.extend(ln.rstrip() for ln in lines[i:bend + 1])
+                i = bend + 1
+            elif "{" in line:
+                sub, nxt = _lite_class_members(lines, i, lang)
+                out.extend(sub)
+                i = nxt
+            else:
+                out.append(line.rstrip())
+                i += 1
+        elif lang == "rust" and _RS_IMPL_RE.match(line):
+            sub, nxt = _lite_class_members(lines, i, lang)
+            out.extend(sub)
+            i = nxt
+        elif stripped.endswith(";") and "(" not in stripped:
+            out.append(line.rstrip())  # field / constant
+            i += 1
+        elif stripped.startswith("#[") or stripped.startswith("@"):
+            out.append(line.rstrip())
+            i += 1
+        else:
+            i += 1
+    out.append("}")
+    return out, end + 1
+
+
+def _lite_signatures(lines, lang, mode):
+    out: list[str] = []
+    imp_re = _IMPORT_LINE_RES[lang]
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        kind = _lite_type_kind(line, lang) or (("class" if _JV_TYPE_RE.match(line) else None)
+                if lang in ("java", "csharp") else None)
+        if lang == "csharp" and re.match(r"^\s*namespace\s+[\w.]+\s*\{", line):
+            if mode == "interfaces":
+                sub, nxt = _lite_class_members(lines, i, lang)
+                # keep interface/enum members only is overkill here; namespace
+                # members were signature-reduced, which matches the class rule.
+                out.extend(sub); out.append(""); i = nxt
+            else:
+                sub, nxt = _lite_class_members(lines, i, lang)
+                out.extend(sub); out.append(""); i = nxt
+        elif imp_re.match(line):
+            if "(" in line and "{" not in line and lang == "go" and line.rstrip().endswith("("):
+                # go import ( ... ) block: copy until closing paren
+                j = i
+                while j < len(lines) and lines[j].strip() != ")":
+                    out.append(lines[j].rstrip()); j += 1
+                if j < len(lines):
+                    out.append(lines[j].rstrip())
+                i = j + 1
+            else:
+                out.append(line.rstrip())
+                i += 1
+        elif kind and "{" in line and _lite_keep_full_type(kind, lang, mode):
+            end = _block_end(lines, i)
+            out.extend(ln.rstrip() for ln in lines[i:end + 1])
+            out.append("")
+            i = end + 1
+        elif (kind or (lang == "rust" and _RS_IMPL_RE.match(line))) and "{" in line:
+            if mode == "interfaces" and lang in ("java", "csharp") and kind == "class":
+                sub, nxt = _lite_class_members(lines, i, lang)
+                out.extend(sub); out.append(""); i = nxt
+            elif mode == "interfaces":
+                i = _block_end(lines, i) + 1  # impl/class bodies are not interfaces in go/rust
+            else:
+                sub, nxt = _lite_class_members(lines, i, lang)
+                out.extend(sub); out.append(""); i = nxt
+        elif _lite_is_func(line, lang):
+            if mode == "interfaces" and lang in ("go", "rust"):
+                i = _block_end(lines, i) + 1 if "{" in line else i + 1
+            elif "{" in line:
+                sig = _sig_before_body(line)
+                out.append(sig + (" { /* ... */ }" if lang != "go" else " { /* ... */ }"))
+                i = _block_end(lines, i) + 1
+            else:
+                out.append(line.rstrip())
+                i = _statement_end(lines, i) + 1
+        elif mode == "signatures" and line.strip().endswith(";") and "(" not in line:
+            out.append(line.rstrip())  # top-level const/var/type alias
+            i += 1
+        elif mode == "signatures" and lang == "rust" and re.match(r"^\s*(pub\s+)?(type|static|const)\b", line):
+            out.append(line.rstrip())
+            i += 1
+        else:
+            i += 1
+    return out
+
+
+def _lite_strip_tests(lines, lang, source):
+    if lang == "rust":
+        drop: set[int] = set()
+        i = 0
+        while i < len(lines):
+            if re.match(r"^\s*mod\s+tests\s*\{", lines[i]) or \
+               (re.match(r"^\s*#\[cfg\(test\)\]", lines[i]) and i + 1 < len(lines)
+                    and "{" in lines[i + 1]):
+                start = i + 1 if lines[i].lstrip().startswith("#[") else i
+                end = _block_end(lines, start) if "{" in lines[start] else i
+                for ln in range(i, end + 1):
+                    drop.add(ln)
+                i = end + 1
+            elif re.match(r"^\s*#\[test\]", lines[i]):
+                j = i + 1
+                while j < len(lines) and not _RS_FN_RE.match(lines[j]):
+                    j += 1
+                if j < len(lines):
+                    end = _block_end(lines, j) if "{" in lines[j] else j
+                    for ln in range(i, end + 1):
+                        drop.add(ln)
+                    i = end + 1
+                else:
+                    i += 1
+            else:
+                i += 1
+        kept = [ln for idx, ln in enumerate(lines) if idx not in drop]
+        text = "\n".join(kept)
+        text = re.sub(r"\n{3,}", "\n\n", text).strip("\n")
+        return text + ("\n" if text else "")
+    # go / java / csharp: drop annotated or conventionally named test functions
+    test_re = _TEST_FN_RES.get(lang)
+    if test_re is None:
+        return source
+    drop: set[int] = set()
+    i = 0
+    while i < len(lines):
+        if test_re.match(lines[i]):
+            if lang == "go":
+                start = i
+            else:
+                # annotation line: the method follows within a few lines
+                start = i
+                j = i
+                while j < min(i + 4, len(lines)) and "{" not in lines[j] and not lines[j].rstrip().endswith(";"):
+                    j += 1
+                end = _block_end(lines, j) if j < len(lines) and "{" in lines[j] else start
+                for ln in range(start, end + 1):
+                    drop.add(ln)
+                i = end + 1
+                continue
+            end = _block_end(lines, start) if "{" in lines[start] else start
+            for ln in range(start, end + 1):
+                drop.add(ln)
+            i = end + 1
+        else:
+            i += 1
+    kept = [ln for idx, ln in enumerate(lines) if idx not in drop]
+    text = "\n".join(kept)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip("\n")
+    return text + ("\n" if text else "")
+
+
+def _slice_brace_lite(source: str, mode: str, lang: str, path: str = "") -> str:
+    lines = source.splitlines()
+    if mode == "strip-tests":
+        return _lite_strip_tests(lines, lang, source)
+    if mode in ("signatures", "interfaces"):
+        out = _lite_signatures(lines, lang, mode)
+        text = "\n".join(out).strip()
+        return text + ("\n" if text else "")
+    return source

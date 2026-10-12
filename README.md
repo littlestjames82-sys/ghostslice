@@ -156,6 +156,24 @@ Every export appends one line to `.ghostslice-history.jsonl` in the
 project (scanner-ignored). `ghostslice history ~/my-project` and the
 dashboard total the estimated savings across runs.
 
+### MCP server (v0.3)
+
+```bash
+ghostslice mcp    # stdio JSON-RPC, newline-delimited
+```
+
+Tools: `scan_project`, `slice_file`, `estimate_cost`, `export_bundle`.
+Same zero-dependency stdlib pattern as the Ghost Hands MCP server: any
+MCP client that can spawn a stdio process can drive GhostSlice.
+
+### More languages (v0.3)
+
+Go, Rust, Java, and C# join Python and TypeScript/JavaScript, with
+parser-lite `signatures` and `interfaces` modes and test stripping
+(Go `TestXxx` functions, Rust `#[test]` / `mod tests`, Java `@Test`,
+C# `[Test]` / `[Fact]`). Parser-lite honesty applies: conventional
+formatting slices well, exotic syntax may not.
+
 ### Dashboard: visual context tree
 
 ```bash

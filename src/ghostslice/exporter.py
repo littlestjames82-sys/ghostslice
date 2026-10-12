@@ -19,7 +19,7 @@ from .scanner import ScanResult, scan
 from .slicer import MODES, slice_text
 from .tokens import METHOD, estimate_tokens
 
-SLICABLE = {"python", "typescript", "javascript"}
+SLICABLE = {"python", "typescript", "javascript", "go", "rust", "java", "csharp"}
 
 
 def default_mode_for(entry) -> str:

@@ -56,9 +56,12 @@ def is_test_file(rel: str) -> bool:
     parts = [part.lower() for part in p.parts]
     if any(part in ("tests", "test", "__tests__", "spec", "specs") for part in parts[:-1]):
         return True
-    if name.startswith("test_") or name.endswith("_test.py") or name.endswith(".test.ts") \
+    if name.startswith("test_") or name.endswith("_test.py") or name.endswith("_test.go") \
+            or name.endswith(".test.ts") \
             or name.endswith(".test.tsx") or name.endswith(".test.js") or name.endswith(".test.jsx") \
-            or ".spec." in name or name.startswith("test.") or name.endswith("_spec.rb"):
+            or ".spec." in name or name.startswith("test.") or name.endswith("_spec.rb") \
+            or name.endswith("test.java") or name.endswith("tests.java") \
+            or name.endswith("test.cs") or name.endswith("tests.cs"):
         return True
     return False
 

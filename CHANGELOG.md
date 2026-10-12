@@ -3,6 +3,19 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [0.3.0] - 2026-10-12
+### Added
+- MCP server (`ghostslice mcp`): stdlib stdio JSON-RPC with tools
+  scan_project, slice_file, estimate_cost, export_bundle, tested
+  end-to-end over a real stdio subprocess.
+- Go, Rust, Java, and C# slicers (parser-lite): signatures and
+  interfaces modes plus test stripping, with golden tests per language.
+- Export defaults and CLI slicing now treat the new languages as
+  slicable.
+### Notes
+- The savings ledger and its dashboard summary shipped in 0.2.0
+  (earlier than this wave's plan); they are unchanged here.
+
 ## [0.2.0] - 2026-10-12
 ### Added
 - Import/dependency graph (Python `ast`, TS/JS parser-lite) with prune
