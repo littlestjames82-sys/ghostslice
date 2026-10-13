@@ -5,8 +5,8 @@ Commands:
   ghostslice graph        <path> [--json]
   ghostslice slice        <path> --mode MODE -o <dir>
   ghostslice task         <path> (--task "words" | --diff) [--budget N] [--fit N] -o <bundle> [--preset P]
-  ghostslice export       <path> -o <bundle> [--mode MODE] [--model ID] [--preset P] [--fit N]
-  ghostslice watch        <path> [--export] [-o <bundle>] [--interval S] [--debounce S] [--once] [--max-events N] [--fit N]
+  ghostslice export       <path> -o <bundle> [--mode MODE] [--model ID] [--preset P] [--fit N] [--exclude-secrets] [--auto-shrink]
+  ghostslice watch        <path> [--export] [-o <bundle>] [--interval S] [--debounce S] [--once] [--max-events N] [--fit N] [--auto-shrink]
   ghostslice check-budget <path> [--max-tokens N]
   ghostslice lint         <path> [--json] [--strict]
   ghostslice check        <bundle>
@@ -83,6 +83,12 @@ def _print_scan(result, model=None, prices=None, recs=None, secrets=None, dups=N
             flags.append("test")
         if f.is_lockfile:
             flags.append("lockfile")
+        if f.is_generated:
+            flags.append("generated")
+        if f.is_minified:
+            flags.append("minified")
+        if f.is_vendored:
+            flags.append("vendored")
         suffix = f"  [{', '.join(flags)}]" if flags else ""
         print(f"{f.tokens:>9,}  {f.lines:>6}  {f.path}{suffix}")
     if len(result.files) > 200:
@@ -164,6 +170,10 @@ def main(argv: list[str] | None = None) -> int:
     p_export.add_argument("--model", default="claude-sonnet")
     p_export.add_argument("--exclude-secrets", action="store_true",
                           help="force-exclude files flagged by the secret guard")
+    p_export.add_argument("--auto-shrink", action="store_true",
+                          help="exclude files detected as generated/vendored/minified "
+                               "(explicit modes and profile modes still win; "
+                               "also settable as \"auto_shrink\": true in the profile)")
     p_export.add_argument("--fit", type=int, default=None, metavar="N",
                           help="auto-fit: downgrade slice modes until the bundle fits N estimated tokens "
                                "(exit 1 if it cannot fit; the bundle is still written)")
@@ -208,6 +218,9 @@ def main(argv: list[str] | None = None) -> int:
     p_watch.add_argument("--preset", choices=PRESETS, default=None)
     p_watch.add_argument("--exclude-secrets", action="store_true",
                          help="with --export: force-exclude files flagged by the secret guard")
+    p_watch.add_argument("--auto-shrink", action="store_true",
+                         help="with --export: exclude detected generated/vendored/minified "
+                              "files, as in export --auto-shrink")
     p_watch.add_argument("--fit", type=int, default=None, metavar="N",
                          help="with --export: auto-fit the bundle to N estimated tokens, as in export --fit")
 
@@ -405,6 +418,12 @@ def main(argv: list[str] | None = None) -> int:
         file_secrets = scan_text(rel, source)
         print(f"{rel}: included")
         print(f"  language: {entry.language}  test: {entry.is_test}  lockfile: {entry.is_lockfile}")
+        if entry.detect_evidence:
+            det = "; ".join(f"{kind} ({ev})" for kind, ev in
+                            sorted(entry.detect_evidence.items()))
+            print(f"  detection: {det}")
+        else:
+            print("  detection: none")
         print(f"  mode: {mode}  ({why})")
         print(f"  tokens (estimated): {sliced.original_tokens:,} -> {sliced.sliced_tokens:,} (saved {sliced.saved_tokens:,})")
         print(f"  imports: {', '.join(graph.get(rel, {}).get('imports', [])) or '(none in project)'}")
@@ -542,11 +561,17 @@ def main(argv: list[str] | None = None) -> int:
         manifest = build_bundle(args.path, args.out, default_mode=args.mode,
                                 profile=profile, preset=args.preset,
                                 exclude_secrets=args.exclude_secrets,
+                                auto_shrink=True if args.auto_shrink else None,
                                 fit=args.fit)
         model = get_model(prices, args.model or profile.model or "claude-sonnet")
         pf = preflight(manifest["total_original_tokens"], manifest["total_sliced_tokens"], model, prices)
         print(f"Bundle: {args.out} (preset: {manifest.get('preset')})")
         print(f"Files: {len(manifest['files'])}")
+        auto = [f for f in manifest["files"] if "mode_reason" in f]
+        if auto:
+            print(f"Auto-shrink: excluded {len(auto)} detected file(s):")
+            for f in auto:
+                print(f"  {f['path']}  ({f['mode_reason']})")
         print(f"Estimated tokens: {pf['before_tokens']:,} -> {pf['after_tokens']:,} (saved {pf['saved_tokens']:,})")
         print(f"Pre-flight input cost at {pf['model_name']} (prices as of {pf['prices_as_of']}, local, not live): "
               f"~${pf['before_cost_usd']:.4f} -> ~${pf['after_cost_usd']:.4f}")
@@ -577,6 +602,7 @@ def main(argv: list[str] | None = None) -> int:
                       fit=args.fit, preset=args.preset,
                       default_mode=args.mode,
                       exclude_secrets=args.exclude_secrets,
+                      auto_shrink=args.auto_shrink,
                       profile=profile)
         except FileNotFoundError:
             print(f"watch: no such project: {args.path}", file=sys.stderr)

@@ -6,6 +6,7 @@ import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from .detect import detect_all, head_of
 from .tokens import estimate_tokens
 
 DEFAULT_IGNORE_DIRS = {
@@ -192,6 +193,13 @@ class FileEntry:
     language: str
     is_test: bool = False
     is_lockfile: bool = False
+    # v0.12: detect.py flags, computed head-only from the text read
+    # below. detect_evidence maps kind -> evidence string (metadata
+    # only, never file content) and holds hits only.
+    is_generated: bool = False
+    is_minified: bool = False
+    is_vendored: bool = False
+    detect_evidence: dict = field(default_factory=dict)
 
     def to_dict(self):
         return asdict(self)
@@ -293,6 +301,9 @@ def _add_file(result: ScanResult, abspath: Path, rel_posix: str) -> None:
             return
     text = data.decode("utf-8", errors="replace")
     lang = language_for(rel_posix)
+    # Detection reuses this read: head for markers/banners/path, the
+    # full text for the minified verdict (audit G07 F1). No re-read.
+    evidence = detect_all(rel_posix, lang, head_of(text), text=text)
     result.files.append(FileEntry(
         path=rel_posix,
         abspath=str(abspath),
@@ -302,4 +313,8 @@ def _add_file(result: ScanResult, abspath: Path, rel_posix: str) -> None:
         language=lang,
         is_test=is_test_file(rel_posix),
         is_lockfile=is_lockfile(rel_posix),
+        is_generated="generated" in evidence,
+        is_minified="minified" in evidence,
+        is_vendored="vendored" in evidence,
+        detect_evidence=evidence,
     ))

@@ -3,6 +3,40 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [0.12.0] - 2026-10-13
+### Added
+- Detection module (`detect.py`): generated / minified / vendored
+  detectors returning (hit, evidence) — evidence is metadata only
+  (a canonical marker, a path segment, line statistics, a library
+  banner name), never file content. Generated = canonical header
+  markers in the first 15 lines; minified = the token estimator's
+  own `looks_minified` verdict, judged on the full text (audit
+  G07 F1: head-only judging flipped the verdict on hand-written
+  code with a dense opening block); vendored = an exact `vendor/`
+  / `third_party/` / `extern/` path segment or a `/*! ... */`
+  library banner. Markdown and notebooks are out of scope for the
+  content detectors; lookalike directories never hit.
+- Scanner flags: every `FileEntry` gains `is_generated`,
+  `is_minified`, `is_vendored`, and `detect_evidence`, surfaced in
+  `scan` text (`[generated]` etc.), `scan --json`, `/api/scan`,
+  and `ghostslice explain`.
+- Auto-shrink (opt-in, default off): profile `"auto_shrink": true`
+  or `export --auto-shrink` (also on `watch --export`) excludes
+  detected files whose mode would come from the built-in defaults;
+  the manifest records `"mode_reason": "auto: <kind> (<evidence>)"`
+  per affected file. Explicit selections, profile modes, a CLI
+  `--mode`, and profile entry points always win. With `--fit`,
+  auto-shrink resolves first and the ladder works on the rest.
+### Changed
+- Lint L006/L007 consume `detect.py` (shared `line_stats` and the
+  generated-marker list) instead of private copies. L007's header
+  window is now 15 lines and markdown/notebook files no longer
+  fire it (prose scope); all v0.11 fixture outcomes are unchanged.
+- GhostBus verification: export totals with auto-shrink off are
+  unchanged (129,555 -> 45,770 estimated tokens); with it on, one
+  compact example JSON is excluded (129,555 -> 45,612). No
+  hand-written file is flagged on either GhostBus or this repo.
+
 ## [0.11.0] - 2026-10-13
 ### Added
 - Context lint (`ghostslice lint`, new module `lint.py`): a rule

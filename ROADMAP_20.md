@@ -22,7 +22,7 @@ Baseline: v0.5.0, 149 tests passed.
 | G4 | Config slicing: shell/PowerShell + SQL + YAML/TOML structure mode (keys/structure, values optional) | v0.9.0 | done |
 | G5 | Token estimator calibration: per-language factors, golden corpora, `calibrate` report | v0.10.0 | done |
 | G6 | Context lint: rule engine for context waste (oversize, generated, vendored, minified, giant lines) | v0.11.0 | done |
-| G7 | Generated/minified/vendored detection wired into scan, graph, export (opt-in auto-modes) | v0.12.0 | pending |
+| G7 | Generated/minified/vendored detection wired into scan, graph, export (opt-in auto-modes) | v0.12.0 | done |
 | G8 | Monorepo support: workspace detection (npm/Cargo/go/pyproject), per-package subtotals everywhere | v0.13.0 | pending |
 | G9 | History analytics: trends, per-model $ saved, ASCII chart, JSON export + savings-history chart embedded in the HTML report (Ryan's mockups, Oct 13) | v0.14.0 | pending |
 | G10 | `init` wizard: analyze a project and generate a tuned .ghostslice.json (non-interactive --yes mode) | v0.15.0 | pending |
@@ -175,3 +175,27 @@ the audit findings that drove the two improvement rounds.
   giant-line shape instead of overclaiming "minified". Known
   cost logged for G15: find_duplicates runs twice per lint
   (inside recommendations + for L004).
+- G7 (v0.12.0) DONE Oct 13, 2026: detection shipped — new
+  detect.py (generated header markers, minified = the estimator's
+  own looks_minified verdict, vendored path segments + /*! */
+  banners; evidence is metadata only, never content) wired into
+  scanner flags (+detect_evidence), scan text/JSON, /api/scan,
+  explain, and lint L006/L007 (which now consume detect.py instead
+  of private copies). Opt-in auto-shrink (profile "auto_shrink" /
+  export --auto-shrink / watch) excludes detected files whose mode
+  came from the built-in defaults, recording manifest mode_reason;
+  selections, profile modes, CLI --mode, and entry points always
+  win; auto resolves before the fit ladder. GhostBus OFF totals
+  unchanged (129,555 -> 45,770); ON excludes only one compact
+  example JSON (-> 45,612). Tests 334 -> 370 (36 new). Audit
+  rounds (audits/G07_audit.md): round 1 headline fix — a HIGH
+  false positive: judging looks_minified on the 4KB head alone
+  flagged hand-written GhostBus src/tools.mjs (dense TOOLS-array
+  head, whole-file verdict False); the minified detector now
+  judges the full text the scanner already read, and post-fix
+  verdict agreement with the estimator is exact on both real
+  trees. Round 1 also added entry-point protection for
+  auto-shrink (fit parity). Round 2 reviewed the fixed state
+  (caller inventory, protection interplay, manifest surface)
+  with no new defects; its fixes were discoverability (profile
+  docstring) and the docs set.

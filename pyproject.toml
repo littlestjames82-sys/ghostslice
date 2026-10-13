@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ghostslice"
-version = "0.11.0"
+version = "0.12.0"
 description = "Agent context and prompt optimizer: visual token-cost tree, AST slicer, pre-flight cost estimator, .claude_context export"
 readme = "README.md"
 license = { text = "MIT" }

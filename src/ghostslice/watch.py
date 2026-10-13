@@ -116,6 +116,7 @@ def run_watch(root: str | Path,
               preset: str | None = None,
               default_mode: str | None = None,
               exclude_secrets: bool = False,
+              auto_shrink: bool = False,
               profile=None,
               scan_fn=None,
               sleep=time.sleep,
@@ -187,7 +188,9 @@ def run_watch(root: str | Path,
         try:
             manifest = build_bundle(root, out, profile=export_profile, preset=preset,
                                     default_mode=default_mode,
-                                    exclude_secrets=exclude_secrets, fit=fit)
+                                    exclude_secrets=exclude_secrets,
+                                    auto_shrink=True if auto_shrink else None,
+                                    fit=fit)
         except (OSError, ValueError) as exc:
             say(f"[watch] export failed ({exc}); continuing to watch")
             return
