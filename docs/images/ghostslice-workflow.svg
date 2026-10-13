@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 460" role="img" aria-labelledby="title description">
+  <title id="title">GhostSlice project-to-agent workflow</title>
+  <desc id="description">Four stages: scan project files, estimate and analyze context, review and tune files in the CLI or dashboard, then export a bundle for the user to give to an agent. Scanning is local, token counts are estimates, and secrets are checked before export.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#171321"/>
+      <stop offset="1" stop-color="#211a31"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#975dff"/>
+      <stop offset="1" stop-color="#6716f3"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M0 0 8 4 0 8Z" fill="#8d79b5"/>
+    </marker>
+  </defs>
+  <rect width="1000" height="460" rx="22" fill="url(#background)"/>
+  <text x="48" y="58" fill="#f4efff" font-family="system-ui, sans-serif" font-size="25" font-weight="700">From project tree to agent-ready context</text>
+  <text x="48" y="86" fill="#b7abc9" font-family="system-ui, sans-serif" font-size="15">You inspect and choose what leaves your project. GhostSlice never runs the agent.</text>
+
+  <g font-family="system-ui, sans-serif">
+    <rect x="42" y="128" width="205" height="204" rx="14" fill="#282238" stroke="#493d60"/>
+    <circle cx="72" cy="160" r="16" fill="url(#accent)"/>
+    <text x="72" y="166" text-anchor="middle" fill="#fff" font-size="15" font-weight="700">1</text>
+    <text x="98" y="166" fill="#f4efff" font-size="17" font-weight="700">Scan</text>
+    <text x="62" y="207" fill="#d5cce4" font-size="14">
+      <tspan x="62" dy="0">Read project files</tspan>
+      <tspan x="62" dy="23">with ignore rules.</tspan>
+      <tspan x="62" dy="34" fill="#b7abc9">Built-in skips for</tspan>
+      <tspan x="62" dy="21" fill="#b7abc9">generated and binary</tspan>
+      <tspan x="62" dy="21" fill="#b7abc9">content.</tspan>
+    </text>
+
+    <path d="M251 230h20" fill="none" stroke="#8d79b5" stroke-width="2" marker-end="url(#arrow)"/>
+
+    <rect x="276" y="128" width="205" height="204" rx="14" fill="#282238" stroke="#493d60"/>
+    <circle cx="306" cy="160" r="16" fill="url(#accent)"/>
+    <text x="306" y="166" text-anchor="middle" fill="#fff" font-size="15" font-weight="700">2</text>
+    <text x="332" y="166" fill="#f4efff" font-size="17" font-weight="700">Analyze</text>
+    <text x="296" y="207" fill="#d5cce4" font-size="14">
+      <tspan x="296" dy="0">Estimate token cost,</tspan>
+      <tspan x="296" dy="23">find dependencies,</tspan>
+      <tspan x="296" dy="23">and suggest files to</tspan>
+      <tspan x="296" dy="23">prune or slice.</tspan>
+      <tspan x="296" dy="34" fill="#b7abc9">Counts are estimates.</tspan>
+    </text>
+
+    <path d="M485 230h20" fill="none" stroke="#8d79b5" stroke-width="2" marker-end="url(#arrow)"/>
+
+    <rect x="510" y="128" width="205" height="204" rx="14" fill="#282238" stroke="#493d60"/>
+    <circle cx="540" cy="160" r="16" fill="url(#accent)"/>
+    <text x="540" y="166" text-anchor="middle" fill="#fff" font-size="15" font-weight="700">3</text>
+    <text x="566" y="166" fill="#f4efff" font-size="17" font-weight="700">Review</text>
+    <text x="530" y="207" fill="#d5cce4" font-size="14">
+      <tspan x="530" dy="0">Use the dashboard or</tspan>
+      <tspan x="530" dy="23">CLI to inspect files,</tspan>
+      <tspan x="530" dy="23">preview slices, choose</tspan>
+      <tspan x="530" dy="23">modes, and check cost.</tspan>
+      <tspan x="530" dy="34" fill="#b7abc9">Your choices stay yours.</tspan>
+    </text>
+
+    <path d="M719 230h20" fill="none" stroke="#8d79b5" stroke-width="2" marker-end="url(#arrow)"/>
+
+    <rect x="744" y="128" width="214" height="204" rx="14" fill="#302344" stroke="#7445b8"/>
+    <circle cx="774" cy="160" r="16" fill="url(#accent)"/>
+    <text x="774" y="166" text-anchor="middle" fill="#fff" font-size="15" font-weight="700">4</text>
+    <text x="800" y="166" fill="#f4efff" font-size="17" font-weight="700">Export</text>
+    <text x="764" y="207" fill="#e2d8f1" font-size="14">
+      <tspan x="764" dy="0">Write sliced files and</tspan>
+      <tspan x="764" dy="23">a manifest to a bundle.</tspan>
+      <tspan x="764" dy="34" fill="#c1b3d5">Validate it, then give</tspan>
+      <tspan x="764" dy="21" fill="#c1b3d5">the context to your</tspan>
+      <tspan x="764" dy="21" fill="#c1b3d5">chosen agent yourself.</tspan>
+    </text>
+  </g>
+
+  <rect x="42" y="365" width="916" height="55" rx="12" fill="#191522" stroke="#3d324f"/>
+  <circle cx="69" cy="392" r="8" fill="#72d6a0"/>
+  <text x="89" y="398" fill="#d5cce4" font-family="system-ui, sans-serif" font-size="14">
+    Local-first: no network calls or telemetry
+  </text>
+  <circle cx="432" cy="392" r="8" fill="#f2bc65"/>
+  <text x="452" y="398" fill="#d5cce4" font-family="system-ui, sans-serif" font-size="14">
+    Secret scanning is a heuristic, not a guarantee
+  </text>
+</svg>

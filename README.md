@@ -20,6 +20,16 @@ your code never leaves the machine.
 Position in the Ghost stack: Agent Seatbelt governs what an agent *does*,
 GhostSlice governs what an agent *reads*.
 
+## How it works
+
+![GhostSlice workflow: scan a project, review and tune the selected context, then export a validated agent bundle. Token counts are estimates, and processing stays local.](docs/images/ghostslice-workflow.svg)
+
+GhostSlice does not connect to or launch an agent. It scans the project on
+your machine, estimates file costs, and lets you review or reduce the context
+before exporting it. The bundle contains the selected file contents and a
+manifest; you decide what to give your agent. Counts and prices are
+estimates, not billing data.
+
 ## Install
 
 No install needed to try it from a checkout:
