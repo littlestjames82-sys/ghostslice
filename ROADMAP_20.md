@@ -25,7 +25,7 @@ Baseline: v0.5.0, 149 tests passed.
 | G7 | Generated/minified/vendored detection wired into scan, graph, export (opt-in auto-modes) | v0.12.0 | done |
 | G8 | Monorepo support: workspace detection (npm/Cargo/go/pyproject), per-package subtotals everywhere | v0.13.0 | done |
 | G9 | History analytics: trends, per-model $ saved, ASCII chart, JSON export + savings-history chart embedded in the HTML report (Ryan's mockups, Oct 13) | v0.14.0 | done |
-| G10 | `init` wizard: analyze a project and generate a tuned .ghostslice.json (non-interactive --yes mode) | v0.15.0 | pending |
+| G10 | `init` wizard: analyze a project and generate a tuned .ghostslice.json (non-interactive --yes mode) | v0.15.0 | done |
 | G11 | New bundle formats: Anthropic-style XML bundle + JSON bundle presets | v0.16.0 | pending |
 | G12 | Redact-in-place export: --redact-secrets replaces secret values with placeholders instead of excluding files | v0.17.0 | pending |
 | G13 | Symbol-level slicing: keep named symbols + their in-file dependencies (Python ast, TS lite) | v0.18.0 | pending |
@@ -251,3 +251,37 @@ the audit findings that drove the two improvement rounds.
   Round 2 verified the $ invariant on the real ledger and pinned
   best/worst tie -> earliest run and empty-ledger CLI --json;
   _input_cost docstring corrected.
+- G10 (v0.15.0) DONE Oct 13, 2026: `ghostslice init` shipped —
+  new entries.py ranks entry-point candidates by documented
+  signals (npm bin / pyproject [project.scripts] +60, npm main
+  +50, the prune engine's name heuristic +40, a Python __main__
+  guard +35, a shebang +25, no-importers +10 as tie-breaker only;
+  cap 5; test files and vendored/generated files are hard-excluded
+  as candidates) and init_wizard.py turns the tool's own analysis
+  into a profile with a printed justification per section:
+  vendored trees (detect.py path evidence) -> ignore, all-generated
+  dirs/files -> modes exclude, config-heavy dirs (>=70% config,
+  >=3 files, >=500 est. tokens) -> modes structure, budget =
+  default-sliced total x1.25 rounded up to 2 s.f. (omitted, with
+  the number, under 5,000 sliced tokens), model only from --model,
+  and NO lint section (documented: findings feed the top-3 wins
+  instead). Safety: existing profile refused (exit 2 + contents
+  summary) without --force, --dry-run writes nothing (fs-snapshot
+  pinned), the written file round-trips through load_profile inside
+  run_init, and a round-trip export test proves the modes/ignore
+  take effect. TTY users confirm per section (defaults = the
+  analysis; injected-input tested); non-TTY behaves as --yes and
+  prints that it did. GhostBus dry-run: its three package.json bin
+  commands top the ranking (135/95/95), budget 58,000 proposed on
+  the 45,770 sliced basis, nothing written. Tests 427 -> 462
+  (35 new). Audit rounds (audits/G10_audit.md): round 1 headline
+  fixes — the __main__ guard moved from a whole-text regex to a
+  module-level ast check (comments/strings/nested guards no longer
+  nominate; regex fallback for unparseable files), config dirs
+  under generated dirs no longer earn a fighting structure glob,
+  an explicit --budget locks the interactive budget prompt, and
+  every suggested mode glob is verified through Profile.mode_for
+  before writing (fnmatch-metachar file names are dropped loudly).
+  Round 2 headline fix — a .ghostslice.json that is a directory,
+  or any unwritable target, is a clean exit 2 instead of a
+  write_text traceback.

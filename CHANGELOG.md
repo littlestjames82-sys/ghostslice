@@ -3,6 +3,34 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [0.15.0] - 2026-10-13
+### Added
+- `ghostslice init <project>`: generates a tuned `.ghostslice.json`
+  from the tool's own analysis, with a printed justification for
+  every section. Entry points are ranked candidates (new
+  `entries.py`): package.json "bin" / pyproject [project.scripts]
+  (+60), package.json "main" (+50), the entry-name heuristic shared
+  with the prune engine (+40), a Python `__main__` guard (+35), a
+  shebang (+25), and "nothing imports it" (+10, tie-breaker only),
+  capped at 5; test files and vendored/generated files are never
+  nominated. Vendored directory trees (detect.py path evidence) go
+  to `ignore`; all-generated directories (and lone generated files)
+  get `modes: "exclude"`; config-heavy directories (≥70% config/data
+  files, ≥3 files, ≥500 estimated tokens) get `modes: "structure"`.
+- `budget_tokens` defaults to the current default-sliced total
+  × 1.25, rounded up to two significant figures, and is omitted
+  (with the reason printed) when the sliced total is under 5,000
+  tokens. `--budget N` overrides; `--model ID` is the only way a
+  model is pinned — init never invents one. No `lint` section is
+  written in this version (documented choice); lint findings feed
+  the printed top-3 "biggest wins" instead.
+- Safety and interaction: an existing profile is refused (exit 2,
+  with a summary of its contents) unless `--force`; `--dry-run`
+  writes nothing; a written profile is loaded back through the real
+  loader before success is reported. On a TTY, each section is
+  confirmed with the analysis as the default; non-TTY stdin behaves
+  as `--yes` and prints that it did.
+
 ## [0.14.0] - 2026-10-13
 ### Added
 - History analytics (`ledger.analytics`): `ghostslice history

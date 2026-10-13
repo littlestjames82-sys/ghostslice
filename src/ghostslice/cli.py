@@ -9,6 +9,7 @@ Commands:
   ghostslice watch        <path> [--export] [-o <bundle>] [--interval S] [--debounce S] [--once] [--max-events N] [--fit N] [--auto-shrink]
   ghostslice check-budget <path> [--max-tokens N]
   ghostslice lint         <path> [--json] [--strict]
+  ghostslice init         <path> [--yes] [--force] [--dry-run] [--budget N] [--model ID]
   ghostslice check        <bundle>
   ghostslice diff         <bundleA> <bundleB> [--json]
   ghostslice history      <path> [--json] [--trend] [--model ID]
@@ -296,6 +297,19 @@ def main(argv: list[str] | None = None) -> int:
     p_watch.add_argument("--fit", type=int, default=None, metavar="N",
                          help="with --export: auto-fit the bundle to N estimated tokens, as in export --fit")
 
+    p_init = sub.add_parser("init", help="analyze a project and generate a tuned .ghostslice.json profile")
+    p_init.add_argument("path")
+    p_init.add_argument("--yes", action="store_true",
+                        help="accept the analysis as-is (also the behaviour on a non-TTY stdin)")
+    p_init.add_argument("--force", action="store_true",
+                        help="overwrite an existing .ghostslice.json")
+    p_init.add_argument("--dry-run", action="store_true",
+                        help="print the profile and its justifications; write nothing")
+    p_init.add_argument("--budget", type=int, default=None, metavar="N",
+                        help="budget_tokens to write (default: current sliced total x 1.25, rounded up)")
+    p_init.add_argument("--model", default=None,
+                        help="model id from prices.json to pin in the profile (default: omit)")
+
     p_lint = sub.add_parser("lint", help="lint the default export selection for context waste (rules L001-L010)")
     p_lint.add_argument("path")
     p_lint.add_argument("--json", action="store_true")
@@ -372,6 +386,36 @@ def main(argv: list[str] | None = None) -> int:
             print("  no changes")
         print(f"Unchanged files: {d['unchanged_count']}")
         return 0
+
+    if args.cmd == "init":
+        # Handled before the generic profile load: init must analyse
+        # the project WITHOUT any existing profile's ignores/modes,
+        # and it decides about overwriting that file itself.
+        if args.budget is not None and args.budget <= 0:
+            print("init: --budget must be > 0", file=sys.stderr)
+            return 2
+        if args.model is not None:
+            try:
+                get_model(prices, args.model)
+            except KeyError:
+                print(f"init: unknown model id: {args.model} "
+                      f"(see `ghostslice prices`)", file=sys.stderr)
+                return 2
+        interactive = sys.stdin.isatty() and not args.yes
+        if not args.yes and not interactive:
+            print("init: stdin is not a terminal; running "
+                  "non-interactively with the analysis defaults "
+                  "(same as --yes).")
+        from .init_wizard import run_init
+        try:
+            code, _payload = run_init(
+                args.path, yes=args.yes, force=args.force,
+                dry_run=args.dry_run, budget=args.budget,
+                model_id=args.model, interactive=interactive)
+        except FileNotFoundError:
+            print(f"init: no such project: {args.path}", file=sys.stderr)
+            return 2
+        return code
 
     # All remaining commands target a project path (or a bundle for check).
     target = getattr(args, "path", None) or getattr(args, "bundle", None)

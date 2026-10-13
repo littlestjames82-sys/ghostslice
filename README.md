@@ -439,6 +439,52 @@ per rule (see Context lint above), and `"auto_shrink": true` makes
 exports exclude detected generated/vendored/minified files (see
 Detection + auto-shrink above).
 
+### Init: generate a tuned profile (v0.15)
+
+```bash
+ghostslice init ~/my-project                 # interactive on a TTY, --yes otherwise
+ghostslice init ~/my-project --dry-run       # print the profile + evidence, write nothing
+ghostslice init ~/my-project --budget 80000 --model claude-sonnet
+```
+
+`init` analyses the project with the tool's own engines (scan, the
+import graph, detect.py flags, the context linter) and writes a
+`.ghostslice.json` where every section carries a printed
+justification:
+
+- **entry_points**: the top candidates (cap 5), ranked by signal —
+  a package.json `"bin"` entry or a pyproject `[project.scripts]`
+  entry (+60), package.json `"main"` (+50), the entry-name heuristic
+  shared with the prune engine (+40), a Python
+  `if __name__ == "__main__"` guard (+35), a shebang (+25), and
+  "nothing imports it" (+10, tie-breaker only). Test files and
+  vendored/generated files are never nominated: a false entry point
+  is worse than a missing one, because exports protect entry points
+  from auto-shrink and fit downgrades.
+- **ignore**: directory trees whose files are all flagged vendored
+  by path. **modes**: directories whose files are all flagged
+  generated get `"exclude"`; config-heavy directories (≥70%
+  config/data files, ≥3 files, ≥500 estimated tokens) get
+  `"structure"`. Docs and tests are deliberately not pinned — the
+  built-in defaults already handle them.
+- **budget_tokens**: your `--budget`, or the current default-sliced
+  total × 1.25 rounded up to two significant figures, so
+  `check-budget` catches growth. Projects slicing under 5,000 tokens
+  get no budget (it would be noise) — the omission is printed, with
+  the number. **model** is written only from `--model`; init never
+  invents one. No `"lint"` section is written in this version: lint
+  stays at its defaults rather than freezing today's findings into
+  config.
+
+Safety: an existing `.ghostslice.json` is refused (exit 2, with a
+summary of what's in it) unless `--force` is given; `--dry-run`
+writes nothing at all; the written file is loaded back through the
+real profile loader before init reports success. On a TTY you are
+asked per section (entry points, file rules, budget) with the
+analysis as the default; piped stdin behaves as `--yes` and says so.
+The output ends with the top 3 "biggest wins" from the analysis and
+the linter — guidance only; init changes nothing but the profile.
+
 ### Budget gate for CI (v0.2)
 
 ```bash
@@ -686,6 +732,8 @@ src/ghostslice/
   bundlediff.py bundle-vs-bundle diff by manifest (v0.5)
   profile.py    .ghostslice.json profile loader
   selection.py  task TF-IDF + symbol + graph keyword / git-diff context selection
+  entries.py    entry-point candidate signals for init (manifest bin/main/scripts, names, shebangs, __main__ guards) (v0.15)
+  init_wizard.py  `ghostslice init`: profile generation with printed evidence per section (v0.15)
   ledger.py     .ghostslice-history.jsonl savings ledger
   mcp_server.py stdio MCP server (v0.3)
   pricing.py    local prices.json loader + cost estimator
