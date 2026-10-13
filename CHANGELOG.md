@@ -3,6 +3,42 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [0.22.0] - 2026-10-13
+### Added
+- Dashboard side-by-side slice preview (G17): clicking a file shows
+  the original and its slice in two panes, with original → sliced
+  estimated tokens and % saved in the header and a mode switcher
+  that re-slices live via the new `GET /api/slice`. Displayed text
+  is capped at 200,000 characters per side (flagged `truncated`;
+  token counts always describe the full text). The endpoint only
+  serves scanned files whose resolved path stays inside the
+  project root — `..` segments, absolute paths, backslash paths,
+  and symlinks pointing outside are refused; symlinks resolving
+  inside are served. `/api/preview` gets the same containment.
+- Dashboard what-if panel (`POST /api/whatif`): a global mode
+  override, a budget/fit target, and exclude-secrets / redact /
+  auto-shrink toggles report would-be totals, the delta against a
+  plain default export, the per-file mode-change count, and the
+  fitted verdict — computed in memory with the exporter's own
+  resolve / fit / slice / redact machinery, writing nothing and
+  recording no history. Totals are pinned by tests against a real
+  `build_bundle` for every option combination, including profiled
+  projects and fit + redact (totals are post-redaction, exactly
+  as an export reports).
+- The dashboard Export button sends the what-if panel's options,
+  so what was previewed is what gets exported; the response gains
+  the manifest's fit and redaction summaries when present.
+### Fixed
+- Dashboard export now honours the project's `.ghostslice.json`
+  profile (modes, ignores, entry points, redact / auto-shrink
+  defaults), as the CLI export and the dashboard's own scan
+  already did; previously it exported without the profile, so a
+  profiled project showed one selection and exported another.
+- Dashboard export `out` is verified to stay inside the served
+  project (a nested path such as `bundles/one` still works);
+  `../` escapes are refused with a 400 instead of writing a
+  bundle outside the project.
+
 ## [0.21.0] - 2026-10-13
 ### Added
 - Shared text decoding (`textio.py`, G16): every surface that turns

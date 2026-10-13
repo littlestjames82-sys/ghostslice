@@ -40,6 +40,15 @@
   .tm-node .tm-path { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11px; word-break:break-all; }
   .tm-node .tm-tok { opacity:.85; font-size:10px; }
   .tm-node.excluded { opacity:.32; }
+  .previewGrid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  @media (max-width:700px){ .previewGrid{grid-template-columns:1fr;} }
+  .previewGrid h4 { margin:8px 0 4px; font-size:12px; color:var(--muted); font-weight:600; }
+  .previewGrid pre { max-height:440px; margin:0; }
+  .wi-grid { display:grid; gap:8px; font-size:13px; margin-bottom:10px; }
+  .wi-grid label { display:flex; justify-content:space-between; gap:8px; align-items:center; }
+  .wi-grid input[type=range] { width:130px; }
+  .wi-grid input[type=number] { width:90px; }
+  #wiResult { margin-top:10px; font-size:13px; }
 </style>
 </head>
 <body>
@@ -69,13 +78,35 @@
   </section>
   <section class="card">
     <h3 style="margin-top:0">Slice preview</h3>
-    <div class="muted" id="previewMeta">Click a file row to preview its slice.</div>
-    <pre id="preview">No file selected.</pre>
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <div class="muted" id="previewMeta">Click a file row to preview its slice, side by side.</div>
+      <label class="muted" for="sliceMode" style="margin-left:auto">Mode</label>
+      <select id="sliceMode"></select>
+    </div>
+    <div class="muted" id="sliceTokens" style="margin-top:6px"></div>
+    <div class="previewGrid">
+      <div><h4>Original</h4><pre id="origText">No file selected.</pre></div>
+      <div><h4>Slice</h4><pre id="sliceText">Select a file to see its slice.</pre></div>
+    </div>
+    <div class="muted" id="truncNote" style="margin-top:6px"></div>
     <div id="status"></div>
     <h3>Prune recommendations</h3>
     <div class="muted" id="recs">Loading...</div>
     <h3>Savings ledger</h3>
     <div class="muted" id="history">Loading...</div>
+  </section>
+  <section class="card">
+    <h3 style="margin-top:0">What-if: export options</h3>
+    <p class="muted">Preview how export options change the bundle before exporting. Token counts are estimates; recalculating writes nothing — only the Export button writes a bundle, with these same options.</p>
+    <div class="wi-grid">
+      <label>Mode override <select id="wiMode"><option value="">(per-file defaults)</option></select></label>
+      <label>Budget / fit target <span><input type="range" id="wiFitRange" min="0" step="100" value="0"> <input type="number" id="wiFitNum" min="0" step="100" value="0"></span></label>
+      <label>Exclude files flagged by the secret guard <input type="checkbox" id="wiExcludeSecrets"></label>
+      <label>Redact secret values in place <input type="checkbox" id="wiRedact"></label>
+      <label>Auto-shrink generated / vendored / minified <input type="checkbox" id="wiAutoShrink"></label>
+    </div>
+    <button class="primary" id="wiBtn">Recalculate</button>
+    <div class="muted" id="wiResult">Uses the per-file modes from the table. Budget 0 means no fit target.</div>
   </section>
 </main>
 <script>
@@ -221,12 +252,57 @@ function setView(v){
   render();
 }
 
+const MODE_LIST = ['full','signatures','interfaces','structure','headings','strip-tests','exclude'];
+let CURRENT = null, PREVIEW_SEQ = 0;
+
 async function preview(f){
+  CURRENT = f;
+  const seq = ++PREVIEW_SEQ;
+  $('sliceMode').value = f.mode;
   $('previewMeta').textContent = 'Loading ' + f.path + ' (' + f.mode + ')...';
-  const r = await fetch('/api/preview?path=' + encodeURIComponent(f.path) + '&mode=' + encodeURIComponent(f.mode));
+  $('truncNote').textContent = '';
+  const r = await fetch('/api/slice?path=' + encodeURIComponent(f.path) + '&mode=' + encodeURIComponent(f.mode));
   const d = await r.json();
-  $('previewMeta').textContent = `${d.path} · ${d.mode} · ${fmt(d.original_tokens)} → ${fmt(d.sliced_tokens)} estimated tokens (saved ${fmt(d.saved_tokens)})`;
-  $('preview').textContent = d.text || '(empty slice)';
+  if (seq !== PREVIEW_SEQ) return;  // a newer selection superseded this one
+  if (!r.ok || d.error) {
+    $('previewMeta').textContent = 'Preview failed: ' + (d.error || ('HTTP ' + r.status));
+    return;
+  }
+  $('previewMeta').textContent = d.path;
+  $('sliceTokens').textContent = `${fmt(d.original_tokens)} → ${fmt(d.sliced_tokens)} estimated tokens (saved ${fmt(d.saved_tokens)}, ${d.saved_pct}%) · mode: ${d.mode}`;
+  // File content is untrusted text: textContent only, never innerHTML.
+  $('origText').textContent = d.original || '(empty file)';
+  $('sliceText').textContent = d.sliced || '(empty slice)';
+  $('truncNote').textContent = d.truncated ? d.note : '';
+}
+
+function panelOptions(){
+  const fit = parseInt($('wiFitNum').value || '0', 10);
+  const o = { exclude_secrets: $('wiExcludeSecrets').checked,
+              redact: $('wiRedact').checked,
+              auto_shrink: $('wiAutoShrink').checked };
+  if ($('wiMode').value) o.mode = $('wiMode').value;
+  if (fit > 0) o.fit = fit;
+  return o;
+}
+
+async function recalculate(){
+  const selections = {}; FILES.forEach(f=>selections[f.path]=f.mode);
+  $('wiResult').textContent = 'Recalculating...';
+  const r = await fetch('/api/whatif', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(Object.assign({selections}, panelOptions()))});
+  const d = await r.json();
+  if (!d.ok) { $('wiResult').textContent = 'What-if failed: ' + (d.error || 'unknown'); return; }
+  const delta = d.delta_sliced_tokens;
+  let txt = `${fmt(d.original_tokens)} → ${fmt(d.sliced_tokens)} estimated tokens (saved ${d.saved_pct}%). ` +
+    `Vs a default export (${fmt(d.baseline.sliced_tokens)} estimated tokens): ` +
+    (delta === 0 ? 'no change' : ((delta > 0 ? '+' : '−') + fmt(Math.abs(delta)) + ' tokens')) + '. ' +
+    `${d.mode_changes} file mode change(s).`;
+  if (d.fit) txt += d.fit.fitted
+    ? ` Fits the ${fmt(d.fit.fit_tokens)} budget (${d.fit.downgraded_count} file(s) downgraded).`
+    : ` Cannot fit the ${fmt(d.fit.fit_tokens)} budget.`;
+  if (d.notes && d.notes.length) txt += ' ' + d.notes.join(' ');
+  $('wiResult').textContent = txt;
 }
 
 async function init(){
@@ -250,10 +326,30 @@ async function init(){
   $('exportBtn').addEventListener('click', async ()=>{
     const selections = {}; FILES.forEach(f=>selections[f.path]=f.mode);
     $('status').textContent = 'Exporting...';
-    const r = await fetch('/api/export', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({selections})});
+    const r = await fetch('/api/export', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(Object.assign({selections}, panelOptions()))});
     const d = await r.json();
-    $('status').textContent = d.ok ? ('Bundle written to ' + d.bundle + ' · ' + fmt(d.total_sliced_tokens) + ' estimated tokens (was ' + fmt(d.total_original_tokens) + ')') : ('Export failed: ' + (d.error||'unknown'));
+    if (!d.ok) { $('status').textContent = 'Export failed: ' + (d.error||'unknown'); return; }
+    let txt = 'Bundle written to ' + d.bundle + ' · ' + fmt(d.total_sliced_tokens) + ' estimated tokens (was ' + fmt(d.total_original_tokens) + ')';
+    if (d.fit) txt += d.fit.fitted ? ` · fitted the ${fmt(d.fit.fit_tokens)} budget` : ` · could NOT fit the ${fmt(d.fit.fit_tokens)} budget (best ${fmt(d.fit.after_tokens)})`;
+    if (d.redaction) txt += ` · ${d.redaction.values_redacted} secret value(s) redacted in ${d.redaction.files_affected} file(s)`;
+    $('status').textContent = txt;
   });
+  MODE_LIST.forEach(m => {
+    const o1 = document.createElement('option'); o1.value = m; o1.textContent = m;
+    $('sliceMode').appendChild(o1);
+    const o2 = document.createElement('option'); o2.value = m; o2.textContent = m;
+    $('wiMode').appendChild(o2);
+  });
+  $('sliceMode').addEventListener('change', ()=>{
+    if (!CURRENT) return;
+    CURRENT.mode = $('sliceMode').value;
+    render(); preview(CURRENT);
+  });
+  $('wiFitRange').max = scan.total_tokens || 0;
+  $('wiFitRange').addEventListener('input', ()=>{ $('wiFitNum').value = $('wiFitRange').value; });
+  $('wiFitNum').addEventListener('change', ()=>{ $('wiFitRange').value = $('wiFitNum').value; });
+  $('wiBtn').addEventListener('click', recalculate);
   render();
 }
 init();

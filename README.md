@@ -969,6 +969,35 @@ rectangles grouped by top-level directory, sized by estimated tokens
 and coloured by the same heat palette; clicking a rectangle toggles
 include/exclude just like the list. The list stays the default view.
 
+Dashboard v2 (v0.22): clicking a file opens a **side-by-side slice
+preview** — the original text on the left, its slice on the right, with
+the original → sliced estimated tokens and % saved in the header and a
+mode switcher that re-slices live (`GET /api/slice`). Each side's text
+is capped at 200,000 characters (the response flags `truncated`; token
+counts always describe the full file). The endpoint only serves files
+in the scan, and only when the file's resolved path stays inside the
+project root — `..` segments, absolute paths, and symlinks pointing
+outside are refused, and file content reaches the page as inert text
+(`textContent`, never markup).
+
+A **What-if panel** (`POST /api/whatif`) previews export options — a
+global mode override, a budget/fit target (slider + number), and
+exclude-secrets / redact / auto-shrink toggles — and reports the
+would-be totals, the delta against a plain default export, how many
+files change mode, and whether the budget fits. It writes nothing and
+records no history: the totals are computed in memory with the
+exporter's own mode resolution, fit ladder, slicer, and redactor, in
+the exporter's order, so they are exactly what a real export with the
+same options reports (test-pinned against `build_bundle`, including
+fit + redact, where the totals are post-redaction). The Export button
+sends the same panel options, so what you previewed is what you
+export. Two consistency fixes ride along: the dashboard export now
+honours the project's `.ghostslice.json` profile (its own scan
+already did), and the export `out` path is verified to stay inside
+the served project. The dashboard is a startup snapshot: the file
+set, secret findings, and token table reflect the project as scanned
+when `serve` started.
+
 ## Honest labels
 
 - **Token counts are estimates.** Method (v2, since v0.10): a BPE-like

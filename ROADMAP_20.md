@@ -32,7 +32,7 @@ Baseline: v0.5.0, 149 tests passed.
 | G14 | Python call graph: function-level graph, entry-point reachability, dead-function candidates | v0.19.0 | done |
 | G15 | Performance: scan caching (.ghostslice-cache), parallel scan, benchmark proof, identical totals | v0.20.0 | done |
 | G16 | Fuzz/robustness: malformed-input fuzzing for every slicer + encoding handling (BOM, UTF-16, latin-1) | v0.21.0 | done |
-| G17 | Dashboard v2: side-by-side slice preview (original vs slice, per Ryan's mockups, Oct 13) with diff highlighting + budget slider with live auto-fit preview | v0.22.0 | pending |
+| G17 | Dashboard v2: side-by-side slice preview (original vs slice, per Ryan's mockups, Oct 13) with diff highlighting + budget slider with live auto-fit preview | v0.22.0 | done |
 | G18 | Plugin system: user slicers from .ghostslice-plugins/*.py, documented API, example plugin | v0.23.0 | pending |
 | G19 | CI pack: `ghostslice ci` one-shot (budget + secrets + lint) with PR markdown summary + sample GitHub Action | v0.24.0 | pending |
 | G20 | v1.0.0: `doctor` self-check, shell completions, docs restructure, full release-readiness audit + mockup polish (Ryan approved Oct 13): scan CLI top-N with heat bars + % of total + token/cost summary box, export --fit report table in the mockup style | v1.0.0 | pending |
@@ -452,3 +452,43 @@ the audit findings that drove the two improvement rounds.
   normalization). Campaign #2 (new seed + shapes) headline fix —
   a FIFO in a scanned tree hung the scanner forever; the scanner
   now reads regular files only.
+- G17 (v0.22.0) DONE Oct 13, 2026: dashboard v2 shipped — the
+  side-by-side Slice Preview from Ryan's mockups: GET /api/slice
+  returns original + slice with token delta and saved %, the page
+  shows both panes with a live mode switcher (content assigned
+  via textContent only), each side capped at 200,000 characters
+  with an explicit truncated flag while token counts always
+  describe the full text. Path safety is defence in depth: scan-
+  index membership, raw-path rejection (absolute / backslash /
+  any `..` segment, URL-decoded before the check), and resolved-
+  path containment in the root — the scanner follows file
+  symlinks, so a link pointing outside is scanned but refused
+  (403), a link resolving inside is served; /api/preview gets
+  the same containment. The What-if panel (POST /api/whatif)
+  takes a mode override, a budget/fit target, and exclude-
+  secrets / redact / auto-shrink toggles and returns would-be
+  totals, the delta vs a plain default export, the mode-change
+  diff, and the fitted verdict — computed in memory with the
+  exporter's own resolve_modes_detailed / fit_modes /
+  slice_text / redact_text in the exporter's order (fit judges
+  pre-redaction slices; totals are post-redaction, with the
+  redacted_after_tokens mirror), writing nothing and recording
+  no history; ground-truth tests pin its totals against real
+  build_bundle manifests for 15+ option combinations including
+  profiled projects (profile modes + entry points fit-protected,
+  profile redact/auto_shrink defaults and their panel
+  overrides). The Export button sends the same panel options.
+  Tests 642 -> 679 (37 new). Audit rounds (audits/G17_audit.md):
+  round 1 headline fixes — /api/preview error precedence
+  restored (entry 404 before mode 400), and the dashboard export
+  now passes the project profile (it silently exported without
+  it while its own scan honoured it: profiled projects showed
+  one selection and exported another). Round 2 headline fix —
+  /api/export's `out` escaped the project root despite the
+  handler's "always lands inside" comment (../escaped probe
+  wrote a bundle outside); resolved-path containment now
+  enforces it (nested inside paths still work), plus a client-
+  side preview response race closed with a sequence guard.
+  Standing limitation: the dashboard is a startup snapshot (no
+  rescan), and the pre-existing file table still renders paths
+  via innerHTML (flagged, out of scope).
