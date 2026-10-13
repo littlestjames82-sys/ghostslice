@@ -18,7 +18,8 @@ from . import __version__
 from .ledger import append_record
 from .scanner import ScanResult, language_for, scan
 from .secrets_scan import REDACTED_KINDS, redact_text, scan_text
-from .slicer import MODES, slice_text
+from .slicer import MODES, SliceResult, slice_text
+from .symslice import resolve_symbol_selection, slice_with_symbols
 from .tokens import METHOD, estimate_tokens
 from .workspaces import summarize_packages
 
@@ -254,7 +255,8 @@ def build_bundle(root: str | Path, out: str | Path,
                  fit: int | None = None,
                  fit_protect_selections: bool = True,
                  task_scores: dict | None = None,
-                 model: str | None = None) -> dict:
+                 model: str | None = None,
+                 symbols=None) -> dict:
     """Slice `root` into bundle dir `out`. Returns the manifest dict.
 
     Mode precedence: explicit `selections` > profile modes (`.ghostslice.json`)
@@ -343,13 +345,59 @@ def build_bundle(root: str | Path, out: str | Path,
     redaction covers the files that remain. Findings of a kind the
     redactor does not handle are counted in the block as
     `left_in_place`, never silently shipped.
+
+    `symbols` (v0.18): symbol-level selection — a comma string or
+    list of spec entries (bare names, `Class.method` qualified
+    names, `file.py:name` scoping, `*` globs; see symslice). Files
+    with a requested symbol ship in mode `symbols`: the requested
+    symbols with bodies plus signature context (imports, shells for
+    enclosing classes, collapsed signatures for the rest). Files
+    with no requested symbol are excluded, EXCEPT profile entry
+    points, which keep their resolved mode and stay included (an
+    entry point is an explicit whole-file signal). The manifest
+    gains a top-level `symbols` report (requested / matches /
+    ambiguous / per-file lists) and each symbols-mode entry gains
+    `symbols_included`. An entry that matches nothing raises
+    UnknownSymbolError (a ValueError) BEFORE anything is written.
+    Cannot combine with `fit` (the ladder downgrades whole files;
+    symbol selection narrows within files) or with an explicit
+    `include` set — both raise ValueError. With `exclude_secrets`,
+    exclusion still wins: a matched file the guard flags is
+    excluded, and the report gains `excluded_by_secrets`.
     """
     selections = selections or {}
     preset = preset or (profile.preset if profile else None) or "claude-code"
     if redact is None:
         redact = bool(profile.redact) if profile is not None else False
+    if symbols is not None:
+        if fit is not None:
+            raise ValueError(
+                "symbol selection cannot be combined with --fit: the fit "
+                "ladder downgrades whole files, symbol selection narrows "
+                "within files; use one or the other")
+        if include is not None:
+            raise ValueError(
+                "symbol selection cannot be combined with an explicit "
+                "include set")
     ignore_matcher = profile.is_ignored if (profile and profile.path) else None
     result: ScanResult = scan(root, ignore_matcher=ignore_matcher)
+    symbol_map: dict[str, set[str]] | None = None
+    symbol_report: dict | None = None
+    symbol_outlines: dict = {}
+    if symbols is not None:
+        sources: dict[str, str] = {}
+        for entry in result.files:
+            try:
+                sources[entry.path] = Path(entry.abspath).read_text(
+                    encoding="utf-8", errors="replace")
+            except OSError:
+                sources[entry.path] = ""
+        symbol_map, symbol_report, symbol_outlines = \
+            resolve_symbol_selection(result, symbols, sources)
+        entry_points = set(profile.entry_points) if profile is not None \
+            else set()
+        include = set(symbol_map) | {p for p in entry_points
+                                     if p in sources}
     secret_files: set[str] = set()
     if exclude_secrets:
         from .secrets_scan import scan_scan_result
@@ -371,6 +419,20 @@ def build_bundle(root: str | Path, out: str | Path,
         protected = set(selections) if fit_protect_selections else set()
         resolved, fit_report = fit_modes(result, resolved, fit,
                                          profile=profile, protected=protected)
+    if symbol_map is not None:
+        # v0.18: matched files become symbols-mode AFTER resolution
+        # and fit, so explicit selections/profile modes already had
+        # their say; profile entry points keep their mode (whole-file
+        # signal), and secret-flagged files stay excluded (exclusion
+        # wins, exactly as with --redact).
+        entry_points = set(profile.entry_points) if profile is not None \
+            else set()
+        for p in symbol_map:
+            if p not in entry_points and p not in secret_files:
+                resolved[p] = "symbols"
+        secret_hits = sorted(set(symbol_map) & secret_files)
+        if secret_hits and symbol_report is not None:
+            symbol_report["excluded_by_secrets"] = secret_hits
 
     manifest_files = []
     prompt_parts: list[str] = []
@@ -388,7 +450,16 @@ def build_bundle(root: str | Path, out: str | Path,
     for entry in result.files:
         mode = resolved[entry.path]
         source = Path(entry.abspath).read_text(encoding="utf-8", errors="replace")
-        sliced = slice_text(entry.path, source, mode)
+        if mode == "symbols":
+            sym_text = slice_with_symbols(entry.path, source,
+                                          symbol_map[entry.path])
+            sliced = SliceResult(
+                path=entry.path, mode="symbols", language=entry.language,
+                original_tokens=estimate_tokens(source, entry.language),
+                sliced_tokens=estimate_tokens(sym_text, entry.language),
+                text=sym_text)
+        else:
+            sliced = slice_text(entry.path, source, mode)
         total_before += sliced.original_tokens
         # v0.17: redaction rewrites the slice before anything derives
         # from it (hash, token count, files/, PROMPT.md, wrappers), so
@@ -426,6 +497,14 @@ def build_bundle(root: str | Path, out: str | Path,
             manifest_entry["redactions"] = len(file_redactions)
             manifest_entry["redaction_kinds"] = sorted(
                 {a["type"] for a in file_redactions})
+        if mode == "symbols":
+            keep = symbol_map[entry.path]
+            included_names: list[str] = []
+            for sym in symbol_outlines.get(entry.path, []):
+                if sym.qualified in keep \
+                        and sym.qualified not in included_names:
+                    included_names.append(sym.qualified)
+            manifest_entry["symbols_included"] = included_names
         if entry.path in auto_reasons:
             manifest_entry["mode_reason"] = auto_reasons[entry.path]
         if task_scores and entry.path in task_scores:
@@ -449,10 +528,14 @@ def build_bundle(root: str | Path, out: str | Path,
         dest = files_dir / entry.path
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(final_text, encoding="utf-8")
-        prompt_parts.append(f"\n\n---\n\n# File: {entry.path} (mode: {mode})\n\n{final_text.rstrip()}\n")
+        mode_label = mode
+        if mode == "symbols":
+            mode_label = "symbols: " + ", ".join(
+                manifest_entry["symbols_included"])
+        prompt_parts.append(f"\n\n---\n\n# File: {entry.path} (mode: {mode_label})\n\n{final_text.rstrip()}\n")
         fence_lang = "" if entry.language in ("text", "notebook") else entry.language
         copilot_parts.append(
-            f"\n\n## File: {entry.path} (mode: {mode})\n\n```{fence_lang}\n{final_text.rstrip()}\n```\n")
+            f"\n\n## File: {entry.path} (mode: {mode_label})\n\n```{fence_lang}\n{final_text.rstrip()}\n```\n")
 
     manifest = {
         "tool": "ghostslice",
@@ -471,6 +554,10 @@ def build_bundle(root: str | Path, out: str | Path,
             result,
             sliced_tokens={f["path"]: f["sliced_tokens"] for f in manifest_files}),
     }
+    if symbol_report is not None:
+        # v0.18: additive; the resolution report (requested entries,
+        # every match, cross-file ambiguities) that the CLI prints.
+        manifest["symbols"] = symbol_report
     if fit_report is not None:
         if redact and total_after != fit_report["after_tokens"]:
             # The ladder judged pre-redaction slices (it must —

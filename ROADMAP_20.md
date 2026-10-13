@@ -28,7 +28,7 @@ Baseline: v0.5.0, 149 tests passed.
 | G10 | `init` wizard: analyze a project and generate a tuned .ghostslice.json (non-interactive --yes mode) | v0.15.0 | done |
 | G11 | New bundle formats: Anthropic-style XML bundle + JSON bundle presets | v0.16.0 | done |
 | G12 | Redact-in-place export: --redact-secrets replaces secret values with placeholders instead of excluding files | v0.17.0 | done |
-| G13 | Symbol-level slicing: keep named symbols + their in-file dependencies (Python ast, TS lite) | v0.18.0 | pending |
+| G13 | Symbol-level slicing: keep named symbols + their in-file dependencies (Python ast, TS lite) | v0.18.0 | done |
 | G14 | Python call graph: function-level graph, entry-point reachability, dead-function candidates | v0.19.0 | pending |
 | G15 | Performance: scan caching (.ghostslice-cache), parallel scan, benchmark proof, identical totals | v0.20.0 | pending |
 | G16 | Fuzz/robustness: malformed-input fuzzing for every slicer + encoding handling (BOM, UTF-16, latin-1) | v0.21.0 | pending |
@@ -336,3 +336,32 @@ the audit findings that drove the two improvement rounds.
   own test file tripped `ghostslice secrets .` with contiguous
   fake literals in its source; fixtures now assemble literals
   from parts (runtime values unchanged), guard exits 0.
+- G13 (v0.18.0) DONE Oct 13, 2026: symbol-level slicing shipped —
+  new module symslice.py outlines for all 14 outlined languages
+  (Python via ast incl. nested/conditional defs, constants, class
+  attributes; the rest reuse the slicer's parser-lite regexes and
+  brace matcher), `ghostslice symbols` listing (name/kind/lines/
+  estimated tokens, honest "no symbol outline" for notebook/
+  markdown/config/text), and `export --symbols` (+ MCP symbols
+  array): bare names, qualified names with suffix matching
+  (Store.total reaches Shop.Store.total; C++ Store::total),
+  file.py:name scoping (a colon scopes only when its left side
+  names a scanned file), and globs. Matched files ship mode
+  "symbols": requested bodies + always-context + class shells +
+  collapsed signatures; unmatched files excluded except profile
+  entry points (mode kept); cross-file ambiguity includes ALL
+  matches and is printed/reported; an unmatched entry is a hard
+  exit 2 with near-miss suggestions before anything is written;
+  --exclude-secrets still wins (excluded_by_secrets), --redact
+  and presets compose, --fit is rejected in combination.
+  Manifest gains the top-level symbols report + per-file
+  symbols_included; PROMPT.md sections headed with the list.
+  Tests 525 -> 555 (30 new). Audit rounds (audits/G13_audit.md):
+  round 1 headline fix — conditionally-defined Python symbols
+  (if/else, try/except, match, TYPE_CHECKING) were outlined and
+  matched but silently dropped by the renderer; all three Python
+  renderers now recurse into compound statements (kept bodies
+  ship, unkept signpost). Round 2 headline fix — Kotlin/Swift
+  properties and PHP fields were missing from outlines though
+  signatures mode keeps them and task selection counts them;
+  they are outline symbols now (verbatim data context).

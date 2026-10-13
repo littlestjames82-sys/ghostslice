@@ -5,7 +5,8 @@ Commands:
   ghostslice graph        <path> [--json]
   ghostslice slice        <path> --mode MODE -o <dir>
   ghostslice task         <path> (--task "words" | --diff) [--budget N] [--fit N] -o <bundle> [--preset P]
-  ghostslice export       <path> -o <bundle> [--mode MODE] [--model ID] [--preset P] [--fit N] [--exclude-secrets] [--redact] [--auto-shrink]
+  ghostslice export       <path> -o <bundle> [--mode MODE] [--model ID] [--preset P] [--fit N] [--exclude-secrets] [--redact] [--auto-shrink] [--symbols SPEC]
+  ghostslice symbols      <path> [file] [--json]
   ghostslice watch        <path> [--export] [-o <bundle>] [--interval S] [--debounce S] [--once] [--max-events N] [--fit N] [--redact] [--auto-shrink]
   ghostslice check-budget <path> [--max-tokens N]
   ghostslice lint         <path> [--json] [--strict]
@@ -127,6 +128,28 @@ def _print_redaction(manifest, exclude_secrets_on: bool = False) -> None:
         print("Note: --exclude-secrets is also on: files flagged by the secret "
               "guard were excluded entirely (exclusion wins); redaction covered "
               "the remaining files.")
+
+
+def _print_symbols(manifest) -> None:
+    """Print the v0.18 symbol-selection report from the manifest:
+    what was requested, how much matched where, and — loudly — the
+    entries that matched in more than one file (all matches ship)."""
+    block = manifest.get("symbols")
+    if not block:
+        return
+    print(f"Symbols: {len(block['requested'])} requested; matched in "
+          f"{len(block['files'])} file(s) (files with no match are excluded; "
+          "profile entry points keep their mode)")
+    for entry, found in block["matches"].items():
+        where = ", ".join(f"{m['path']}:{m['symbol']}" for m in found)
+        print(f"  {entry}: {len(found)} match(es): {where}")
+    for entry in block["ambiguous"]:
+        files = sorted({m["path"] for m in block["matches"][entry]})
+        print(f"  note: {entry!r} matched in {len(files)} files "
+              f"({', '.join(files)}); all matches included")
+    for path in block.get("excluded_by_secrets", []):
+        print(f"  note: {path} matched but was excluded by "
+              "--exclude-secrets (exclusion wins)")
 
 
 def _scan_with_profile(path, profile):
@@ -299,6 +322,18 @@ def main(argv: list[str] | None = None) -> int:
     p_export.add_argument("--fit", type=int, default=None, metavar="N",
                           help="auto-fit: downgrade slice modes until the bundle fits N estimated tokens "
                                "(exit 1 if it cannot fit; the bundle is still written)")
+    p_export.add_argument("--symbols", default=None, metavar="SPEC",
+                          help="symbol-level selection: comma list of symbol names, "
+                               "Class.method qualified names, file.py:name scoping, or "
+                               "* globs; matched files ship with those symbols' bodies "
+                               "plus signature context, other files are excluded "
+                               "(cannot combine with --fit)")
+
+    p_symbols = sub.add_parser("symbols", help="list a project's symbols (name, kind, lines, estimated tokens) for symbol-level slicing")
+    p_symbols.add_argument("path")
+    p_symbols.add_argument("file", nargs="?", default=None,
+                           help="optional single file, relative to the project root")
+    p_symbols.add_argument("--json", action="store_true")
 
     p_diff = sub.add_parser("diff", help="diff two bundles: mode changes, token deltas, added/removed files")
     p_diff.add_argument("bundle_a")
@@ -699,6 +734,79 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Output: {out}")
         return 0
 
+    if args.cmd == "symbols":
+        from .symslice import OUTLINE_LANGUAGES, outline_source
+        from .tokens import estimate_tokens as _estimate_tokens
+        try:
+            result = _scan_with_profile(args.path, profile)
+        except FileNotFoundError:
+            print(f"symbols: no such project: {args.path}", file=sys.stderr)
+            return 2
+        entries = sorted(result.files, key=lambda e: e.path)
+        single = None
+        if args.file:
+            rel = args.file.replace("\\", "/").lstrip("./")
+            entries = [e for e in entries if e.path == rel]
+            if not entries:
+                print(f"symbols: {rel}: not in the scan", file=sys.stderr)
+                return 2
+            single = rel
+        files_payload: list[dict] = []
+        no_outline: list[str] = []
+        total_symbols = 0
+        for e in entries:
+            if e.language not in OUTLINE_LANGUAGES:
+                no_outline.append(e.path)
+                files_payload.append({"path": e.path, "language": e.language,
+                                      "symbols": None})
+                continue
+            source = Path(e.abspath).read_text(encoding="utf-8",
+                                               errors="replace")
+            found = outline_source(source, e.language, e.path) or []
+            lines = source.splitlines()
+            rows = []
+            for s in found:
+                if not s.selectable:
+                    continue
+                rows.append({
+                    "name": s.name, "qualified": s.qualified, "kind": s.kind,
+                    "start_line": s.start + 1, "end_line": s.end + 1,
+                    "tokens": _estimate_tokens(s.span_text(lines), e.language),
+                })
+            total_symbols += len(rows)
+            files_payload.append({"path": e.path, "language": e.language,
+                                  "symbols": rows})
+        if args.json:
+            print(json.dumps({
+                "root": result.root, "files": files_payload,
+                "no_outline_files": no_outline,
+                "token_method": TOKEN_METHOD,
+            }, indent=2))
+            return 0
+        shown = 0
+        for fp in files_payload:
+            if fp["symbols"] is None:
+                if single:
+                    print(f"{fp['path']} ({fp['language']}): no symbol "
+                          "outline for this language")
+                continue
+            if not fp["symbols"] and not single:
+                continue
+            shown += 1
+            print(f"{fp['path']} ({fp['language']})")
+            for r in fp["symbols"]:
+                print(f"  {r['qualified']:<32} {r['kind']:<9} "
+                      f"lines {r['start_line']:>4}-{r['end_line']:<4} "
+                      f"~{r['tokens']:,} tokens")
+            if not fp["symbols"]:
+                print("  (no symbols found)")
+        print(f"{total_symbols} symbol(s) in {shown} file(s); "
+              "token counts are estimates.")
+        if no_outline and not single:
+            print(f"{len(no_outline)} file(s) have no symbol outline "
+                  "(notebook, markdown, config/data, or plain text).")
+        return 0
+
     if args.cmd == "task":
         if bool(args.task) == bool(args.diff):
             print("task: give exactly one of --task or --diff", file=sys.stderr)
@@ -751,10 +859,14 @@ def main(argv: list[str] | None = None) -> int:
                                     exclude_secrets=args.exclude_secrets,
                                     redact=args.redact,
                                     auto_shrink=True if args.auto_shrink else None,
-                                    fit=args.fit, model=model_id)
+                                    fit=args.fit, model=model_id,
+                                    symbols=args.symbols)
         except RedactionError as exc:
             print(f"export: {exc}", file=sys.stderr)
             return 1
+        except ValueError as exc:
+            print(f"export: {exc}", file=sys.stderr)
+            return 2
         model = get_model(prices, model_id)
         pf = preflight(manifest["total_original_tokens"], manifest["total_sliced_tokens"], model, prices)
         print(f"Bundle: {args.out} (preset: {manifest.get('preset')})")
@@ -767,6 +879,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Estimated tokens: {pf['before_tokens']:,} -> {pf['after_tokens']:,} (saved {pf['saved_tokens']:,})")
         _print_wrapper(manifest)
         _print_redaction(manifest, exclude_secrets_on=args.exclude_secrets)
+        _print_symbols(manifest)
         print(f"Pre-flight input cost at {pf['model_name']} (prices as of {pf['prices_as_of']}, local, not live): "
               f"~${pf['before_cost_usd']:.4f} -> ~${pf['after_cost_usd']:.4f}")
         fitted = _print_fit(manifest.get("fit"))

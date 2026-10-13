@@ -3,6 +3,50 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [0.18.0] - 2026-10-13
+### Added
+- Symbol-level slicing (G13): new module `symslice.py` with symbol
+  outlines for every sliced language and a new selection surface.
+  `ghostslice symbols <project> [file] [--json]` lists each file's
+  symbols (qualified name, kind, line span, estimated tokens);
+  files in languages without an outline (notebook, markdown,
+  config/data, text) are reported as having none, never guessed.
+  Python outlines come from `ast` (exact: nested functions,
+  methods, classes, module constants, class attributes, and defs
+  inside compound statements); the other languages reuse the
+  slicer's parser-lite declaration regexes and brace matcher, so
+  outline spans are the spans the signatures slicer already trusts.
+- `export --symbols SPEC` (and MCP `export_bundle`'s `symbols`
+  array): entries are bare names, `Class.method` qualified names
+  (suffix-matched: `Store.total` reaches `Shop.Store.total`; C++
+  uses `Store::total`), `file.py:name` scoping (globs allowed;
+  a colon only scopes when its left side names a scanned file),
+  and `*` globs. Matched files ship in the new mode `symbols`:
+  requested symbols with bodies, always-context (imports; Python
+  docstring head and small constants), enclosing classes as
+  shells, and all other symbols collapsed (Python reuses the
+  signatures renderers; lite languages collapse to a signature
+  line and keep declaration types whole, as signatures mode
+  does). Files with no match are excluded, except profile entry
+  points, which keep their resolved mode. A bare name matching
+  in several files matches in ALL of them and is reported as
+  ambiguous in the CLI and the manifest's new top-level `symbols`
+  report (requested / matches / ambiguous / per-file
+  `symbols_included`); PROMPT.md sections are headed with the
+  symbol list. An entry matching nothing raises/exits 2 with
+  near-miss suggestions BEFORE anything is written. Composition:
+  presets (incl. context.json/xml) and `--redact` apply as usual;
+  `--exclude-secrets` still wins over a match (report gains
+  `excluded_by_secrets`); `--symbols` + `--fit` is rejected.
+- Audit G13 fixes baked in: the Python renderer recurses into
+  compound statements at module, class, and function scope, so
+  conditionally-defined symbols (`if`/`else`, `try`/`except`,
+  `match`, `if TYPE_CHECKING:`) render — kept bodies ship,
+  unkept ones signpost — instead of silently vanishing from a
+  symbols export (F1); Kotlin/Swift properties and PHP fields
+  are outline symbols, matching what signatures mode keeps and
+  task selection counts (F2).
+
 ## [0.17.0] - 2026-10-13
 ### Added
 - Redact-in-place export (G12): `export --redact` (also `task`,

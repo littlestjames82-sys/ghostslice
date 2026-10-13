@@ -100,6 +100,14 @@ TOOLS = [
                            "description": "replace flagged secret values in slices "
                                           "with [REDACTED:...] placeholders "
                                           "(default: the profile setting)"},
+                "symbols": {"type": "array", "items": {"type": "string"},
+                            "description": "symbol-level selection (v0.18): names, "
+                                           "Class.method qualified names, file.py:name "
+                                           "scoping, or * globs; matched files ship with "
+                                           "those symbols' bodies plus signature "
+                                           "context, other files are excluded (profile "
+                                           "entry points keep their mode). An entry "
+                                           "matching nothing is an error."},
             },
             "required": ["path", "out"],
         },
@@ -154,7 +162,8 @@ def _export_bundle(args: dict) -> dict:
     profile = load_profile(args["path"])
     manifest = build_bundle(args["path"], args["out"], profile=profile,
                             preset=args.get("preset", "claude-code"),
-                            redact=args.get("redact"))
+                            redact=args.get("redact"),
+                            symbols=args.get("symbols"))
     out = {
         "bundle": str(Path(args["out"]).resolve()),
         "preset": manifest.get("preset"),
@@ -165,6 +174,8 @@ def _export_bundle(args: dict) -> dict:
     }
     if manifest.get("redaction"):
         out["redaction"] = manifest["redaction"]
+    if manifest.get("symbols"):
+        out["symbols"] = manifest["symbols"]
     return out
 
 

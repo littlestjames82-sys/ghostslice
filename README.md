@@ -545,6 +545,87 @@ The CLI prints each chosen file's score with its components
 matching `score` and `score_components` fields per selected file
 (additive; other bundles are unchanged).
 
+### Symbol-level slicing (v0.18)
+
+Files are not always the right unit. `ghostslice symbols` lists what
+a project defines, and `export --symbols` ships exactly the named
+symbols — with their bodies — plus the context needed to read them:
+
+```bash
+# what can I ask for? (name, kind, line span, estimated tokens)
+ghostslice symbols ~/my-project
+ghostslice symbols ~/my-project src/auth.py [--json]
+
+# ship login's body, not the whole auth module
+ghostslice export ~/my-project -o /tmp/bundle --symbols "Auth.login, db.connect"
+```
+
+A spec is a comma list of entries. Each entry is one of:
+
+- a **bare name** (`login`) — matches that symbol anywhere;
+- a **qualified name** (`Auth.login`, C++ `Store::total`) — matches
+  the full name or any qualified name *ending* in it (`Store.total`
+  reaches `Shop.Store.total`);
+- a **file-scoped name** (`db.py:login`, globs allowed:
+  `src/*.py:login`) — the part before the `:` must name or glob a
+  scanned file, so `Store::total` is never mistaken for scoping;
+- a **glob** (`*.render*`, `hash_*`) — fnmatch against qualified and
+  bare names.
+
+Semantics, all of them deliberate:
+
+- A file with a requested symbol ships in mode `symbols`: the
+  requested symbols **with bodies**, the file's always-context
+  (imports; for Python also the module docstring's first line and
+  small module constants, mirroring signatures mode), enclosing
+  classes as shells, and every other symbol collapsed to its
+  signature so the file stays navigable.
+- A bare name that matches in several files matches in **all** of
+  them. The CLI and the manifest say so (`ambiguous`) — ambiguity is
+  reported, never silently resolved to one file.
+- An entry that matches **nothing** is a hard error (exit 2) with
+  near-miss suggestions, raised before anything is written: a typo
+  must not silently export less context.
+- Files with no requested symbol are excluded — except profile
+  **entry points**, which keep their resolved mode and stay
+  included (an entry point is an explicit whole-file signal).
+  `--exclude-secrets` still wins over a match (the report gains
+  `excluded_by_secrets`); `--redact` composes as usual. `--symbols`
+  cannot combine with `--fit` (the ladder downgrades whole files;
+  symbol selection narrows within files).
+- The manifest gains a top-level `symbols` report (requested,
+  per-entry matches, ambiguities, per-file lists) and each
+  symbols-mode entry gains `symbols_included`. PROMPT.md sections
+  are headed `(mode: symbols: Auth.login, ...)`. MCP
+  `export_bundle` takes the same selection as a `symbols` array.
+
+Per-language support. "Body" = a selected symbol ships its full
+body; "Collapse" = what a non-selected symbol becomes.
+
+| Language | Outline source | Body | Collapse |
+|---|---|---|---|
+| python | `ast` (exact: nested defs, methods, constants, class attributes, conditional defs) | full | signatures rules (the signatures renderers themselves) |
+| typescript, javascript | parser-lite spans | full | signature line; interfaces/types/enums kept whole |
+| go | parser-lite spans | full | signature line; struct/interface kept whole |
+| rust | parser-lite spans (impl blocks) | full | signature line; struct/enum/trait/union kept whole |
+| java, csharp | parser-lite spans | full | signature line; interface/enum/record kept whole |
+| php, kotlin, swift | parser-lite spans | full | signature line; interface/trait/protocol kept whole |
+| c, cpp | parser-lite spans (qualified names) | full | signature line; struct/enum kept whole |
+| scala | parser-lite spans | full | signature line; trait/enum kept whole |
+| ruby | parser-lite spans (keyword/`end`) | full | the `def` line |
+| notebook, markdown, config/data, text | **no outline** | — | — |
+
+Declaration types are surface: selecting a *method of* an
+interface/trait/protocol ships the whole type, exactly as
+signatures mode treats it. Lite limits, stated plainly: nested
+functions are outlined only for Python (lite outlines are
+top-level definitions plus class members); constructors are not
+selectable in lite languages; C# namespaces do not prefix
+qualified names; Go grouped `type ( ... )` declarations are not
+outlined; a C++ out-of-line definition (`int Store::total() { }`)
+is its own symbol, spelled as written, separate from the in-class
+declaration it implements.
+
 ### Profiles: `.ghostslice.json` (v0.2)
 
 Drop this in a project root and every command picks it up automatically:
