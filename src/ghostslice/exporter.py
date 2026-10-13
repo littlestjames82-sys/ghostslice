@@ -10,11 +10,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
 from . import __version__
+from .cache import cached_slice_text, open_cache
 from .ledger import append_record
 from .scanner import ScanResult, language_for, scan
 from .secrets_scan import REDACTED_KINDS, redact_text, scan_text
@@ -256,7 +259,10 @@ def build_bundle(root: str | Path, out: str | Path,
                  fit_protect_selections: bool = True,
                  task_scores: dict | None = None,
                  model: str | None = None,
-                 symbols=None) -> dict:
+                 symbols=None,
+                 use_cache: bool = True,
+                 workers: int | None = None,
+                 timing: dict | None = None) -> dict:
     """Slice `root` into bundle dir `out`. Returns the manifest dict.
 
     Mode precedence: explicit `selections` > profile modes (`.ghostslice.json`)
@@ -364,6 +370,21 @@ def build_bundle(root: str | Path, out: str | Path,
     `include` set — both raise ValueError. With `exclude_secrets`,
     exclusion still wins: a matched file the guard flags is
     excluded, and the report gains `excluded_by_secrets`.
+
+    `use_cache` / `workers` / `timing` (v0.20, G15): unless disabled
+    (here or via GHOSTSLICE_NO_CACHE), one content cache
+    (.ghostslice-cache/, cache.py) is shared by the scan, the fit
+    ladder, symbol resolution, and the slicing loop; cache hits are
+    the same pure functions evaluated earlier, so bundle bytes are
+    identical with the cache on or off (pinned by tests). `workers`
+    > 1 slices files on a thread pool — results are collected in
+    manifest order, so output is identical for any worker count;
+    the default (None) is sequential, because measurement showed
+    threads do not pay for this workload under the GIL
+    (audits/G15_audit.md).
+    `timing`, when a dict is passed, is filled with phase seconds
+    (scan/resolve/slice/render/total) and the cache counters — it
+    never enters the manifest, so default output is unchanged.
     """
     selections = selections or {}
     preset = preset or (profile.preset if profile else None) or "claude-code"
@@ -379,8 +400,11 @@ def build_bundle(root: str | Path, out: str | Path,
             raise ValueError(
                 "symbol selection cannot be combined with an explicit "
                 "include set")
+    _t0 = time.perf_counter()
+    cache = open_cache(root) if use_cache else None
     ignore_matcher = profile.is_ignored if (profile and profile.path) else None
-    result: ScanResult = scan(root, ignore_matcher=ignore_matcher)
+    result: ScanResult = scan(root, ignore_matcher=ignore_matcher, cache=cache)
+    _t_scan = time.perf_counter()
     symbol_map: dict[str, set[str]] | None = None
     symbol_report: dict | None = None
     symbol_outlines: dict = {}
@@ -393,7 +417,7 @@ def build_bundle(root: str | Path, out: str | Path,
             except OSError:
                 sources[entry.path] = ""
         symbol_map, symbol_report, symbol_outlines = \
-            resolve_symbol_selection(result, symbols, sources)
+            resolve_symbol_selection(result, symbols, sources, cache=cache)
         entry_points = set(profile.entry_points) if profile is not None \
             else set()
         include = set(symbol_map) | {p for p in entry_points
@@ -417,8 +441,10 @@ def build_bundle(root: str | Path, out: str | Path,
     if fit is not None:
         from .fit import fit_modes
         protected = set(selections) if fit_protect_selections else set()
-        resolved, fit_report = fit_modes(result, resolved, fit,
-                                         profile=profile, protected=protected)
+        resolved, fit_report = fit_modes(
+            result, resolved, fit, profile=profile, protected=protected,
+            slice_fn=lambda p, s, m: cached_slice_text(cache, p, s, m))
+    _t_resolve = time.perf_counter()
     if symbol_map is not None:
         # v0.18: matched files become symbols-mode AFTER resolution
         # and fit, so explicit selections/profile modes already had
@@ -447,20 +473,26 @@ def build_bundle(root: str | Path, out: str | Path,
     leftover_total = 0
     leftover_kinds: set[str] = set()
 
-    for entry in result.files:
+    def _process(entry) -> dict:
+        """Slice one file end to end (read, slice, redact, hash,
+        write its bundle file). Purely per-file: it reads shared
+        read-only resolution state and returns a record, so it is
+        safe to run on a thread pool; the caller aggregates the
+        records in scan order, keeping every output byte identical
+        for any worker count."""
         mode = resolved[entry.path]
         source = Path(entry.abspath).read_text(encoding="utf-8", errors="replace")
         if mode == "symbols":
             sym_text = slice_with_symbols(entry.path, source,
-                                          symbol_map[entry.path])
+                                          symbol_map[entry.path],
+                                          cache=cache)
             sliced = SliceResult(
                 path=entry.path, mode="symbols", language=entry.language,
                 original_tokens=estimate_tokens(source, entry.language),
                 sliced_tokens=estimate_tokens(sym_text, entry.language),
                 text=sym_text)
         else:
-            sliced = slice_text(entry.path, source, mode)
-        total_before += sliced.original_tokens
+            sliced = cached_slice_text(cache, entry.path, source, mode)
         # v0.17: redaction rewrites the slice before anything derives
         # from it (hash, token count, files/, PROMPT.md, wrappers), so
         # every artifact carries the redacted text and the manifest
@@ -469,20 +501,13 @@ def build_bundle(root: str | Path, out: str | Path,
         final_text = sliced.text
         final_tokens = sliced.sliced_tokens
         file_redactions: list[dict] = []
+        file_leftovers: list[dict] = []
         if redact and mode != "exclude" and final_text:
             final_text, file_redactions, file_leftovers = redact_text(
                 entry.path, final_text)
             if file_redactions:
                 final_tokens = estimate_tokens(final_text,
                                                language_for(entry.path))
-                redact_values += len(file_redactions)
-                redact_files += 1
-                for a in file_redactions:
-                    redact_kind_counts[a["type"]] = \
-                        redact_kind_counts.get(a["type"], 0) + 1
-            leftover_total += len(file_leftovers)
-            leftover_kinds.update(f["type"] for f in file_leftovers)
-        total_after += final_tokens
         digest = hashlib.sha256(final_text.encode("utf-8")).hexdigest()
         manifest_entry = {
             "path": entry.path,
@@ -513,6 +538,48 @@ def build_bundle(root: str | Path, out: str | Path,
             manifest_entry["score_components"] = {
                 "tfidf": bd["tfidf"], "symbol": bd["symbol"], "graph": bd["graph"],
             }
+        if mode != "exclude" and final_text:
+            dest = files_dir / entry.path
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(final_text, encoding="utf-8")
+        return {"entry": entry, "mode": mode, "sliced": sliced,
+                "final_text": final_text, "final_tokens": final_tokens,
+                "redactions": file_redactions, "leftovers": file_leftovers,
+                "manifest_entry": manifest_entry}
+
+    # Worker resolution: an explicit count wins; the default is
+    # sequential. Measured on the 2,000-file synthetic tree in
+    # audits/G15_audit.md: threads bought ~5% cold at 2 workers
+    # (noise), lost at 4, and made WARM runs slower (0.78s vs
+    # 0.59s) — the hot work is regex/AST under the GIL and this
+    # machine has 2 vCPUs. The option stays for bigger machines;
+    # output is identical for any count because records are
+    # aggregated in scan order.
+    n_workers = max(1, workers) if workers is not None else 1
+    if n_workers > 1 and len(result.files) > 1:
+        with ThreadPoolExecutor(max_workers=n_workers) as pool:
+            records = list(pool.map(_process, result.files))
+    else:
+        records = [_process(entry) for entry in result.files]
+
+    for rec in records:
+        entry = rec["entry"]
+        mode = rec["mode"]
+        sliced = rec["sliced"]
+        final_text = rec["final_text"]
+        final_tokens = rec["final_tokens"]
+        file_redactions = rec["redactions"]
+        total_before += sliced.original_tokens
+        if file_redactions:
+            redact_values += len(file_redactions)
+            redact_files += 1
+            for a in file_redactions:
+                redact_kind_counts[a["type"]] = \
+                    redact_kind_counts.get(a["type"], 0) + 1
+        leftover_total += len(rec["leftovers"])
+        leftover_kinds.update(f["type"] for f in rec["leftovers"])
+        total_after += final_tokens
+        manifest_entry = rec["manifest_entry"]
         manifest_files.append(manifest_entry)
         if mode == "exclude":
             excluded_records.append({
@@ -525,9 +592,6 @@ def build_bundle(root: str | Path, out: str | Path,
                 "reason": f"empty slice (mode: {mode})"})
             continue
         included.append({**manifest_entry, "content": final_text})
-        dest = files_dir / entry.path
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(final_text, encoding="utf-8")
         mode_label = mode
         if mode == "symbols":
             mode_label = "symbols: " + ", ".join(
@@ -536,6 +600,7 @@ def build_bundle(root: str | Path, out: str | Path,
         fence_lang = "" if entry.language in ("text", "notebook") else entry.language
         copilot_parts.append(
             f"\n\n## File: {entry.path} (mode: {mode_label})\n\n```{fence_lang}\n{final_text.rstrip()}\n```\n")
+    _t_slice = time.perf_counter()
 
     manifest = {
         "tool": "ghostslice",
@@ -656,14 +721,29 @@ def build_bundle(root: str | Path, out: str | Path,
                           if redact and redact_values else None)
         except OSError:
             pass
+    if timing is not None:
+        _t_end = time.perf_counter()
+        timing.update({
+            "scan_s": round(_t_scan - _t0, 4),
+            "resolve_s": round(_t_resolve - _t_scan, 4),
+            "slice_s": round(_t_slice - _t_resolve, 4),
+            "render_s": round(_t_end - _t_slice, 4),
+            "total_s": round(_t_end - _t0, 4),
+            "workers": n_workers,
+            "cache": cache.counters() if cache is not None else None,
+        })
     return manifest
 
 
 def estimate_context_tokens(root: str | Path, profile=None,
-                            default_mode: str | None = None) -> tuple[int, int]:
-    """(total original, total sliced) tokens for the default/profile selection."""
+                            default_mode: str | None = None,
+                            cache=None) -> tuple[int, int]:
+    """(total original, total sliced) tokens for the default/profile selection.
+
+    `cache` (v0.20): optional cache.ProjectCache shared by the scan
+    and the slicing below; None keeps the pre-cache behaviour."""
     ignore_matcher = profile.is_ignored if (profile and profile.path) else None
-    result: ScanResult = scan(root, ignore_matcher=ignore_matcher)
+    result: ScanResult = scan(root, ignore_matcher=ignore_matcher, cache=cache)
     resolved = resolve_modes(result, profile=profile, default_mode=default_mode)
     before = after = 0
     for entry in result.files:
@@ -675,7 +755,7 @@ def estimate_context_tokens(root: str | Path, profile=None,
             before += entry.tokens
         else:
             source = Path(entry.abspath).read_text(encoding="utf-8", errors="replace")
-            r = slice_text(entry.path, source, mode)
+            r = cached_slice_text(cache, entry.path, source, mode)
             before += r.original_tokens
             after += r.sliced_tokens
     return before, after

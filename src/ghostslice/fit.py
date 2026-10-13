@@ -54,13 +54,19 @@ def _next_rung(mode: str) -> str | None:
 
 
 def fit_modes(scan_result, modes: dict[str, str], fit_tokens: int,
-              profile=None, protected: set[str] | None = None) -> tuple[dict[str, str], dict]:
+              profile=None, protected: set[str] | None = None,
+              slice_fn=None) -> tuple[dict[str, str], dict]:
     """Return (final modes dict, fit report dict).
 
     `modes` maps every scanned path to its starting mode. `protected`
     holds paths the caller explicitly moded and wants left untouched;
     profile-moded paths are protected automatically.
+
+    `slice_fn` (v0.20): optional drop-in for slicer.slice_text —
+    build_bundle passes its cache-aware wrapper so ladder probes hit
+    the content cache; the default is the plain slicer.
     """
+    slice_text_fn = slice_fn or slice_text
     protected = set(protected or ())
     if profile is not None:
         for entry in scan_result.files:
@@ -82,7 +88,7 @@ def fit_modes(scan_result, modes: dict[str, str], fit_tokens: int,
                 token_cache[key] = 0
             else:
                 source = Path(entry.abspath).read_text(encoding="utf-8", errors="replace")
-                token_cache[key] = slice_text(entry.path, source, mode).sliced_tokens
+                token_cache[key] = slice_text_fn(entry.path, source, mode).sliced_tokens
         return token_cache[key]
 
     current = dict(modes)

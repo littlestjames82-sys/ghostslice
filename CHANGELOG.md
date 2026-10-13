@@ -3,6 +3,39 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [0.20.0] - 2026-10-13
+### Added
+- Content cache (G15): a per-project `.ghostslice-cache/` memoizes
+  the tool's pure derivations — per-file scan results (token
+  estimate, lines, detection evidence), slice results, symbol
+  outlines, and symbol-slice renders — keyed by sha256 of every
+  input (content hash, relative path, mode or sorted keep-set,
+  GhostSlice version, estimator version). Export/slice/task/watch
+  and `check-budget` consult it; `scan --timing` and
+  `export --timing` print phase breakdowns (scan/resolve/slice/
+  render) plus hit/miss/corrupt counters; `ghostslice cache
+  stats|clear <project>` inspects and removes it. Bundles are
+  byte-identical with the cache off, cold, or warm (whole-tree
+  diffs in the test suite), and one changed file in a 2,000-file
+  tree misses exactly its own two entries. Entries are written
+  atomically (temp + rename; racing exports both succeed),
+  corrupt entries count and read as misses, and a 256 MiB cap
+  evicts oldest-first. GHOSTSLICE_NO_CACHE=1 or `--no-cache`
+  disables it. Local paired measurements (BENCHMARKS.md): warm
+  exports ~7-30x faster than cold, warm scans ~3-5x.
+- Parallel slicing: `export --workers N` slices on a thread pool
+  with results aggregated in manifest order — byte-identical at
+  any worker count (test-pinned). It defaults to 1 on purpose:
+  measured on the benchmark tree, threads gained ~5% cold at 2
+  workers (noise), lost at 4, and made warm runs slower, because
+  the hot work is regex/AST under the GIL. The cache is the win.
+### Changed
+- `.ghostslice-cache` joins the scanner's built-in ignore dirs:
+  the cache is never scanned, exported, or watched.
+- Nothing else: every command's default output is unchanged, and
+  manifest bytes are identical whether the cache is on or off
+  (timing travels out-of-band via a build_bundle out-param).
+
 ## [0.19.0] - 2026-10-13
 ### Added
 - Python call graph (G14): new module `callgraph.py` and a

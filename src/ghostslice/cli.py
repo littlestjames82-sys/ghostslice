@@ -1,17 +1,18 @@
 """GhostSlice command line.
 
 Commands:
-  ghostslice scan         <path> [--json] [--model ID]
+  ghostslice scan         <path> [--json] [--model ID] [--timing] [--no-cache]
   ghostslice graph        <path> [--json]
-  ghostslice slice        <path> --mode MODE -o <dir>
+  ghostslice slice        <path> --mode MODE -o <dir> [--no-cache]
   ghostslice task         <path> (--task "words" | --diff) [--budget N] [--fit N] -o <bundle> [--preset P]
-  ghostslice export       <path> -o <bundle> [--mode MODE] [--model ID] [--preset P] [--fit N] [--exclude-secrets] [--redact] [--auto-shrink] [--symbols SPEC]
+  ghostslice export       <path> -o <bundle> [--mode MODE] [--model ID] [--preset P] [--fit N] [--exclude-secrets] [--redact] [--auto-shrink] [--symbols SPEC] [--timing] [--no-cache] [--workers N]
   ghostslice symbols      <path> [file] [--json]
   ghostslice calls        <path> [file] [--json] [--dead]
   ghostslice watch        <path> [--export] [-o <bundle>] [--interval S] [--debounce S] [--once] [--max-events N] [--fit N] [--redact] [--auto-shrink]
   ghostslice check-budget <path> [--max-tokens N]
   ghostslice lint         <path> [--json] [--strict]
   ghostslice init         <path> [--yes] [--force] [--dry-run] [--budget N] [--model ID]
+  ghostslice cache        stats|clear <path>
   ghostslice check        <bundle>
   ghostslice diff         <bundleA> <bundleB> [--json]
   ghostslice history      <path> [--json] [--trend] [--model ID]
@@ -28,9 +29,12 @@ import argparse
 import json
 import math
 import sys
+import time
 from pathlib import Path
 
 from . import __version__
+from .cache import cached_slice_text, clear_cache, open_cache
+from .cache import cache_stats as _cache_stats
 from .exporter import SLICABLE, build_bundle, estimate_context_tokens, validate_bundle
 from .graph import build_graph, importers_of, recommendations
 from .ledger import analytics as ledger_analytics
@@ -153,9 +157,43 @@ def _print_symbols(manifest) -> None:
               "--exclude-secrets (exclusion wins)")
 
 
-def _scan_with_profile(path, profile):
+def _scan_with_profile(path, profile, cache=None):
     matcher = profile.is_ignored if profile.path else None
-    return scan(path, ignore_matcher=matcher)
+    return scan(path, ignore_matcher=matcher, cache=cache)
+
+
+def _print_timing(timing, stream=None) -> None:
+    """Print a build_bundle timing dict (--timing): phase seconds
+    plus the content-cache counters for the run."""
+    stream = stream or sys.stdout
+    parts = [f"scan {timing['scan_s']:.3f}s",
+             f"resolve {timing['resolve_s']:.3f}s",
+             f"slice {timing['slice_s']:.3f}s",
+             f"render {timing['render_s']:.3f}s"]
+    print(f"Timing: {' + '.join(parts)} = {timing['total_s']:.3f}s "
+          f"(workers: {timing['workers']})", file=stream)
+    c = timing.get("cache")
+    if c is None:
+        print("Cache: off", file=stream)
+    else:
+        print(f"Cache: {c['hits']} hit(s), {c['misses']} miss(es), "
+              f"{c['stores']} store(s), {c['corrupt']} corrupt, "
+              f"{c['evictions']} eviction(s)", file=stream)
+
+
+def _print_scan_timing(t0, t1, cache, stream=None) -> None:
+    """`scan --timing`: the scan phase vs everything after it
+    (graph, recommendations, secrets, duplicates, rendering)."""
+    stream = stream or sys.stdout
+    total = time.perf_counter() - t0
+    print(f"Timing: scan {t1 - t0:.3f}s + analysis/render "
+          f"{total - (t1 - t0):.3f}s = {total:.3f}s", file=stream)
+    if cache is None:
+        print("Cache: off", file=stream)
+    else:
+        c = cache.counters()
+        print(f"Cache: {c['hits']} hit(s), {c['misses']} miss(es), "
+              f"{c['stores']} store(s), {c['corrupt']} corrupt", file=stream)
 
 
 def _with_dead_symbol_recs(result, graph, profile, recs):
@@ -355,6 +393,10 @@ def main(argv: list[str] | None = None) -> int:
     p_scan.add_argument("path")
     p_scan.add_argument("--json", action="store_true")
     p_scan.add_argument("--model", default=None, help="model id from prices.json, for a cost line")
+    p_scan.add_argument("--timing", action="store_true",
+                        help="print a phase breakdown (scan vs analysis) and cache counters")
+    p_scan.add_argument("--no-cache", action="store_true",
+                        help="do not consult or fill the .ghostslice-cache content cache")
 
     p_graph = sub.add_parser("graph", help="import graph + prune recommendations")
     p_graph.add_argument("path")
@@ -364,6 +406,9 @@ def main(argv: list[str] | None = None) -> int:
     p_slice.add_argument("path")
     p_slice.add_argument("--mode", choices=MODES, default="signatures")
     p_slice.add_argument("-o", "--out", required=True)
+    p_slice.add_argument("--no-cache", action="store_true",
+                         help="do not consult or fill the .ghostslice-cache content cache "
+                              "(tree slices only; a single file is never cached)")
 
     p_task = sub.add_parser("task", help="task-focused context: keyword or git-diff selection, exported as a bundle")
     p_task.add_argument("path")
@@ -412,6 +457,14 @@ def main(argv: list[str] | None = None) -> int:
                                "* globs; matched files ship with those symbols' bodies "
                                "plus signature context, other files are excluded "
                                "(cannot combine with --fit)")
+    p_export.add_argument("--timing", action="store_true",
+                          help="print a phase breakdown (scan/resolve/slice/render) and cache counters")
+    p_export.add_argument("--no-cache", action="store_true",
+                          help="do not consult or fill the .ghostslice-cache content cache")
+    p_export.add_argument("--workers", type=int, default=None, metavar="N",
+                          help="slice files on N threads (default: 1; measured no "
+                               "faster for this workload under the GIL — see "
+                               "BENCHMARKS.md — but output is identical for any N)")
 
     p_symbols = sub.add_parser("symbols", help="list a project's symbols (name, kind, lines, estimated tokens) for symbol-level slicing")
     p_symbols.add_argument("path")
@@ -518,6 +571,14 @@ def main(argv: list[str] | None = None) -> int:
     p_cal.add_argument("path")
     p_cal.add_argument("--json", action="store_true")
 
+    p_cache = sub.add_parser("cache", help="inspect or clear the per-project content cache (.ghostslice-cache)")
+    cache_sub = p_cache.add_subparsers(dest="cache_cmd", required=True)
+    p_cache_stats = cache_sub.add_parser("stats", help="entry counts, bytes, and age of the cache")
+    p_cache_stats.add_argument("path")
+    p_cache_stats.add_argument("--json", action="store_true")
+    p_cache_clear = cache_sub.add_parser("clear", help="delete the whole cache (it is derived data; it rebuilds on demand)")
+    p_cache_clear.add_argument("path")
+
     sub.add_parser("mcp", help="run the stdio MCP server (JSON-RPC)")
 
     p_serve = sub.add_parser("serve", help="serve the local dashboard")
@@ -596,6 +657,39 @@ def main(argv: list[str] | None = None) -> int:
             print(f"init: no such project: {args.path}", file=sys.stderr)
             return 2
         return code
+
+    if args.cmd == "cache":
+        # Handled before the generic profile load: the cache is
+        # derived data and must be inspectable even for a project
+        # whose profile is broken or absent.
+        if not Path(args.path).is_dir():
+            print(f"cache: no such project: {args.path}", file=sys.stderr)
+            return 2
+        if args.cache_cmd == "stats":
+            stats = _cache_stats(args.path)
+            if args.json:
+                print(json.dumps(stats, indent=2))
+                return 0
+            if not stats["entries"]:
+                print(f"Cache for {args.path}: empty (no .ghostslice-cache)")
+                return 0
+            print(f"Cache for {args.path}: {stats['entries']} entr(ies), "
+                  f"{stats['bytes']:,} bytes in {stats['dir']}")
+            for kind, info in stats["by_kind"].items():
+                print(f"  {kind:<9} {info['entries']:>6} entr(ies), "
+                      f"{info['bytes']:,} bytes")
+            print(f"  oldest: {stats['oldest']}  newest: {stats['newest']}")
+            return 0
+        if args.cache_cmd == "clear":
+            gone = clear_cache(args.path)
+            if gone["existed"]:
+                print(f"Cleared cache for {args.path}: "
+                      f"{gone['removed_entries']} entr(ies), "
+                      f"{gone['removed_bytes']:,} bytes removed")
+            else:
+                print(f"Cache for {args.path}: nothing to clear")
+            return 0
+        return 2
 
     # All remaining commands target a project path (or a bundle for check).
     target = getattr(args, "path", None) or getattr(args, "bundle", None)
@@ -740,7 +834,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "scan":
         from .duplicates import find_duplicates
-        result = _scan_with_profile(args.path, profile)
+        _t0 = time.perf_counter()
+        _scan_cache = None if args.no_cache else open_cache(args.path)
+        result = _scan_with_profile(args.path, profile, cache=_scan_cache)
+        _t1 = time.perf_counter()
         graph = build_graph(result)
         recs = _with_dead_symbol_recs(result, graph, profile,
                                       recommendations(result, graph, profile))
@@ -755,6 +852,8 @@ def main(argv: list[str] | None = None) -> int:
             payload["profile"] = profile.to_dict()
             payload["history"] = ledger_summary(args.path)
             print(json.dumps(payload, indent=2))
+            if args.timing:
+                _print_scan_timing(_t0, _t1, _scan_cache, stream=sys.stderr)
             return 0
         model = get_model(prices, args.model or profile.model) if (args.model or profile.model) else None
         from .workspaces import summarize_packages
@@ -763,6 +862,8 @@ def main(argv: list[str] | None = None) -> int:
                     dups=dups, packages=summarize_packages(result),
                     ws_missing=ws.missing if ws else None,
                     ws_warnings=ws.warnings if ws else None)
+        if args.timing:
+            _print_scan_timing(_t0, _t1, _scan_cache)
         return 0
 
     if args.cmd == "graph":
@@ -811,13 +912,14 @@ def main(argv: list[str] | None = None) -> int:
             (out / src.name).write_text(r.text, encoding="utf-8")
             print(f"{src.name}: {r.original_tokens:,} -> {r.sliced_tokens:,} estimated tokens ({args.mode})")
             return 0
-        result = _scan_with_profile(src, profile)
+        _slice_cache = None if args.no_cache else open_cache(src)
+        result = _scan_with_profile(src, profile, cache=_slice_cache)
         before = after = 0
         for entry in result.files:
             text = Path(entry.abspath).read_text(encoding="utf-8", errors="replace")
             mode = args.mode if entry.language in SLICABLE or entry.language == "markdown" \
                 or entry.language in CONFIG_LANGUAGES else "full"
-            r = slice_text(entry.path, text, mode)
+            r = cached_slice_text(_slice_cache, entry.path, text, mode)
             before += r.original_tokens
             after += r.sliced_tokens
             if r.text:
@@ -976,9 +1078,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if check["ok"] and fitted else 1
 
     if args.cmd == "export":
-        _export_scan = _scan_with_profile(args.path, profile)
+        _export_scan = _scan_with_profile(
+            args.path, profile,
+            cache=None if args.no_cache else open_cache(args.path))
         _warn_secrets(scan_scan_result(_export_scan))
         model_id = args.model or profile.model or "claude-sonnet"
+        _timing: dict = {}
         try:
             manifest = build_bundle(args.path, args.out, default_mode=args.mode,
                                     profile=profile, preset=args.preset,
@@ -986,7 +1091,10 @@ def main(argv: list[str] | None = None) -> int:
                                     redact=args.redact,
                                     auto_shrink=True if args.auto_shrink else None,
                                     fit=args.fit, model=model_id,
-                                    symbols=args.symbols)
+                                    symbols=args.symbols,
+                                    use_cache=not args.no_cache,
+                                    workers=args.workers,
+                                    timing=_timing if args.timing else None)
         except RedactionError as exc:
             print(f"export: {exc}", file=sys.stderr)
             return 1
@@ -1011,6 +1119,8 @@ def main(argv: list[str] | None = None) -> int:
         fitted = _print_fit(manifest.get("fit"))
         check = validate_bundle(args.out)
         print(f"Validation: {'OK' if check['ok'] else 'FAILED: ' + '; '.join(check['errors'])}")
+        if args.timing:
+            _print_timing(_timing)
         return 0 if check["ok"] and fitted else 1
 
     if args.cmd == "watch":
@@ -1053,7 +1163,9 @@ def main(argv: list[str] | None = None) -> int:
         if budget is None:
             print("check-budget: no budget given (use --max-tokens or profile budget_tokens)", file=sys.stderr)
             return 2
-        before, after = estimate_context_tokens(args.path, profile=profile, default_mode=args.mode)
+        before, after = estimate_context_tokens(
+            args.path, profile=profile, default_mode=args.mode,
+            cache=open_cache(args.path))
         status = "OK" if after <= budget else "OVER BUDGET"
         print(f"Selected context: {after:,} sliced estimated tokens (full project {before:,}); budget {budget:,}: {status}")
         return 0 if after <= budget else 1

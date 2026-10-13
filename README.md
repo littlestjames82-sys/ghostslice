@@ -846,6 +846,53 @@ loaded once at startup; edit `.ghostslice.json` and restart the watch
 to apply it. `--max-events N` exits after N settled events. Ctrl-C
 exits 0 with a session summary (duration, polls, events, exports).
 
+### Performance: the content cache (v0.20)
+
+Repeat runs are fast because GhostSlice memoizes its own pure
+derivations on disk, in `<project>/.ghostslice-cache/`:
+
+```bash
+ghostslice export ~/my-project -o /tmp/ctx --timing   # phase breakdown + cache counters
+ghostslice scan ~/my-project --timing                 # scan phase vs analysis, cache counters
+ghostslice cache stats ~/my-project                   # entries, bytes, age by kind
+ghostslice cache clear ~/my-project                   # delete it (derived data; rebuilds on demand)
+ghostslice export ~/my-project -o /tmp/ctx --no-cache # bypass the cache for one run
+GHOSTSLICE_NO_CACHE=1 ghostslice export ...           # or disable it entirely
+```
+
+What is cached: per-file scan derivations (token estimate, line
+count, detection evidence), slice results (text + token counts),
+symbol outlines, and symbol-slice renders. Every entry is keyed
+by the sha256 of *all* its inputs — the file's content hash, its
+relative path, the slice mode (or sorted symbol keep-set), the
+GhostSlice version, and the token-estimator version — so a hit is
+the same result the code would have computed, and bundles are
+byte-identical with the cache off, cold, or warm (the test suite
+diffs whole bundle trees to prove it). A changed file misses
+exactly its own entries; a GhostSlice or estimator upgrade moves
+the version dimensions and simply misses. Entries are written
+atomically (temp file + rename), a corrupt entry counts and reads
+as a miss, and a 256 MiB cap evicts oldest-first.
+
+Measured warmups (local, this dev sandbox, medians; see
+BENCHMARKS.md for method and caveats): a 2,000-file tree exports
+in ~0.65s warm vs ~4.4s cold; this repo exports in ~0.09s warm vs
+~2.6s cold. Parallel slicing (`--workers N`) is available and
+deterministic, but measured *no faster* for this workload (the
+work is regex/AST under the GIL), so it defaults to 1 — the cache
+is the win, not thread count.
+
+Trust model, plainly: the cache is trusted derived data, like
+ccache's store. Nothing in it is trusted for a security decision
+(secret scanning and redaction always run on the final text,
+cached or not), but a hand-forged entry would change output —
+`cache clear` or GHOSTSLICE_NO_CACHE if that ever matters. The
+cache directory is scanner-ignored (never scanned, exported, or
+watched); add `.ghostslice-cache/` to your `.gitignore` — it is
+regenerable. Estimator changes must bump the estimator version
+stamp (`tokens.METHOD_VERSION`) so old entries miss, which is
+the same discipline the savings ledger already uses.
+
 ### MCP server (v0.3)
 
 ```bash

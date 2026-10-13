@@ -30,7 +30,7 @@ Baseline: v0.5.0, 149 tests passed.
 | G12 | Redact-in-place export: --redact-secrets replaces secret values with placeholders instead of excluding files | v0.17.0 | done |
 | G13 | Symbol-level slicing: keep named symbols + their in-file dependencies (Python ast, TS lite) | v0.18.0 | done |
 | G14 | Python call graph: function-level graph, entry-point reachability, dead-function candidates | v0.19.0 | done |
-| G15 | Performance: scan caching (.ghostslice-cache), parallel scan, benchmark proof, identical totals | v0.20.0 | pending |
+| G15 | Performance: scan caching (.ghostslice-cache), parallel scan, benchmark proof, identical totals | v0.20.0 | done |
 | G16 | Fuzz/robustness: malformed-input fuzzing for every slicer + encoding handling (BOM, UTF-16, latin-1) | v0.21.0 | pending |
 | G17 | Dashboard v2: side-by-side slice preview (original vs slice, per Ryan's mockups, Oct 13) with diff highlighting + budget slider with live auto-fit preview | v0.22.0 | pending |
 | G18 | Plugin system: user slicers from .ghostslice-plugins/*.py, documented API, example plugin | v0.23.0 | pending |
@@ -393,3 +393,36 @@ the audit findings that drove the two improvement rounds.
   method calls. Round 2 headline fix — template-method
   overrides flagged because self. calls resolved exact-only;
   self./cls. calls now fan out to subclass overrides.
+- G15 (v0.20.0) DONE Oct 13, 2026: performance shipped — new
+  cache.py: a per-project .ghostslice-cache memoizes scan
+  derivations, slice results, symbol outlines, and symbol-slice
+  renders, keyed by sha256 of every input (content, path, mode /
+  keep-set, tool version, estimator version); atomic stores,
+  corrupt-reads-as-miss, 256 MiB oldest-first cap, `cache
+  stats|clear`, GHOSTSLICE_NO_CACHE / --no-cache, and --timing
+  phase breakdowns on scan/export. Bundles are byte-identical
+  cache off/cold/warm at any worker count (whole-tree diffs,
+  hash-seed and racing-writer probes in audits/G15_audit.md);
+  one changed file in the 2,000-file tree misses exactly its own
+  2 entries. Parallel slicing (--workers) shipped but defaults
+  to 1: measured no faster under the GIL (2 workers ~+5% cold =
+  noise, 4 lost, warm runs slower threaded) — the cache is the
+  win: paired local medians, synthetic export 4.38s -> 0.65s
+  warm, repo export 2.61s -> 0.085s, scans ~3-5x (BENCHMARKS.md,
+  labelled local + sandbox-noisy). Tests 590 -> 614 (24 new).
+  Audit rounds: round 1 — in-flight store temp files matched the
+  *.json eviction/stats walks (renamed to .part + stale-temp
+  sweep) and the export CLI's warning pre-scan bypassed the
+  cache (now shares it); the poison probe pinned the trust model
+  in README (cache is trusted derived data; secrets/redaction
+  always run on final text). Round 2 — no defects (hash-seed
+  determinism, bundle-diff zero-change, precise incrementality
+  all probed); improvements were ms-precision timing output and
+  the checked-in BENCHMARKS.md. Round 2's verification tail
+  caught a real one in round 1's own fix (F6): the stale-temp
+  sweep walked the cache tree per store, making cold fills
+  quadratic (fill 14.8s CPU under load -> 3.1s after throttling
+  the sweep to every 512 stores); the suite's speedup test now
+  times process CPU (paired ~5x) instead of the sandbox's
+  weather-vane wall clock, and the big-tree tests were made
+  disk-lean after /tmp filled to 100% during one loaded run.

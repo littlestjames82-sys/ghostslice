@@ -1284,26 +1284,40 @@ def _render_lite(lines: list[str], symbols: list[Symbol],
     return text + ("\n" if text else "")
 
 
-def slice_with_symbols(path: str, source: str, keep: set[str]) -> str:
+def slice_with_symbols(path: str, source: str, keep: set[str],
+                       cache=None) -> str:
     """Slice `source` to the symbols named by `keep` (qualified names).
 
     Python uses the ast renderer; every other outlined language uses
     the generic line-range renderer over its outline spans. A
     language with no outline returns the source unchanged (callers
     only route outlined files here; this is a defensive default).
+
+    `cache` (v0.20): optional cache.ProjectCache — the rendered text
+    is a pure function of (path, source, keep set), so it is stored
+    under exactly those dimensions (cache.py).
     """
+    if cache is not None:
+        hit = cache.get_symslice(path, source, keep)
+        if hit is not None:
+            return hit
     language = language_for(path)
     if language == "python":
         try:
             ast.parse(source)
         except SyntaxError:
             symbols = _py_fallback_outline(source.splitlines())
-            return _render_lite(source.splitlines(), symbols, keep, language)
-        return _slice_python_symbols(source, keep)
-    symbols = outline_source(source, language, path)
-    if symbols is None:
-        return source
-    return _render_lite(source.splitlines(), symbols, keep, language)
+            text = _render_lite(source.splitlines(), symbols, keep, language)
+        else:
+            text = _slice_python_symbols(source, keep)
+    else:
+        symbols = outline_source(source, language, path)
+        if symbols is None:
+            return source
+        text = _render_lite(source.splitlines(), symbols, keep, language)
+    if cache is not None:
+        cache.put_symslice(path, source, keep, text)
+    return text
 
 
 # ---------------------------------------------------------------------------
@@ -1391,7 +1405,8 @@ def _split_file_scope(entry: str, paths: set[str]) -> tuple[str | None, str]:
     return None, entry
 
 
-def resolve_symbol_selection(scan_result, symbols, sources: dict[str, str]):
+def resolve_symbol_selection(scan_result, symbols, sources: dict[str, str],
+                             cache=None):
     """Resolve spec entries against every scanned file's outline.
 
     `sources` maps path -> source text for the scan's files. Returns
@@ -1402,6 +1417,10 @@ def resolve_symbol_selection(scan_result, symbols, sources: dict[str, str]):
       outlines:   {path: [Symbol]} for files that have one
 
     Raises UnknownSymbolError when any entry matches nothing.
+
+    `cache` (v0.20): optional cache.ProjectCache for the per-file
+    outlines — an outline is a pure function of (path, source), so
+    hits rebuild the same Symbol rows from the stored dicts.
     """
     specs = parse_symbol_specs(symbols)
     if not specs:
@@ -1409,8 +1428,21 @@ def resolve_symbol_selection(scan_result, symbols, sources: dict[str, str]):
     paths = {e.path for e in scan_result.files}
     outlines: dict[str, list[Symbol]] = {}
     for entry in scan_result.files:
-        syms = outline_source(sources.get(entry.path, ""), entry.language,
-                              entry.path)
+        source = sources.get(entry.path, "")
+        syms = None
+        if cache is not None:
+            rows = cache.get_outline(entry.path, source)
+            if rows is not None:
+                try:
+                    syms = [Symbol(**row) for row in rows]
+                except TypeError:
+                    syms = None  # shape drift: recompute below
+        if syms is None:
+            syms = outline_source(source, entry.language, entry.path)
+            if cache is not None and syms is not None:
+                from dataclasses import asdict
+                cache.put_outline(entry.path, source,
+                                   [asdict(s) for s in syms])
         if syms is not None:
             outlines[entry.path] = syms
     known: set[str] = set()

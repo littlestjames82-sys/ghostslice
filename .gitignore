@@ -6,3 +6,4 @@ dist/
 *.egg-info/
 src/*.egg-info/
 .claude_context/
+.ghostslice-cache/

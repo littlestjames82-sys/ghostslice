@@ -15,6 +15,9 @@ DEFAULT_IGNORE_DIRS = {
     "__pycache__", ".venv", "venv", "env", ".tox", ".mypy_cache",
     ".pytest_cache", ".next", ".nuxt", "coverage", ".cache", "target",
     ".idea", ".vscode", ".ghostslice_bundle", ".claude_context",
+    # v0.20: the content cache is derived data — never scanned,
+    # exported, or watched (cache.py).
+    ".ghostslice-cache",
 }
 
 BINARY_EXTS = {
@@ -257,7 +260,7 @@ DEFAULT_IGNORE_FILES = {".ghostslice-history.jsonl"}
 # callable takes a posix rel path and returns True to exclude the file.
 # Kept as a plain callable to avoid an import cycle with profile.py.
 
-def scan(root: str | Path, ignore_matcher=None) -> ScanResult:
+def scan(root: str | Path, ignore_matcher=None, cache=None) -> ScanResult:
     root = Path(root).expanduser().resolve()
     if not root.exists():
         raise FileNotFoundError(str(root))
@@ -265,7 +268,7 @@ def scan(root: str | Path, ignore_matcher=None) -> ScanResult:
     if root.is_file():
         candidates = [(root, root.name)]
         for abspath, rel in candidates:
-            _add_file(result, abspath, rel)
+            _add_file(result, abspath, rel, cache=cache)
         return result
 
     # v0.13: detect the package layout ONCE for the whole walk;
@@ -301,13 +304,14 @@ def scan(root: str | Path, ignore_matcher=None) -> ScanResult:
                 continue
             if ignore_matcher and ignore_matcher(rel_posix):
                 continue
-            _add_file(result, abspath, rel_posix, package=package_for(rel_posix))
+            _add_file(result, abspath, rel_posix, package=package_for(rel_posix),
+                      cache=cache)
     result.files.sort(key=lambda f: f.tokens, reverse=True)
     return result
 
 
 def _add_file(result: ScanResult, abspath: Path, rel_posix: str,
-              package: str = "") -> None:
+              package: str = "", cache=None) -> None:
     suffix = abspath.suffix.lower()
     if suffix in BINARY_EXTS:
         return
@@ -323,12 +327,35 @@ def _add_file(result: ScanResult, abspath: Path, rel_posix: str,
             data.decode("utf-8")
         except UnicodeDecodeError:
             return
-    text = data.decode("utf-8", errors="replace")
     lang = language_for(rel_posix)
+    if cache is not None:
+        # v0.20: the derivation below (decode, line count, token
+        # estimate, detection) is a pure function of (path, bytes);
+        # a content-keyed hit reproduces it exactly (cache.py).
+        hit = cache.get_scan(rel_posix, data)
+        if hit is not None:
+            evidence = hit["evidence"]
+            result.files.append(FileEntry(
+                path=rel_posix,
+                abspath=str(abspath),
+                size=len(data),
+                lines=hit["lines"],
+                tokens=hit["tokens"],
+                language=lang,
+                is_test=is_test_file(rel_posix),
+                is_lockfile=is_lockfile(rel_posix),
+                is_generated="generated" in evidence,
+                is_minified="minified" in evidence,
+                is_vendored="vendored" in evidence,
+                detect_evidence=evidence,
+                package=package,
+            ))
+            return
+    text = data.decode("utf-8", errors="replace")
     # Detection reuses this read: head for markers/banners/path, the
     # full text for the minified verdict (audit G07 F1). No re-read.
     evidence = detect_all(rel_posix, lang, head_of(text), text=text)
-    result.files.append(FileEntry(
+    entry = FileEntry(
         path=rel_posix,
         abspath=str(abspath),
         size=len(data),
@@ -342,4 +369,8 @@ def _add_file(result: ScanResult, abspath: Path, rel_posix: str,
         is_vendored="vendored" in evidence,
         detect_evidence=evidence,
         package=package,
-    ))
+    )
+    result.files.append(entry)
+    if cache is not None:
+        cache.put_scan(rel_posix, data, tokens=entry.tokens,
+                       lines=entry.lines, evidence=evidence)
