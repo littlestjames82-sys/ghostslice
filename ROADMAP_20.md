@@ -29,7 +29,7 @@ Baseline: v0.5.0, 149 tests passed.
 | G11 | New bundle formats: Anthropic-style XML bundle + JSON bundle presets | v0.16.0 | done |
 | G12 | Redact-in-place export: --redact-secrets replaces secret values with placeholders instead of excluding files | v0.17.0 | done |
 | G13 | Symbol-level slicing: keep named symbols + their in-file dependencies (Python ast, TS lite) | v0.18.0 | done |
-| G14 | Python call graph: function-level graph, entry-point reachability, dead-function candidates | v0.19.0 | pending |
+| G14 | Python call graph: function-level graph, entry-point reachability, dead-function candidates | v0.19.0 | done |
 | G15 | Performance: scan caching (.ghostslice-cache), parallel scan, benchmark proof, identical totals | v0.20.0 | pending |
 | G16 | Fuzz/robustness: malformed-input fuzzing for every slicer + encoding handling (BOM, UTF-16, latin-1) | v0.21.0 | pending |
 | G17 | Dashboard v2: side-by-side slice preview (original vs slice, per Ryan's mockups, Oct 13) with diff highlighting + budget slider with live auto-fit preview | v0.22.0 | pending |
@@ -365,3 +365,31 @@ the audit findings that drove the two improvement rounds.
   properties and PHP fields were missing from outlines though
   signatures mode keeps them and task selection counts them;
   they are outline symbols now (verbatim data context).
+- G14 (v0.19.0) DONE Oct 13, 2026: Python call graph shipped —
+  new callgraph.py (AST edges between symslice symbols, labelled
+  exact / heuristic / attribute; references count as calls do;
+  class instantiation edges to __init__) behind `ghostslice
+  calls [file] [--json] [--dead]`, with dead-function candidates
+  merged as kind "dead-symbol" into the scan/graph prune
+  recommendations at the CLI surface only (the shared
+  recommendations function and lint are unchanged). Roots:
+  module top levels, profile entry points (full trust) vs
+  heuristic entry files (only a function named main),
+  [project.scripts], __all__, test files + conftest, framework
+  decorators, and methods of classes extending non-project
+  bases; dunders, unparseable files, and direct self-recursion
+  exempt; getattr-style dispatch flagged by design under the
+  honesty line. Self-repo dogfood: 44 candidates at build, 0
+  after the audit fixes — the 44 read as 38 downstream of the
+  missing __init__ edge, the http.server Handler family, and
+  three test-only-called public helpers (one, a private helper
+  unused in src since G2, a true positive whose unit test is
+  its caller). Tests 555 -> 590 (35 new). Audit rounds
+  (audits/G14_audit.md): round 1 headline fixes — instantiation
+  never reached __init__ (whole subtrees flagged), framework
+  protocol subclasses flagged, heuristic entry files rooted
+  everything in them (app.py!), src-layout absolute imports
+  unresolved, and the unresolved counter drowned in stdlib
+  method calls. Round 2 headline fix — template-method
+  overrides flagged because self. calls resolved exact-only;
+  self./cls. calls now fan out to subclass overrides.

@@ -494,7 +494,47 @@ with no entry points known, imported by nothing). Candidates carry their
 token cost so you can see the saving before you act. They are
 recommendations to review, never automatic deletions: dynamic imports,
 framework wiring, and config-referenced entry files can look dead when
-they are not.
+they are not. Since v0.19 the scan/graph recommendation lists also
+include dead *symbols* (kind `dead-symbol`) from the call graph below.
+
+### Call graph + dead functions (v0.19)
+
+```bash
+ghostslice calls ~/my-project                    # most-called symbols (fan-in)
+ghostslice calls ~/my-project src/auth.py        # callers/callees per symbol in one file
+ghostslice calls ~/my-project --dead             # dead-function candidates
+ghostslice calls ~/my-project --json             # full payload: symbols, edges, dead, counts
+```
+
+For Python files, GhostSlice builds a symbol-level call graph with the
+real `ast`. Every resolved edge is labelled: **exact** (same file,
+`self.` or a resolved project base class, or import evidence — aliases
+and `module.func()` included), **heuristic** (a bare name matched in
+another module with no import evidence), or **attribute**
+(`anything.name(...)` fans out to every project method of that name —
+deliberately conservative, and `self.`/`cls.` calls also fan out to
+subclass overrides, since that is where dispatch can land). References
+count as well as calls: a function passed as a callback, stored in a
+table, or named in a default is alive. Calling a class counts as
+calling its `__init__`.
+
+Dead candidates are callable symbols no root reaches: roots are module
+top levels, profile-declared entry points (heuristic entry files root
+only a function named `main`), `[project.scripts]` targets, `__all__`
+exports, test files and `conftest.py`, framework-decorated functions
+(route handlers, pytest fixtures), and methods of classes extending a
+non-project base (an `http.server` handler's `do_GET` is invoked by
+the base class, not by your code). Dunders are never candidates, files
+that do not parse are never judged, and a directly self-recursive
+function is alive by rule. Nothing is ever auto-excluded.
+
+The honesty line travels with every candidate — *recommendations to
+review, not instructions: dynamic dispatch, getattr, string
+registries, and framework callbacks can hide real use*. String-based
+dispatch (`getattr(x, "name")`) is invisible by design and such a
+function *will* be flagged; that is the known limit, stated rather
+than hidden. Import resolution follows the import graph's
+root-relative model, plus a unique-suffix fallback for src layouts.
 
 ### Task-focused context (v0.2)
 
@@ -942,6 +982,7 @@ src/ghostslice/
   slicer.py     Python ast slicer + TS/JS parser-lite slicer (+ Go/Rust/Java/C# lite in v0.3, PHP/Ruby/Kotlin/Swift lite in v0.5, C/C++/Scala lite in v0.8)
   configslice.py  structure mode for YAML/TOML/JSON/SQL/shell/PowerShell (v0.9): value rule + scanner backstop
   graph.py      import graph + prune recommendations + git changed-files
+  callgraph.py  python call graph + dead-function candidates (v0.19)
   secrets_scan.py  secret guard: provider token shapes, assignments, entropy (v0.4)
   duplicates.py exact (sha256) + near (line-shingle Jaccard) duplicates (v0.4)
   detect.py     generated/minified/vendored detection: header markers, estimator line shape, vendor paths/banners (v0.12)

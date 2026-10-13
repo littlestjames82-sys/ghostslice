@@ -3,6 +3,41 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [0.19.0] - 2026-10-13
+### Added
+- Python call graph (G14): new module `callgraph.py` and a
+  `ghostslice calls <project> [file] [--json] [--dead]` command.
+  Per Python file, `ast` call edges between project symbols
+  (symbols from the same outline `ghostslice symbols` prints),
+  each labelled exact (same file, `self.`/resolved project base,
+  import evidence incl. aliases and `module.func()`), heuristic
+  (bare name matched across modules without import evidence), or
+  attribute (`anything.name(...)` fans out to every project
+  method of that name; `self.`/`cls.` calls also fan out to
+  subclass overrides). References count as well as calls
+  (callbacks, tables, defaults, bases, decorators). Calling a
+  class counts as calling its `__init__`. The listing shows
+  per-symbol callers/callees for one file and a fan-in ranking
+  overall; unresolved/external call sites are counted, not
+  hidden.
+- Dead-function candidates: callable symbols unreachable from
+  the root set (module top levels; profile-declared entry
+  points at full trust, heuristic entry files rooting only a
+  function named `main`; `[project.scripts]` targets; `__all__`
+  exports; test files and `conftest.py`; framework-decorated
+  functions; methods of classes extending a non-project base),
+  with dunders, unparseable files, and directly self-recursive
+  functions exempt. Candidates surface in `calls --dead` and,
+  as kind `dead-symbol`, in the `scan`/`graph` prune
+  recommendations (the shared recommendations function — and
+  lint, which consumes it — is unchanged). Every candidate
+  carries the honesty line: recommendations to review, not
+  instructions; string-based dispatch (`getattr`) is invisible
+  by design and will be flagged. Nothing is auto-excluded.
+- Import resolution for the call graph reuses graph.py's
+  module mapping, plus a unique-suffix fallback so src-layout
+  projects (`src/pkg/...` imported as `pkg...`) resolve.
+
 ## [0.18.0] - 2026-10-13
 ### Added
 - Symbol-level slicing (G13): new module `symslice.py` with symbol

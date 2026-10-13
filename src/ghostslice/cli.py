@@ -7,6 +7,7 @@ Commands:
   ghostslice task         <path> (--task "words" | --diff) [--budget N] [--fit N] -o <bundle> [--preset P]
   ghostslice export       <path> -o <bundle> [--mode MODE] [--model ID] [--preset P] [--fit N] [--exclude-secrets] [--redact] [--auto-shrink] [--symbols SPEC]
   ghostslice symbols      <path> [file] [--json]
+  ghostslice calls        <path> [file] [--json] [--dead]
   ghostslice watch        <path> [--export] [-o <bundle>] [--interval S] [--debounce S] [--once] [--max-events N] [--fit N] [--redact] [--auto-shrink]
   ghostslice check-budget <path> [--max-tokens N]
   ghostslice lint         <path> [--json] [--strict]
@@ -157,6 +158,24 @@ def _scan_with_profile(path, profile):
     return scan(path, ignore_matcher=matcher)
 
 
+def _with_dead_symbol_recs(result, graph, profile, recs):
+    """Append v0.19 dead-symbol candidates to a recommendation list
+    (the `scan` / `graph` surfaces). graph.recommendations itself is
+    unchanged — lint consumes it and gains nothing this round. A
+    call-graph failure must never break a scan, so this is guarded
+    the same way graph.recommendations guards its duplicate pass."""
+    try:
+        from .callgraph import dead_symbol_recommendations
+        extra = dead_symbol_recommendations(result, profile, graph)
+    except Exception:
+        return recs
+    if not extra:
+        return recs
+    merged = list(recs) + extra
+    merged.sort(key=lambda r: r["tokens"], reverse=True)
+    return merged
+
+
 def _warn_secrets(findings, heading="WARNING: possible secrets detected") -> None:
     if not findings:
         return
@@ -247,6 +266,71 @@ def _print_scan(result, model=None, prices=None, recs=None, secrets=None, dups=N
         print("  Recommendations to review, not instructions: dynamic imports can hide real use.")
 
 
+def _print_calls(payload, single=None, dead=False) -> None:
+    c = payload["counts"]
+    print(f"Call graph for {payload['root']} (Python only; "
+          "token counts are estimates)")
+    print(f"Symbols: {c['symbols']} in {c['files']} python file(s); "
+          f"call sites: {c['calls']} "
+          f"(exact {c['exact']}, heuristic {c['heuristic']}, "
+          f"attribute {c['attribute']}, external {c['external']}, "
+          f"unresolved {c['unresolved']}); "
+          f"references: {c['references']}")
+    if payload["skipped_files"]:
+        print(f"Skipped (unparseable, no verdict): "
+              f"{', '.join(payload['skipped_files'])}")
+    symbols = payload["symbols"]
+    if single:
+        by_id = {s["id"]: s for s in symbols}
+        callers: dict[str, list] = {}
+        callees: dict[str, list] = {}
+        for e in payload["edges"]:
+            if e["kind"] == "reference":
+                continue
+            callees.setdefault(e["caller"], []).append(e)
+            callers.setdefault(e["callee"], []).append(e)
+        rows = [s for s in symbols if s["path"] == single]
+        if not rows:
+            print(f"{single}: no python symbols")
+        for s in rows:
+            print(f"\n{s['qualified']} ({s['kind']}, "
+                  f"lines {s['start_line']}-{s['end_line']}, "
+                  f"~{s['tokens']:,} tokens, fan-in {s['fan_in']}, "
+                  f"references {s['references']})")
+            for e in sorted(callees.get(s["id"], []),
+                            key=lambda e: e["callee"]):
+                callee = by_id.get(e["callee"])
+                label = callee["id"] if callee else e["callee"]
+                print(f"  calls [{e['kind']}] {label} (x{e['sites']})")
+            for e in sorted(callers.get(s["id"], []),
+                            key=lambda e: e["caller"]):
+                print(f"  called by [{e['kind']}] {e['caller']} "
+                      f"(x{e['sites']})")
+    elif not dead:
+        ranked = sorted((s for s in symbols if s["fan_in"]),
+                        key=lambda s: (-s["fan_in"], s["id"]))
+        if ranked:
+            print("\nMost-called symbols (fan-in):")
+            for s in ranked[:15]:
+                print(f"  {s['fan_in']:>4}  {s['id']} ({s['kind']})")
+    if dead or not single:
+        dead_rows = payload["dead"]
+        if single:
+            dead_rows = [d for d in dead_rows if d["path"] == single]
+        if dead:
+            print(f"\nDead-function candidates ({len(dead_rows)}):")
+            for d in dead_rows:
+                print(f"  {d['path']}:{d['start_line']}-{d['end_line']}  "
+                      f"{d['qualified']} ({d['kind']}, "
+                      f"~{d['tokens']:,} estimated tokens)")
+            total = sum(d["tokens"] for d in dead_rows)
+            print(f"Total: ~{total:,} estimated tokens. "
+                  f"{payload['note']}.")
+        elif dead_rows:
+            print(f"\n{len(dead_rows)} dead-function candidate(s); "
+                  "run with --dead to list them.")
+
+
 def _print_lint(payload) -> None:
     findings = payload["findings"]
     print(f"Lint: {payload['root']} (token counts are estimates)")
@@ -334,6 +418,14 @@ def main(argv: list[str] | None = None) -> int:
     p_symbols.add_argument("file", nargs="?", default=None,
                            help="optional single file, relative to the project root")
     p_symbols.add_argument("--json", action="store_true")
+
+    p_calls = sub.add_parser("calls", help="python call graph: who calls what, most-called symbols, dead-function candidates")
+    p_calls.add_argument("path")
+    p_calls.add_argument("file", nargs="?", default=None,
+                         help="optional single file, relative to the project root: show callers/callees per symbol")
+    p_calls.add_argument("--json", action="store_true")
+    p_calls.add_argument("--dead", action="store_true",
+                         help="list dead-function candidates (symbols no caller or reference reaches)")
 
     p_diff = sub.add_parser("diff", help="diff two bundles: mode changes, token deltas, added/removed files")
     p_diff.add_argument("bundle_a")
@@ -650,7 +742,8 @@ def main(argv: list[str] | None = None) -> int:
         from .duplicates import find_duplicates
         result = _scan_with_profile(args.path, profile)
         graph = build_graph(result)
-        recs = recommendations(result, graph, profile)
+        recs = _with_dead_symbol_recs(result, graph, profile,
+                                      recommendations(result, graph, profile))
         findings = scan_scan_result(result)
         dups = find_duplicates(result)
         if args.json:
@@ -675,7 +768,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "graph":
         result = _scan_with_profile(args.path, profile)
         graph = build_graph(result)
-        recs = recommendations(result, graph, profile)
+        recs = _with_dead_symbol_recs(result, graph, profile,
+                                      recommendations(result, graph, profile))
         if args.json:
             from .duplicates import find_duplicates
             print(json.dumps({
@@ -805,6 +899,38 @@ def main(argv: list[str] | None = None) -> int:
         if no_outline and not single:
             print(f"{len(no_outline)} file(s) have no symbol outline "
                   "(notebook, markdown, config/data, or plain text).")
+        return 0
+
+    if args.cmd == "calls":
+        from .callgraph import build_call_graph
+        try:
+            result = _scan_with_profile(args.path, profile)
+        except FileNotFoundError:
+            print(f"calls: no such project: {args.path}", file=sys.stderr)
+            return 2
+        graph = build_graph(result)
+        payload = build_call_graph(result, profile, graph)
+        single = None
+        if args.file:
+            single = args.file.replace("\\", "/").lstrip("./")
+            if single not in {e.path for e in result.files}:
+                print(f"calls: {single}: not in the scan", file=sys.stderr)
+                return 2
+        if args.json:
+            if single:
+                payload = dict(payload)
+                payload["symbols"] = [s for s in payload["symbols"]
+                                       if s["path"] == single]
+                keep = {s["id"] for s in payload["symbols"]}
+                payload["edges"] = [e for e in payload["edges"]
+                                     if e["caller"] in keep
+                                     or e["callee"] in keep
+                                     or e["caller"] == f"{single}:<module>"]
+                payload["dead"] = [d for d in payload["dead"]
+                                    if d["path"] == single]
+            print(json.dumps(payload, indent=2))
+            return 0
+        _print_calls(payload, single=single, dead=args.dead)
         return 0
 
     if args.cmd == "task":
