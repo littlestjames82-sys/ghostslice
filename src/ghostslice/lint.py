@@ -43,6 +43,7 @@ from .scanner import scan
 from .secrets_scan import scan_scan_result
 from .slicer import slice_text
 from .tokens import METHOD
+from .textio import read_text as _gs_read_text
 
 _SEV_RANK = {"error": 0, "warn": 1, "info": 2}
 
@@ -91,8 +92,7 @@ class _Ctx:
     def text(self, entry) -> str:
         if entry.path not in self._texts:
             try:
-                self._texts[entry.path] = Path(entry.abspath).read_text(
-                    encoding="utf-8", errors="replace")
+                self._texts[entry.path] = _gs_read_text(entry.abspath)
             except OSError:
                 self._texts[entry.path] = ""
         return self._texts[entry.path]

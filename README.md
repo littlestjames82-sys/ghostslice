@@ -1012,6 +1012,56 @@ include/exclude just like the list. The list stays the default view.
   Secret guard above): it favours not flagging placeholders over
   catching every possible secret shape.
 
+## Encodings, malformed input, and limits
+
+Since v0.21 every surface decodes source files through one shared
+helper (`src/ghostslice/textio.py`), so a file means the same text
+to the scanner, the slicers, and the exporter:
+
+- **BOMs are honoured.** UTF-8, UTF-16 (LE/BE), and UTF-32 (LE/BE)
+  byte-order marks are sniffed and decoded with the matching codec.
+  Token counts and line counts are computed on the decoded text,
+  and slicers see the real source (a UTF-16 file used to be skipped
+  as "binary"; a UTF-8 BOM used to cost a phantom token and break
+  Python parsing). Wide encodings are detected by BOM only — a
+  BOM-less UTF-16 file is indistinguishable from binary data and
+  is still skipped.
+- **Bytes that are not valid UTF-8 decode as Latin-1** (every byte
+  maps to a codepoint, so nothing is lost) instead of being mangled
+  into U+FFFD replacement characters. The scanner records the
+  source encoding per file, and bundle manifests carry
+  `source_encoding` for any file that was not plain UTF-8. Bundles
+  always ship the decoded text as UTF-8: a bundle is a normalized
+  view, never a byte copy. (One format exception: `context.xml`
+  content additionally passes through XML's own rules — characters
+  XML cannot represent become U+FFFD there, and XML parsers
+  normalize CR/CRLF line endings to LF when reading; `files/`
+  always keeps the canonical slice bytes.)
+- **Line endings are split with `splitlines()` semantics**: LF,
+  CRLF, and CR-only files all slice and count lines correctly.
+- **Malformed input degrades, never tracebacks.** A seeded fuzz
+  corpus (`tests/fuzz_harness.py`, driven by
+  `tests/test_v21_fuzz.py`) mutates real fixtures — truncations,
+  bit flips, NUL and invalid-UTF-8 injection, BOM/EOL shuffles,
+  unbalanced braces — plus malformed profiles, manifests, and
+  ledgers, and drives every command over it. Broken profiles are
+  exit 2 with the field named; broken bundles fail `check` with
+  errors listed (validation reports, it does not raise); broken
+  Python/JSON degrades to the line fallback / full text; a missing
+  project or unknown `--model` is a clean exit 2 everywhere.
+- **Limits.** There is no hard file-size cap: files are read fully
+  into memory and processed at a measured ~0.4-0.8 s per MB in the
+  parser-lite modes on modest hardware (linear, no pathological
+  blowups — the fuzz suite pins a scaling bound), so a 50 MB
+  source file costs tens of seconds, not a hang. Nesting depth is
+  bounded by Python's recursion limit: deeper Python/JSON degrades
+  to the fallback/full rendering (JSON structure shaping also
+  placeholders beyond depth 100). Non-regular files (FIFOs,
+  sockets, devices) are skipped by the scanner — opening a FIFO
+  would block forever. Pathological inputs are a documented
+  degrade, never a crash: if you find one that tracebacks, that is
+  a bug — the fuzz corpus is the regression net.
+
 ## Tests
 
 ```bash

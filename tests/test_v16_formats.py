@@ -214,15 +214,19 @@ class TestJsonPreset(Fixture):
 
     def test_invalid_utf8_source_file(self):
         # Invalid UTF-8 bytes in a source file must not explode the
-        # JSON writer: read errors="replace" turns them into U+FFFD
-        # long before json.dumps sees the text.
+        # JSON writer. v0.21 (G16): the shared decode (textio) turns
+        # non-UTF-8 bytes into Latin-1 codepoints — lossless, and
+        # labelled in the manifest — instead of U+FFFD replacement;
+        # the round-trip and validation invariants are unchanged.
         (self.root / "bad.txt").write_bytes(b"caf\xe9 \xff\xfe bytes\n")
         manifest, out = self.build("json", "bad-bundle")
         payload = json.loads((out / "context.json").read_text(encoding="utf-8"))
         rec = {f["path"]: f for f in payload["files"]}["bad.txt"]
         disk = (out / "files" / "bad.txt").read_text(encoding="utf-8")
         self.assertEqual(rec["content"], disk)
-        self.assertIn("\uFFFD", rec["content"])
+        self.assertEqual(rec["content"], "café ÿþ bytes\n")
+        by_path = {f["path"]: f for f in manifest["files"]}
+        self.assertEqual(by_path["bad.txt"]["source_encoding"], "latin-1")
         self.assertTrue(validate_bundle(out)["ok"], validate_bundle(out))
 
     def test_validate_ok(self):

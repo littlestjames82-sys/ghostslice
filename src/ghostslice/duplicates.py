@@ -12,6 +12,7 @@ flagging every tiny boilerplate file), and pairs at similarity
 are not repeated in the near list.
 """
 from __future__ import annotations
+from .textio import read_text as _gs_read_text
 
 import hashlib
 from pathlib import Path
@@ -39,7 +40,7 @@ def find_duplicates(scan_result) -> dict:
     texts: dict[str, str] = {}
     for entry in scan_result.files:
         try:
-            raw = Path(entry.abspath).read_text(encoding="utf-8", errors="replace")
+            raw = _gs_read_text(entry.abspath)
         except OSError:
             continue
         texts[entry.path] = normalize(raw)

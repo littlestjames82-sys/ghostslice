@@ -27,6 +27,7 @@ from .profile import PRESETS, load_profile
 from .scanner import scan
 from .slicer import MODES, slice_text
 from .tokens import METHOD as TOKEN_METHOD
+from .textio import read_text as _gs_read_text
 
 PROTOCOL_VERSION = "2024-11-05"
 
@@ -136,7 +137,7 @@ def _slice_file(args: dict) -> dict:
     file_arg = Path(args["file"])
     abspath = file_arg if file_arg.is_absolute() else root / file_arg
     rel = str(abspath.relative_to(root)) if abspath.is_relative_to(root) else abspath.name
-    source = abspath.read_text(encoding="utf-8", errors="replace")
+    source = _gs_read_text(abspath)
     return slice_text(rel, source, args.get("mode", "signatures")).to_dict()
 
 
@@ -207,7 +208,11 @@ _DISPATCH = {
 
 def handle_message(msg: dict) -> dict | None:
     """Pure JSON-RPC handler (testable without stdio)."""
-    method = msg.get("method", "")
+    if not isinstance(msg, dict):
+        return None  # v0.21: non-object JSON is not a request
+    method = msg.get("method") or ""
+    if not isinstance(method, str):
+        method = ""
     msg_id = msg.get("id")
     if method.startswith("notifications/"):
         return None
@@ -223,7 +228,11 @@ def handle_message(msg: dict) -> dict | None:
         result = {"tools": TOOLS}
     elif method == "tools/call":
         params = msg.get("params") or {}
+        if not isinstance(params, dict):
+            params = {}
         name = params.get("name", "")
+        if not isinstance(name, str):
+            name = ""
         fn = _DISPATCH.get(name)
         if fn is None:
             return {"jsonrpc": "2.0", "id": msg_id,
@@ -256,6 +265,8 @@ def run_stdio(instream=None, outstream=None) -> None:
             msg = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if not isinstance(msg, dict):
+            continue  # v0.21: a JSON scalar/array line is not a request
         resp = handle_message(msg)
         if resp is not None:
             outstream.write(json.dumps(resp) + "\n")

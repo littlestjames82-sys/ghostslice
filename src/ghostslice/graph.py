@@ -18,6 +18,7 @@ Every candidate is a *recommendation to review*, not an instruction:
 dynamic imports and reflection can make a file look dead when it is not.
 """
 from __future__ import annotations
+from .textio import read_text as _gs_read_text
 
 import ast
 import re
@@ -46,7 +47,7 @@ def _py_imports(source: str, rel: str, root_files: set[str]) -> tuple[list[str],
     external: list[str] = []
     try:
         tree = ast.parse(source)
-    except SyntaxError:
+    except Exception:
         return edges, external
     current_dir = PurePosixPath(rel).parent  # '.' for root files
     for node in ast.walk(tree):
@@ -141,7 +142,7 @@ def build_graph(scan_result) -> dict:
         external: list[str] = []
         if entry.language in ("python", "typescript", "javascript"):
             try:
-                source = Path(entry.abspath).read_text(encoding="utf-8", errors="replace")
+                source = _gs_read_text(entry.abspath)
             except OSError:
                 source = ""
             if entry.language == "python":

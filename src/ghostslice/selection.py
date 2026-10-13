@@ -59,6 +59,7 @@ from .exporter import SLICABLE, default_mode_for
 from .graph import build_graph, changed_files, importers_of
 from .scanner import scan
 from .slicer import _py_fallback_defs, slice_source, slice_text
+from .textio import read_text as _gs_read_text
 
 _WORD_RE = re.compile(r"[a-z0-9_]+")
 _TF_CAP = 20
@@ -310,7 +311,7 @@ def _sliced_tokens(entry, mode: str, cache: dict) -> int:
         elif mode == "exclude":
             cache[key] = 0
         else:
-            source = Path(entry.abspath).read_text(encoding="utf-8", errors="replace")
+            source = _gs_read_text(entry.abspath)
             cache[key] = slice_text(entry.path, source, mode).sliced_tokens
     return cache[key]
 
@@ -345,7 +346,7 @@ def _select_for_task_impl(root, task: str, budget: int | None = None, profile=No
     doc_freq: Counter = Counter()
     for entry in entries:
         try:
-            content = Path(entry.abspath).read_text(encoding="utf-8", errors="replace")
+            content = _gs_read_text(entry.abspath)
         except OSError:
             content = ""
         raw[entry.path] = content

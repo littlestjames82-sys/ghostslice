@@ -22,6 +22,7 @@ False-positive care: empty values, placeholders (``example``,
 full of ``*``) are not flagged.
 """
 from __future__ import annotations
+from .textio import read_text as _gs_read_text
 
 import hashlib
 import math
@@ -409,7 +410,7 @@ def scan_scan_result(scan_result) -> list[dict]:
     out: list[dict] = []
     for entry in scan_result.files:
         try:
-            text = Path(entry.abspath).read_text(encoding="utf-8", errors="replace")
+            text = _gs_read_text(entry.abspath)
         except OSError:
             continue
         out.extend(scan_text(entry.path, text))

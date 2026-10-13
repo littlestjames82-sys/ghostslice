@@ -42,6 +42,7 @@ from pathlib import Path
 
 from .exporter import build_bundle, validate_bundle
 from .profile import Profile
+from .textio import read_text as _gs_read_text
 from .scanner import DEFAULT_IGNORE_DIRS, ScanResult, scan
 
 LEDGER_NAME = ".ghostslice-history.jsonl"
@@ -265,7 +266,7 @@ def run_watch(root: str | Path,
                 if entry is None:
                     continue
                 try:
-                    text = Path(entry.abspath).read_text(encoding="utf-8", errors="replace")
+                    text = _gs_read_text(entry.abspath)
                 except OSError:
                     continue
                 findings.extend(scan_text(p, text))

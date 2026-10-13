@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import stat
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from .detect import detect_all, head_of
+from .textio import UTF16_32_LABELS, decode_bytes
 from .tokens import estimate_tokens
 from .workspaces import WorkspaceInfo, detect_workspaces, summarize_packages
 
@@ -207,6 +209,10 @@ class FileEntry:
     # v0.13: owning package (workspaces.py): posix rel path of the
     # package root, "" for the root package / unpackaged root files.
     package: str = ""
+    # v0.21: source encoding label (textio.decode_bytes): "utf-8"
+    # unless a BOM or the Latin-1 fallback said otherwise. Token and
+    # line counts are computed on the DECODED text.
+    encoding: str = "utf-8"
 
     def to_dict(self):
         return asdict(self)
@@ -264,6 +270,10 @@ def scan(root: str | Path, ignore_matcher=None, cache=None) -> ScanResult:
     root = Path(root).expanduser().resolve()
     if not root.exists():
         raise FileNotFoundError(str(root))
+    if root.is_dir() and not os.access(root, os.R_OK | os.X_OK):
+        # os.walk would silently yield nothing for an unreadable
+        # root; an explicit error beats an empty "0 files" scan.
+        raise PermissionError(str(root))
     result = ScanResult(root=str(root))
     if root.is_file():
         candidates = [(root, root.name)]
@@ -316,16 +326,32 @@ def _add_file(result: ScanResult, abspath: Path, rel_posix: str,
     if suffix in BINARY_EXTS:
         return
     try:
+        info = abspath.stat()
+    except OSError:
+        return
+    if not stat.S_ISREG(info.st_mode):
+        # v0.21: FIFOs, sockets and device files are not source
+        # text — and opening a FIFO blocks until a writer appears,
+        # so merely scanning a tree containing one hung forever
+        # (G16 fuzz find). Regular files only.
+        return
+    try:
         data = abspath.read_bytes()
     except OSError:
         return
-    if _looks_binary(data):
+    # v0.21: decode once, centrally (textio). A UTF-16/32 BOM marks
+    # the file as text even though its raw bytes are full of NULs —
+    # the binary test below only applies to un-BOM'd bytes.
+    text, encoding = decode_bytes(data)
+    wide = encoding in UTF16_32_LABELS
+    if not wide and _looks_binary(data):
         return
     if suffix not in TEXT_EXTS and suffix != "":
-        # Unknown extension: skip unless it decodes cleanly and is smallish.
-        try:
-            data.decode("utf-8")
-        except UnicodeDecodeError:
+        # Unknown extension: skip unless it decodes cleanly as the
+        # UTF-8 family or carries a wide BOM. A "latin-1" verdict
+        # means the bytes were NOT valid UTF-8, which is exactly
+        # what this gate has always rejected.
+        if encoding == "latin-1":
             return
     lang = language_for(rel_posix)
     if cache is not None:
@@ -349,9 +375,9 @@ def _add_file(result: ScanResult, abspath: Path, rel_posix: str,
                 is_vendored="vendored" in evidence,
                 detect_evidence=evidence,
                 package=package,
+                encoding=hit["encoding"],
             ))
             return
-    text = data.decode("utf-8", errors="replace")
     # Detection reuses this read: head for markers/banners/path, the
     # full text for the minified verdict (audit G07 F1). No re-read.
     evidence = detect_all(rel_posix, lang, head_of(text), text=text)
@@ -359,7 +385,8 @@ def _add_file(result: ScanResult, abspath: Path, rel_posix: str,
         path=rel_posix,
         abspath=str(abspath),
         size=len(data),
-        lines=text.count("\n") + (1 if text and not text.endswith("\n") else 0),
+        # v0.21: splitlines semantics — a CR-only file is not 1 line.
+        lines=len(text.splitlines()),
         tokens=estimate_tokens(text, lang),
         language=lang,
         is_test=is_test_file(rel_posix),
@@ -369,8 +396,10 @@ def _add_file(result: ScanResult, abspath: Path, rel_posix: str,
         is_vendored="vendored" in evidence,
         detect_evidence=evidence,
         package=package,
+        encoding=encoding,
     )
     result.files.append(entry)
     if cache is not None:
         cache.put_scan(rel_posix, data, tokens=entry.tokens,
-                       lines=entry.lines, evidence=evidence)
+                       lines=entry.lines, evidence=evidence,
+                       encoding=encoding)

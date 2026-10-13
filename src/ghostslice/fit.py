@@ -40,6 +40,7 @@ from pathlib import Path
 
 from .graph import build_graph, find_entry_points, importers_of
 from .slicer import slice_text
+from .textio import read_text as _gs_read_text
 
 _LADDER = ["full", "signatures", "interfaces", "exclude"]
 _RUNG = {"full": 0, "signatures": 1, "interfaces": 2, "strip-tests": 2,
@@ -87,7 +88,7 @@ def fit_modes(scan_result, modes: dict[str, str], fit_tokens: int,
             elif mode == "exclude":
                 token_cache[key] = 0
             else:
-                source = Path(entry.abspath).read_text(encoding="utf-8", errors="replace")
+                source = _gs_read_text(entry.abspath)
                 token_cache[key] = slice_text_fn(entry.path, source, mode).sliced_tokens
         return token_cache[key]
 

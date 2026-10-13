@@ -228,7 +228,9 @@ def _slice_python(source: str, mode: str) -> str:
         return _py_strip_tests(source)
     try:
         tree = ast.parse(source)
-    except SyntaxError:
+    except Exception:
+        # SyntaxError, ValueError (NUL bytes), RecursionError
+        # (pathological nesting): degrade to the line fallback.
         return _py_fallback_defs(source)
     out: list[str] = []
     for node in tree.body:
@@ -262,7 +264,7 @@ def _slice_python(source: str, mode: str) -> str:
 def _py_strip_tests(source: str) -> str:
     try:
         tree = ast.parse(source)
-    except SyntaxError:
+    except Exception:
         return source
     drop: set[int] = set()
 

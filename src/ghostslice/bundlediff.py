@@ -16,7 +16,23 @@ from .exporter import validate_bundle
 
 
 def load_manifest(bundle: str | Path) -> dict:
-    return json.loads((Path(bundle) / "manifest.json").read_text(encoding="utf-8"))
+    """Load a bundle manifest, raising ValueError (never a raw
+    OSError/JSON error) with a clear message — the CLI turns
+    ValueError into exit 1 (v0.21)."""
+    path = Path(bundle) / "manifest.json"
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ValueError(f"{path}: cannot read manifest ({exc})") from exc
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"{path}: manifest is not valid UTF-8 ({exc})") from exc
+    try:
+        data = json.loads(raw)
+    except ValueError as exc:
+        raise ValueError(f"{path}: invalid manifest JSON ({exc})") from exc
+    if not isinstance(data, dict) or not isinstance(data.get("files"), list):
+        raise ValueError(f"{path}: manifest is not an object with a 'files' list")
+    return data
 
 
 def diff_bundles(bundle_a: str | Path, bundle_b: str | Path) -> dict:
@@ -32,8 +48,30 @@ def diff_bundles(bundle_a: str | Path, bundle_b: str | Path) -> dict:
                 f"bundle {label} ({bundle}) failed validation: " + "; ".join(check["errors"]))
     ma = load_manifest(bundle_a)
     mb = load_manifest(bundle_b)
-    fa = {f["path"]: f for f in ma["files"]}
-    fb = {f["path"]: f for f in mb["files"]}
+    # v0.21: normalize entries before indexing — validation has
+    # already judged these bundles, but fields it does not check
+    # (original_tokens, mode on every entry) must not KeyError here.
+    def _entries(manifest: dict) -> dict[str, dict]:
+        out: dict[str, dict] = {}
+        for f in manifest["files"]:
+            if not isinstance(f, dict) or not isinstance(f.get("path"), str):
+                continue
+            out[f["path"]] = {
+                "path": f["path"],
+                "mode": f.get("mode") if isinstance(f.get("mode"), str) else "",
+                "original_tokens": f.get("original_tokens")
+                    if isinstance(f.get("original_tokens"), int) else 0,
+                "sliced_tokens": f.get("sliced_tokens")
+                    if isinstance(f.get("sliced_tokens"), int) else 0,
+            }
+        return out
+
+    def _total(manifest: dict, key: str) -> int:
+        val = manifest.get(key)
+        return val if isinstance(val, int) and not isinstance(val, bool) else 0
+
+    fa = _entries(ma)
+    fb = _entries(mb)
     added = sorted(set(fb) - set(fa))
     removed = sorted(set(fa) - set(fb))
     changed: list[dict] = []
@@ -67,11 +105,11 @@ def diff_bundles(bundle_a: str | Path, bundle_b: str | Path) -> dict:
         "changed": changed,
         "unchanged_count": unchanged,
         "totals": {
-            "original_from": ma["total_original_tokens"],
-            "original_to": mb["total_original_tokens"],
-            "original_delta": mb["total_original_tokens"] - ma["total_original_tokens"],
-            "sliced_from": ma["total_sliced_tokens"],
-            "sliced_to": mb["total_sliced_tokens"],
-            "sliced_delta": mb["total_sliced_tokens"] - ma["total_sliced_tokens"],
+            "original_from": _total(ma, "total_original_tokens"),
+            "original_to": _total(mb, "total_original_tokens"),
+            "original_delta": _total(mb, "total_original_tokens") - _total(ma, "total_original_tokens"),
+            "sliced_from": _total(ma, "total_sliced_tokens"),
+            "sliced_to": _total(mb, "total_sliced_tokens"),
+            "sliced_delta": _total(mb, "total_sliced_tokens") - _total(ma, "total_sliced_tokens"),
         },
     }

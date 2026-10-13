@@ -61,6 +61,7 @@ from .graph import build_graph
 from .profile import PROFILE_NAME, Profile, load_profile
 from .scanner import scan
 from .slicer import slice_text
+from .textio import read_text as _gs_read_text
 
 ENTRY_CAP = 5
 MODE_ENTRY_CAP = 10
@@ -202,7 +203,7 @@ def analyze_project(root, *, budget_override: int | None = None,
         for f in dirs[d]["entries"]:
             if f.language in CONFIG_LANGUAGES:
                 try:
-                    text = Path(f.abspath).read_text(encoding="utf-8", errors="replace")
+                    text = _gs_read_text(f.abspath)
                     saved += f.tokens - slice_text(f.path, text, "structure").sliced_tokens
                 except OSError:
                     continue

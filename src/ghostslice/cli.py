@@ -46,6 +46,7 @@ from .secrets_scan import RedactionError, scan_scan_result, scan_text
 from .selection import select_for_diff, select_for_task, select_for_task_breakdown
 from .configslice import CONFIG_LANGUAGES
 from .slicer import MODES, slice_text
+from .textio import read_text as _gs_read_text
 from .tokens import METHOD as TOKEN_METHOD
 
 
@@ -385,6 +386,34 @@ def _print_lint(payload) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """CLI entry point (v0.21): filesystem-shaped failures — a
+    missing project, an unreadable path, a file where a directory
+    belongs — are user errors with a message and exit 2, never
+    tracebacks. Command handlers keep their more specific messages;
+    this wrapper is the safety net under all of them."""
+    try:
+        return _main_impl(argv)
+    except FileNotFoundError as exc:
+        print(f"ghostslice: no such file or directory: "
+              f"{exc.filename or exc}", file=sys.stderr)
+        return 2
+    except (PermissionError, NotADirectoryError, IsADirectoryError) as exc:
+        print(f"ghostslice: cannot access {exc.filename or exc} "
+              f"({exc.strerror or exc})", file=sys.stderr)
+        return 2
+    except OSError as exc:
+        # Any other environment-shaped failure (an unwritable
+        # bundle dir, a busy port for serve, a full disk): a clean
+        # message beats a traceback. Guard the print itself — the
+        # failure may BE the output stream (broken pipe).
+        try:
+            print(f"ghostslice: {exc}", file=sys.stderr)
+        except OSError:
+            pass
+        return 2
+
+
+def _main_impl(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ghostslice", description="GhostSlice: agent context & prompt optimizer (token counts are estimates)")
     parser.add_argument("--version", action="version", version=f"ghostslice {__version__}")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -589,7 +618,12 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("prices", help="show the local, dated model price table")
 
     args = parser.parse_args(argv)
-    prices = load_prices()
+    try:
+        prices = load_prices()
+    except (ValueError, OSError) as exc:
+        print(f"ghostslice: cannot load the price table: {exc}",
+              file=sys.stderr)
+        return 2
 
     if args.cmd == "prices":
         print(f"Local prices.json (as of {prices.get('as_of')}, not live): {prices.get('_path')}")
@@ -696,13 +730,25 @@ def main(argv: list[str] | None = None) -> int:
     try:
         profile = load_profile(target) if target else load_profile(".")
     except ValueError as exc:
-        if args.cmd == "lint":
-            print(f"lint: invalid profile: {exc}", file=sys.stderr)
-            return 2
-        raise
+        # v0.21: a malformed profile is exit 2 for EVERY command
+        # (previously only lint caught it; the rest trace-backed).
+        print(f"{args.cmd}: invalid profile: {exc}", file=sys.stderr)
+        return 2
 
     if profile.path:
         print(f"Profile: {profile.path}", file=sys.stderr)
+
+    # v0.21: commands that resolve a pricing model validate the id
+    # (from --model or the profile) up front. An unknown id used to
+    # surface as a raw KeyError traceback from pricing.get_model at
+    # different depths per command (scan/task/export/report).
+    if args.cmd in ("scan", "export", "task", "report", "history", "serve"):
+        _valid_ids = {m["id"] for m in models(prices)}
+        for _mid in (getattr(args, "model", None), profile.model):
+            if _mid is not None and _mid not in _valid_ids:
+                print(f"{args.cmd}: unknown model id: {_mid} "
+                      "(see `ghostslice prices`)", file=sys.stderr)
+                return 2
 
     if args.cmd == "lint":
         from .lint import lint_exit_code, lint_project
@@ -797,7 +843,7 @@ def main(argv: list[str] | None = None) -> int:
                     why = f"default: {entry.language} code -> signatures"
                 else:
                     why = "default: non-code file stays full"
-        source = Path(entry.abspath).read_text(encoding="utf-8", errors="replace")
+        source = _gs_read_text(entry.abspath)
         sliced = slice_text(rel, source, mode)
         graph = build_graph(result)
         rev = _imp_of(graph)
@@ -907,7 +953,7 @@ def main(argv: list[str] | None = None) -> int:
         out = Path(args.out)
         out.mkdir(parents=True, exist_ok=True)
         if src.is_file():
-            text = src.read_text(encoding="utf-8", errors="replace")
+            text = _gs_read_text(src)
             r = slice_text(src.name, text, args.mode)
             (out / src.name).write_text(r.text, encoding="utf-8")
             print(f"{src.name}: {r.original_tokens:,} -> {r.sliced_tokens:,} estimated tokens ({args.mode})")
@@ -916,7 +962,7 @@ def main(argv: list[str] | None = None) -> int:
         result = _scan_with_profile(src, profile, cache=_slice_cache)
         before = after = 0
         for entry in result.files:
-            text = Path(entry.abspath).read_text(encoding="utf-8", errors="replace")
+            text = _gs_read_text(entry.abspath)
             mode = args.mode if entry.language in SLICABLE or entry.language == "markdown" \
                 or entry.language in CONFIG_LANGUAGES else "full"
             r = cached_slice_text(_slice_cache, entry.path, text, mode)
@@ -956,8 +1002,7 @@ def main(argv: list[str] | None = None) -> int:
                 files_payload.append({"path": e.path, "language": e.language,
                                       "symbols": None})
                 continue
-            source = Path(e.abspath).read_text(encoding="utf-8",
-                                               errors="replace")
+            source = _gs_read_text(e.abspath)
             found = outline_source(source, e.language, e.path) or []
             lines = source.splitlines()
             rows = []

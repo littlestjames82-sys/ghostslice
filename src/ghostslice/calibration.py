@@ -14,6 +14,7 @@ from pathlib import Path
 
 from .profile import Profile
 from .scanner import scan
+from .textio import read_text as _gs_read_text
 from .tokens import (FAMILY_CALIBRATION, METHOD, estimate_tokens,
                      estimate_tokens_raw, family_for)
 
@@ -28,7 +29,7 @@ def calibrate_project(path, profile: Profile | None = None) -> dict:
     rows: dict[str, dict] = {}
     for entry in result.files:
         try:
-            text = Path(entry.abspath).read_text(encoding="utf-8", errors="replace")
+            text = _gs_read_text(entry.abspath)
         except OSError:
             continue
         fam = family_for(entry.language, text)

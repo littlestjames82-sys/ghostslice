@@ -3,6 +3,48 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [0.21.0] - 2026-10-13
+### Added
+- Shared text decoding (`textio.py`, G16): every surface that turns
+  file bytes into text — scanner, slicers, exporter, graph, lint,
+  watch, dashboard, MCP — now decodes through one helper. BOMs are
+  sniffed (UTF-8 / UTF-16 LE/BE / UTF-32 LE/BE) and decoded with the
+  matching codec; counts are computed on the decoded text; bytes
+  that are not valid UTF-8 fall back to Latin-1 (lossless) instead
+  of U+FFFD mangling. Scanner entries carry `encoding`; bundle
+  manifests carry `source_encoding` whenever a file was not plain
+  UTF-8. Bundle `files/` are written and re-read as exact bytes.
+- Fuzz harness: `tests/fuzz_harness.py` builds a seeded,
+  deterministic mutated corpus (truncations, bit flips, NUL and
+  invalid-UTF-8 injection, BOM/EOL shuffles, brace unbalancing)
+  plus malformed profile/manifest/ledger families;
+  `tests/test_v21_fuzz.py` drives every command and library entry
+  point over it under a no-traceback invariant.
+### Fixed
+- UTF-16/UTF-32 files were silently skipped as "binary" (the NUL
+  test ran before any decoding); they now scan, slice, and export
+  like their UTF-8 twins. A UTF-8 BOM no longer costs a phantom
+  token or breaks `ast.parse`. CR-only files report a real line
+  count (scanner counts with `splitlines()` semantics).
+- Bundles whose slices keep CR/CRLF line endings (full-mode text,
+  docs, configs) failed their own `ghostslice check`: bundle files
+  are now written as exact bytes and validation reads bytes (text
+  mode's universal-newline translation silently rewrote the text
+  being hashed). The XML validator now compares against the
+  parser-normalized form (XML 1.0 section 2.11: CR/CRLF become LF
+  when an XML parser reads `context.xml`).
+- Malformed input no longer tracebacks anywhere: profile JSON and
+  wrong-typed profile fields are exit 2 naming the field (every
+  command, not just lint); `check`/`diff` on missing, malformed,
+  or wrong-shaped manifests report errors instead of raising;
+  unknown `--model` ids (CLI or profile) are a clean exit 2;
+  deeply nested Python/JSON degrades to the fallback/full
+  rendering instead of RecursionError; non-object JSON bodies and
+  messages in the dashboard/MCP surfaces are rejected, not crashed
+  on; filesystem failures at the CLI are clean exit-2 messages.
+- A FIFO (or socket/device) in a scanned tree hung the scanner
+  forever on open; the scanner now only reads regular files.
+
 ## [0.20.0] - 2026-10-13
 ### Added
 - Content cache (G15): a per-project `.ghostslice-cache/` memoizes

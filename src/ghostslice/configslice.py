@@ -817,7 +817,12 @@ def slice_json(source: str, mode: str, path: str = "") -> str:
         data = json.loads(source)
     except Exception:
         return source  # invalid JSON degrades to full, unchanged
-    shaped = _json_shape(data, "", values, 0)
+    try:
+        shaped = _json_shape(data, "", values, 0)
+    except RecursionError:
+        # v0.21: nesting that parses but is too deep to shape-walk
+        # degrades to full, like invalid JSON — never a crash.
+        return source
     text = json.dumps(shaped, indent=2, ensure_ascii=False)
     return _leak_backstop(text + "\n", path or "file.json")
 
@@ -843,6 +848,11 @@ def _json_homogeneous(values) -> bool:
 
 def _json_shape(value, key_name: str, values: bool, depth: int):
     if is_sensitive_key(key_name):
+        return "…"
+    if depth > 100:
+        # v0.21: depth bound — real configs nest a handful of
+        # levels; beyond this the shape is a placeholder, which
+        # also keeps the walk far from the recursion limit.
         return "…"
     if isinstance(value, dict):
         items = list(value.items())

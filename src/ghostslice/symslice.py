@@ -210,7 +210,7 @@ def _py_mk(node, name: str, qualified: str, kind: str,
 def _py_outline(source: str) -> list[Symbol]:
     try:
         tree = ast.parse(source)
-    except SyntaxError:
+    except Exception:
         return _py_fallback_outline(source.splitlines())
     out: list[Symbol] = []
 
@@ -1305,7 +1305,7 @@ def slice_with_symbols(path: str, source: str, keep: set[str],
     if language == "python":
         try:
             ast.parse(source)
-        except SyntaxError:
+        except Exception:
             symbols = _py_fallback_outline(source.splitlines())
             text = _render_lite(source.splitlines(), symbols, keep, language)
         else:

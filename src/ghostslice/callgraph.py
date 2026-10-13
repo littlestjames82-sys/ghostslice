@@ -81,6 +81,7 @@ from .graph import _py_module_base
 from .symslice import outline_source
 from .tokens import METHOD as TOKEN_METHOD
 from .tokens import estimate_tokens
+from .textio import read_text as _gs_read_text
 
 HONESTY = ("recommendations to review, not instructions: dynamic "
            "dispatch, getattr, string registries, and framework "
@@ -720,8 +721,7 @@ class CallGraph:
 
     def _load_file(self, entry) -> _File | None:
         try:
-            source = Path(entry.abspath).read_text(encoding="utf-8",
-                                                   errors="replace")
+            source = _gs_read_text(entry.abspath)
         except OSError:
             source = ""
         fi = _File(path=entry.path, entry=entry, source=source,
@@ -729,7 +729,7 @@ class CallGraph:
         try:
             fi.tree = ast.parse(source)
             fi.parse_ok = True
-        except (SyntaxError, ValueError):
+        except Exception:
             self.skipped_files.append(entry.path)
             return None
         outline = outline_source(source, "python", entry.path) or []

@@ -23,6 +23,7 @@ from .scanner import ScanResult, language_for, scan
 from .secrets_scan import REDACTED_KINDS, redact_text, scan_text
 from .slicer import MODES, SliceResult, slice_text
 from .symslice import resolve_symbol_selection, slice_with_symbols
+from .textio import read_text as read_source_text
 from .tokens import METHOD, estimate_tokens
 from .workspaces import summarize_packages
 
@@ -158,6 +159,17 @@ def _xml_safe_text(text: str) -> str:
             out.append("\uFFFD")
     return "".join(out)
 
+
+def _xml_roundtrip_text(text: str) -> str:
+    """`text` as reading it back out of context.xml returns it:
+    _xml_safe_text plus the line-ending normalization every
+    conforming XML parser performs (XML 1.0 section 2.11: CRLF
+    and lone CR become LF). The validator compares parsed artifact
+    content against this transform of the bundle's slice text, so
+    CR-bearing slices validate - the CR loss lives in the XML
+    artifact only; files/ keeps the canonical bytes (v0.21, G16
+    fuzz find)."""
+    return _xml_safe_text(text).replace("\r\n", "\n").replace("\r", "\n")
 
 def render_context_xml(included: list[dict], excluded: list[dict]) -> str:
     """Render the `anthropic-xml` preset artifact (context.xml).
@@ -412,8 +424,7 @@ def build_bundle(root: str | Path, out: str | Path,
         sources: dict[str, str] = {}
         for entry in result.files:
             try:
-                sources[entry.path] = Path(entry.abspath).read_text(
-                    encoding="utf-8", errors="replace")
+                sources[entry.path] = read_source_text(entry.abspath)
             except OSError:
                 sources[entry.path] = ""
         symbol_map, symbol_report, symbol_outlines = \
@@ -481,7 +492,7 @@ def build_bundle(root: str | Path, out: str | Path,
         records in scan order, keeping every output byte identical
         for any worker count."""
         mode = resolved[entry.path]
-        source = Path(entry.abspath).read_text(encoding="utf-8", errors="replace")
+        source = read_source_text(entry.abspath)
         if mode == "symbols":
             sym_text = slice_with_symbols(entry.path, source,
                                           symbol_map[entry.path],
@@ -518,6 +529,11 @@ def build_bundle(root: str | Path, out: str | Path,
             "sliced_tokens": final_tokens,
             "sha256": digest,
         }
+        # v0.21: the manifest names the source encoding whenever it
+        # was not plain UTF-8 (the bundle ships the decoded text as
+        # UTF-8; the label records what the bytes on disk were).
+        if getattr(entry, "encoding", "utf-8") != "utf-8":
+            manifest_entry["source_encoding"] = entry.encoding
         if file_redactions:
             manifest_entry["redactions"] = len(file_redactions)
             manifest_entry["redaction_kinds"] = sorted(
@@ -541,7 +557,10 @@ def build_bundle(root: str | Path, out: str | Path,
         if mode != "exclude" and final_text:
             dest = files_dir / entry.path
             dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(final_text, encoding="utf-8")
+            # v0.21: exact bytes, not write_text — text mode would
+            # translate newlines on some platforms, and the manifest
+            # sha256 is computed over these exact bytes.
+            dest.write_bytes(final_text.encode("utf-8"))
         return {"entry": entry, "mode": mode, "sliced": sliced,
                 "final_text": final_text, "final_tokens": final_tokens,
                 "redactions": file_redactions, "leftovers": file_leftovers,
@@ -754,7 +773,7 @@ def estimate_context_tokens(root: str | Path, profile=None,
         elif mode == "exclude":
             before += entry.tokens
         else:
-            source = Path(entry.abspath).read_text(encoding="utf-8", errors="replace")
+            source = read_source_text(entry.abspath)
             r = cached_slice_text(cache, entry.path, source, mode)
             before += r.original_tokens
             after += r.sliced_tokens
@@ -817,7 +836,7 @@ def _validate_wrapper_artifacts(bundle: Path, manifest: dict,
             if p not in on_disk:
                 errors.append(f"{kind}: content for {p} but no sliced file in bundle")
                 continue
-            if rec["sha256"] != entry["sha256"]:
+            if rec["sha256"] != entry.get("sha256"):
                 errors.append(f"{kind}: sha256 for {p} != manifest sha256")
             if rec["content"] != safe(disk_texts.get(p, "")):
                 errors.append(f"{kind}: content mismatch for {p}")
@@ -851,7 +870,7 @@ def _validate_wrapper_artifacts(bundle: Path, manifest: dict,
                     "sha256": doc.get("sha256"),
                     "content": (content.text or "") if content is not None else "",
                 })
-            _check_files("context.xml", records, _xml_safe_text)
+            _check_files("context.xml", records, _xml_roundtrip_text)
             ex_el = root_el.find("excluded")
             listed = ({f.get("path") for f in ex_el.findall("file")}
                       if ex_el is not None else set())
@@ -861,7 +880,7 @@ def _validate_wrapper_artifacts(bundle: Path, manifest: dict,
     if json_path.is_file():
         checked.append("context.json")
         try:
-            payload = json.loads(json_path.read_text(encoding="utf-8"))
+            payload = json.loads(json_path.read_bytes().decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             errors.append(f"context.json: invalid JSON ({exc})")
             payload = None
@@ -900,45 +919,96 @@ def validate_bundle(bundle: str | Path) -> dict:
     validate exactly as before.
     """
     bundle = Path(bundle)
-    manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
     errors: list[str] = []
+
+    def _fail(msg: str) -> dict:
+        return {"ok": False, "errors": [msg], "files_checked": 0,
+                "total_sliced_tokens": 0, "total_original_tokens": 0,
+                "artifacts_checked": [], "redaction_checked": False}
+
+    # v0.21: the manifest is untrusted input to a validator. A
+    # missing, unreadable, malformed, or wrong-shaped manifest is a
+    # validation FAILURE reported in errors — never an exception
+    # (this function's whole job is judging broken bundles).
+    mpath = bundle / "manifest.json"
+    try:
+        raw = mpath.read_text(encoding="utf-8")
+    except OSError as exc:
+        return _fail(f"manifest.json: cannot read ({exc})")
+    except UnicodeDecodeError as exc:
+        return _fail(f"manifest.json: not valid UTF-8 ({exc})")
+    try:
+        manifest = json.loads(raw)
+    except ValueError as exc:
+        return _fail(f"manifest.json: invalid JSON ({exc})")
+    if not isinstance(manifest, dict):
+        return _fail("manifest.json: top level is not a JSON object")
+    files = manifest.get("files")
+    if not isinstance(files, list):
+        return _fail("manifest.json: 'files' is missing or not a list")
+    entries: list[dict] = []
+    for i, entry in enumerate(files):
+        if not isinstance(entry, dict) \
+                or not isinstance(entry.get("path"), str):
+            errors.append(
+                f"manifest files[{i}]: not an object with a string 'path'")
+            continue
+        entries.append(entry)
+    total_original = manifest.get("total_original_tokens")
+    if not isinstance(total_original, int) \
+            or isinstance(total_original, bool):
+        errors.append(
+            "manifest: 'total_original_tokens' is missing or not an integer")
+        total_original = 0
     checked = 0
     total_sliced = 0
     disk_texts: dict[str, str] = {}
     on_disk: set[str] = set()
-    for entry in manifest["files"]:
-        if entry["mode"] == "exclude":
+    for entry in entries:
+        if entry.get("mode") == "exclude":
             # Excluded files may not exist on disk; their sliced tokens are 0.
-            if entry["sliced_tokens"] != 0:
+            if entry.get("sliced_tokens") != 0:
                 errors.append(f"{entry['path']}: excluded but sliced_tokens != 0")
             continue
         dest = bundle / "files" / entry["path"]
         if not dest.is_file():
             # Sliced-to-empty files are not written; treat as empty text.
             text = ""
-            if entry["sliced_tokens"] != 0:
+            if entry.get("sliced_tokens") != 0:
                 errors.append(f"{entry['path']}: missing from bundle but sliced_tokens != 0")
                 continue
         else:
-            text = dest.read_text(encoding="utf-8", errors="replace")
+            # v0.21: read BYTES and decode — Path.read_text's
+            # universal-newline mode silently translates \r\n and
+            # \r to \n, which made every bundle whose slices keep
+            # CR line endings (full-mode text/docs/configs) fail
+            # its own sha256 check (fuzz find, G16).
+            text = dest.read_bytes().decode("utf-8", errors="replace")
             on_disk.add(entry["path"])
         disk_texts[entry["path"]] = text
         digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
-        if digest != entry["sha256"]:
+        if digest != entry.get("sha256"):
             # An empty slice hashes as empty even when no file was written;
             # files written by build_bundle always match unless edited.
             if text:
                 errors.append(f"{entry['path']}: sha256 mismatch")
         recomputed = estimate_tokens(text, language_for(entry["path"]))
-        if recomputed != entry["sliced_tokens"]:
+        if recomputed != entry.get("sliced_tokens"):
             errors.append(
-                f"{entry['path']}: sliced_tokens {entry['sliced_tokens']} != recomputed {recomputed}")
+                f"{entry['path']}: sliced_tokens {entry.get('sliced_tokens')} != recomputed {recomputed}")
         total_sliced += recomputed
         checked += 1
-    if total_sliced != manifest["total_sliced_tokens"]:
+    if total_sliced != manifest.get("total_sliced_tokens"):
         errors.append(
-            f"total_sliced_tokens {manifest['total_sliced_tokens']} != recomputed {total_sliced}")
-    artifacts = _validate_wrapper_artifacts(bundle, manifest, disk_texts,
+            f"total_sliced_tokens {manifest.get('total_sliced_tokens')} != recomputed {total_sliced}")
+    # The wrapper check indexes manifest["files"] and the totals by
+    # key; hand it the sanitized entries and .get()-able totals.
+    safe_manifest = dict(manifest)
+    safe_manifest["files"] = entries
+    for key in ("total_original_tokens", "total_sliced_tokens",
+                "total_saved_tokens"):
+        safe_manifest[key] = manifest.get(key)
+    artifacts = _validate_wrapper_artifacts(bundle, safe_manifest, disk_texts,
                                             on_disk, errors)
     # v0.17: a bundle whose manifest claims redaction must not contain
     # a reportable secret literal in any shipped file. The scan uses
@@ -948,8 +1018,8 @@ def validate_bundle(bundle: str | Path) -> dict:
     redaction_block = manifest.get("redaction")
     if isinstance(redaction_block, dict) and redaction_block.get("enabled"):
         redaction_checked = True
-        for entry in manifest["files"]:
-            if entry["mode"] == "exclude":
+        for entry in entries:
+            if entry.get("mode") == "exclude":
                 continue
             for f in scan_text(entry["path"],
                                disk_texts.get(entry["path"], ""),
@@ -964,7 +1034,7 @@ def validate_bundle(bundle: str | Path) -> dict:
         "errors": errors,
         "files_checked": checked,
         "total_sliced_tokens": total_sliced,
-        "total_original_tokens": manifest["total_original_tokens"],
+        "total_original_tokens": total_original,
         "artifacts_checked": artifacts,
         "redaction_checked": redaction_checked,
     }

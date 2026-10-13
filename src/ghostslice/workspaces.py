@@ -51,6 +51,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .textio import read_text as _gs_read_text
+
 MANIFEST_NAMES = ("package.json", "pyproject.toml", "Cargo.toml", "go.mod")
 
 # Root-directory names the fallback never treats as packages even
@@ -112,7 +114,7 @@ class WorkspaceInfo:
 
 def _read(root: Path, name: str) -> str | None:
     try:
-        return (root / name).read_text(encoding="utf-8", errors="replace")
+        return _gs_read_text(root / name)
     except OSError:
         return None
 

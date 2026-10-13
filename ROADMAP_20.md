@@ -31,7 +31,7 @@ Baseline: v0.5.0, 149 tests passed.
 | G13 | Symbol-level slicing: keep named symbols + their in-file dependencies (Python ast, TS lite) | v0.18.0 | done |
 | G14 | Python call graph: function-level graph, entry-point reachability, dead-function candidates | v0.19.0 | done |
 | G15 | Performance: scan caching (.ghostslice-cache), parallel scan, benchmark proof, identical totals | v0.20.0 | done |
-| G16 | Fuzz/robustness: malformed-input fuzzing for every slicer + encoding handling (BOM, UTF-16, latin-1) | v0.21.0 | pending |
+| G16 | Fuzz/robustness: malformed-input fuzzing for every slicer + encoding handling (BOM, UTF-16, latin-1) | v0.21.0 | done |
 | G17 | Dashboard v2: side-by-side slice preview (original vs slice, per Ryan's mockups, Oct 13) with diff highlighting + budget slider with live auto-fit preview | v0.22.0 | pending |
 | G18 | Plugin system: user slicers from .ghostslice-plugins/*.py, documented API, example plugin | v0.23.0 | pending |
 | G19 | CI pack: `ghostslice ci` one-shot (budget + secrets + lint) with PR markdown summary + sample GitHub Action | v0.24.0 | pending |
@@ -426,3 +426,29 @@ the audit findings that drove the two improvement rounds.
   times process CPU (paired ~5x) instead of the sandbox's
   weather-vane wall clock, and the big-tree tests were made
   disk-lean after /tmp filled to 100% during one loaded run.
+- G16 (v0.21.0) DONE Oct 13, 2026: fuzz + encoding robustness
+  shipped — new textio.py is the one shared decode for every
+  surface (BOM sniff UTF-8/16/32 -> codec; strict UTF-8; Latin-1
+  fallback, lossless and labelled on scanner entries and as
+  manifest source_encoding), so UTF-16/32 files scan/slice/export
+  like their UTF-8 twins instead of being skipped as "binary",
+  BOMs stop costing phantom tokens / breaking ast.parse, CR-only
+  files count lines by splitlines, and bundles write files/ as
+  exact bytes. A seeded deterministic fuzz corpus
+  (tests/fuzz_harness.py: 100 mutated cases + malformed profile/
+  manifest/ledger families) drives every library entry point and
+  30 CLI commands in tests/test_v21_fuzz.py under a no-traceback
+  invariant. Tests 614 -> 642 (28 new; 1 pre-existing test updated
+  — the G11 U+FFFD pin, replaced by the Latin-1 contract). Audit
+  rounds (audits/G16_audit.md): campaign #1 headline fixes —
+  malformed profiles crashed most commands (now exit 2 naming the
+  field), the bundle validator raised on the broken bundles it
+  exists to judge (now returns failures), nonexistent projects
+  trace-backed 8 commands (CLI OSError net + per-command model-id
+  validation), RecursionError/NUL-ValueError escaped the Python
+  and JSON paths, and bundles whose slices keep CR line endings
+  failed their own sha256 check (universal-newline translation
+  on re-read; XML comparison now models the spec's LF
+  normalization). Campaign #2 (new seed + shapes) headline fix —
+  a FIFO in a scanned tree hung the scanner forever; the scanner
+  now reads regular files only.

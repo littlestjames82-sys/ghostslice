@@ -47,6 +47,8 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .textio import decode_bytes, sniff_bom
+
 PROFILE_NAME = ".ghostslice.json"
 PRESETS = ("claude-code", "aider", "generic", "cursor", "copilot",
            "anthropic-xml", "json")
@@ -171,9 +173,49 @@ def load_profile(root: str | Path) -> Profile:
     candidate = root / PROFILE_NAME if root.is_dir() else root.parent / PROFILE_NAME
     if not candidate.is_file():
         return Profile()
-    data = json.loads(candidate.read_text(encoding="utf-8"))
+    # v0.21: a malformed profile is a user error with a message,
+    # never a traceback — invalid JSON and wrong-typed fields all
+    # become ValueError naming the file and the field (the CLI maps
+    # ValueError to exit 2 for every command).
+    try:
+        blob = candidate.read_bytes()
+    except OSError as exc:
+        raise ValueError(f"{candidate}: cannot read profile: {exc}") from exc
+    if sniff_bom(blob) is not None:
+        # A BOM is explicit intent (Windows editors write UTF-8
+        # BOMs): decode through the shared helper, BOM stripped.
+        raw = decode_bytes(blob)[0]
+    else:
+        try:
+            raw = blob.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError(
+                f"{candidate}: profile is not valid UTF-8: {exc}") from exc
+    try:
+        data = json.loads(raw)
+    except ValueError as exc:
+        raise ValueError(f"{candidate}: invalid JSON: {exc}") from exc
     if not isinstance(data, dict):
         raise ValueError(f"{candidate}: profile must be a JSON object")
+
+    def _str_list(key: str) -> list:
+        val = data.get(key) or []
+        if not isinstance(val, list) or \
+                any(not isinstance(v, str) for v in val):
+            raise ValueError(
+                f"{candidate}: {key!r} must be a list of strings")
+        return list(val)
+
+    modes_raw = data.get("modes") or {}
+    if not isinstance(modes_raw, dict) or any(
+            not isinstance(k, str) or not isinstance(v, str)
+            for k, v in modes_raw.items()):
+        raise ValueError(
+            f"{candidate}: 'modes' must be an object mapping glob "
+            "patterns to mode names")
+    model = data.get("model")
+    if model is not None and not isinstance(model, str):
+        raise ValueError(f"{candidate}: 'model' must be a string")
     preset = data.get("preset")
     if preset is not None and preset not in PRESETS:
         raise ValueError(f"{candidate}: unknown preset {preset!r} (choose from {', '.join(PRESETS)})")
@@ -184,12 +226,23 @@ def load_profile(root: str | Path) -> Profile:
     if not isinstance(redact, bool):
         raise ValueError(f"{candidate}: 'redact' must be true or false, got {redact!r}")
     budget = data.get("budget_tokens")
+    if budget is not None:
+        if isinstance(budget, bool) or \
+                not isinstance(budget, (int, float, str)):
+            raise ValueError(
+                f"{candidate}: 'budget_tokens' must be a number")
+        try:
+            budget = int(budget)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"{candidate}: 'budget_tokens' must be a number, "
+                f"got {budget!r}") from None
     return Profile(
-        ignore=list(data.get("ignore") or []),
-        modes=dict(data.get("modes") or {}),
-        model=data.get("model"),
-        budget_tokens=int(budget) if budget is not None else None,
-        entry_points=list(data.get("entry_points") or []),
+        ignore=_str_list("ignore"),
+        modes=dict(modes_raw),
+        model=model,
+        budget_tokens=budget,
+        entry_points=_str_list("entry_points"),
         preset=preset,
         auto_shrink=auto_shrink,
         redact=redact,

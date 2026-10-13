@@ -293,14 +293,18 @@ class ProjectCache:
                 "sha": hashlib.sha256(data).hexdigest()}
 
     def get_scan(self, path: str, data: bytes) -> dict | None:
-        """Payload {tokens, lines, evidence} for a file's raw bytes,
-        or None."""
+        """Payload {tokens, lines, evidence, encoding} for a file's
+        raw bytes, or None. (v0.21: entries without an encoding —
+        written before the field existed — read as corrupt/miss;
+        the gs-version dimension already orphans them, this is the
+        belt-and-braces shape check.)"""
         payload = self._read("scan", _digest(self._scan_dims(path, data)))
         if payload is None:
             return None
         ev = payload.get("evidence")
         if not _is_int(payload.get("tokens")) \
                 or not _is_int(payload.get("lines")) \
+                or not isinstance(payload.get("encoding"), str) \
                 or not isinstance(ev, dict) \
                 or any(not isinstance(k, str) or not isinstance(v, str)
                        for k, v in ev.items()):
@@ -310,9 +314,10 @@ class ProjectCache:
         return payload
 
     def put_scan(self, path: str, data: bytes, *, tokens: int, lines: int,
-                 evidence: dict) -> None:
+                 evidence: dict, encoding: str = "utf-8") -> None:
         self._write("scan", _digest(self._scan_dims(path, data)), {
-            "tokens": tokens, "lines": lines, "evidence": evidence})
+            "tokens": tokens, "lines": lines, "evidence": evidence,
+            "encoding": encoding})
 
     # -- introspection ---------------------------------------------------
 

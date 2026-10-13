@@ -15,6 +15,7 @@ from .profile import load_profile
 from .scanner import scan
 from .secrets_scan import scan_scan_result
 from .slicer import MODES, slice_text
+from .textio import read_text as _gs_read_text
 from .tokens import METHOD as TOKEN_METHOD
 from .workspaces import summarize_packages
 
@@ -71,7 +72,7 @@ class _State:
             elif mode == "exclude":
                 self._mode_tokens_cache[key] = 0
             else:
-                source = Path(entry.abspath).read_text(encoding="utf-8", errors="replace")
+                source = _gs_read_text(entry.abspath)
                 self._mode_tokens_cache[key] = slice_text(entry.path, source, mode).sliced_tokens
         return self._mode_tokens_cache[key]
 
@@ -150,7 +151,7 @@ def make_server(root: str, port: int = 8765, host: str = "127.0.0.1"):
                 if mode not in MODES:
                     self._json(400, {"error": f"unknown mode: {mode}"})
                     return
-                source = Path(entry.abspath).read_text(encoding="utf-8", errors="replace")
+                source = _gs_read_text(entry.abspath)
                 self._json(200, slice_text(rel, source, mode).to_dict())
             else:
                 self._json(404, {"error": "not found"})
@@ -163,6 +164,11 @@ def make_server(root: str, port: int = 8765, host: str = "127.0.0.1"):
                 body = json.loads(raw.decode("utf-8") or "{}")
             except Exception:
                 self._json(400, {"error": "invalid JSON body"})
+                return
+            if not isinstance(body, dict):
+                # v0.21: a JSON array/scalar body is a 400, not a
+                # handler traceback on body.get.
+                self._json(400, {"error": "JSON body must be an object"})
                 return
             if parsed.path == "/api/export":
                 selections = body.get("selections") or {}

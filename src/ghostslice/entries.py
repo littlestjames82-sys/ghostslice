@@ -50,6 +50,7 @@ import re
 from pathlib import Path, PurePosixPath
 
 from .graph import ENTRY_BASENAMES, build_graph, importers_of
+from .textio import read_text as _gs_read_text
 
 SCORE_BIN = 60
 SCORE_SCRIPTS = 60
@@ -68,7 +69,7 @@ _CODE_FOR_SHEBANG = {
 
 def _read_text(path: Path) -> str | None:
     try:
-        return path.read_text(encoding="utf-8", errors="replace")
+        return _gs_read_text(path)
     except OSError:
         return None
 
