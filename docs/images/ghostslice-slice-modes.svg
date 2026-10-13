@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" role="img" aria-labelledby="title description">
+  <title id="title">What GhostSlice slice modes keep</title>
+  <desc id="description">Five columns show how modes affect an example source file. Full retains imports, declarations, implementation, and tests. Signatures retains imports and declarations but omits bodies. Interfaces retains type contracts. Strip-tests retains implementation while removing tests. Exclude retains no content. Exact output depends on language and parser.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#171321"/>
+      <stop offset="1" stop-color="#211a31"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#975dff"/>
+      <stop offset="1" stop-color="#6716f3"/>
+    </linearGradient>
+  </defs>
+  <rect width="1000" height="600" rx="22" fill="url(#background)"/>
+  <text x="44" y="52" fill="#f4efff" font-family="system-ui, sans-serif" font-size="25" font-weight="700">Choose how much of each file to include</text>
+  <text x="44" y="80" fill="#b7abc9" font-family="system-ui, sans-serif" font-size="15">Conceptual source-file regions: imports · declarations · implementation · tests</text>
+
+  <g font-family="system-ui, sans-serif">
+    <g transform="translate(40 112)">
+      <rect width="176" height="420" rx="14" fill="#282238" stroke="#493d60"/>
+      <text x="18" y="34" fill="#f4efff" font-size="18" font-weight="700">full</text>
+      <text x="18" y="57" fill="#b7abc9" font-size="12">Keep the file unchanged</text>
+      <rect x="18" y="83" width="140" height="44" rx="7" fill="#315b70"/>
+      <text x="30" y="110" fill="#e7f7ff" font-size="12">Imports</text>
+      <rect x="18" y="138" width="140" height="65" rx="7" fill="#5c4b80"/>
+      <text x="30" y="177" fill="#f0e8ff" font-size="12">Declarations</text>
+      <rect x="18" y="214" width="140" height="98" rx="7" fill="#285c4b"/>
+      <text x="30" y="269" fill="#ddfff0" font-size="12">Implementation</text>
+      <rect x="18" y="323" width="140" height="44" rx="7" fill="#79434c"/>
+      <text x="30" y="350" fill="#ffebed" font-size="12">Tests</text>
+      <text x="18" y="398" fill="#a79fc0" font-size="12">Largest context</text>
+    </g>
+
+    <g transform="translate(232 112)">
+      <rect width="176" height="420" rx="14" fill="#282238" stroke="#493d60"/>
+      <text x="18" y="34" fill="#f4efff" font-size="18" font-weight="700">signatures</text>
+      <text x="18" y="57" fill="#b7abc9" font-size="12">Keep the code surface</text>
+      <rect x="18" y="83" width="140" height="44" rx="7" fill="#315b70"/>
+      <text x="30" y="110" fill="#e7f7ff" font-size="12">Imports</text>
+      <rect x="18" y="138" width="140" height="65" rx="7" fill="#5c4b80"/>
+      <text x="30" y="177" fill="#f0e8ff" font-size="12">Signatures</text>
+      <rect x="18" y="214" width="140" height="98" rx="7" fill="#302a3b" stroke="#62596f" stroke-dasharray="5 4"/>
+      <text x="30" y="269" fill="#b7abc9" font-size="12">Bodies omitted</text>
+      <rect x="18" y="323" width="140" height="44" rx="7" fill="#302a3b" stroke="#62596f" stroke-dasharray="5 4"/>
+      <text x="30" y="350" fill="#b7abc9" font-size="12">Tests vary</text>
+      <text x="18" y="398" fill="#a79fc0" font-size="12">Compact code context</text>
+    </g>
+
+    <g transform="translate(424 112)">
+      <rect width="176" height="420" rx="14" fill="#282238" stroke="#493d60"/>
+      <text x="18" y="34" fill="#f4efff" font-size="18" font-weight="700">interfaces</text>
+      <text x="18" y="57" fill="#b7abc9" font-size="12">Keep type contracts</text>
+      <rect x="18" y="83" width="140" height="44" rx="7" fill="#302a3b" stroke="#62596f" stroke-dasharray="5 4"/>
+      <text x="30" y="110" fill="#b7abc9" font-size="12">Imports vary</text>
+      <rect x="18" y="138" width="140" height="65" rx="7" fill="#5c4b80"/>
+      <text x="30" y="177" fill="#f0e8ff" font-size="12">Types / contracts</text>
+      <rect x="18" y="214" width="140" height="98" rx="7" fill="#302a3b" stroke="#62596f" stroke-dasharray="5 4"/>
+      <text x="30" y="269" fill="#b7abc9" font-size="12">Bodies omitted</text>
+      <rect x="18" y="323" width="140" height="44" rx="7" fill="#302a3b" stroke="#62596f" stroke-dasharray="5 4"/>
+      <text x="30" y="350" fill="#b7abc9" font-size="12">Tests omitted</text>
+      <text x="18" y="398" fill="#a79fc0" font-size="12">Contract-focused context</text>
+    </g>
+
+    <g transform="translate(616 112)">
+      <rect width="176" height="420" rx="14" fill="#282238" stroke="#493d60"/>
+      <text x="18" y="34" fill="#f4efff" font-size="18" font-weight="700">strip-tests</text>
+      <text x="18" y="57" fill="#b7abc9" font-size="12">Remove recognized tests</text>
+      <rect x="18" y="83" width="140" height="44" rx="7" fill="#315b70"/>
+      <text x="30" y="110" fill="#e7f7ff" font-size="12">Imports</text>
+      <rect x="18" y="138" width="140" height="65" rx="7" fill="#5c4b80"/>
+      <text x="30" y="177" fill="#f0e8ff" font-size="12">Declarations</text>
+      <rect x="18" y="214" width="140" height="98" rx="7" fill="#285c4b"/>
+      <text x="30" y="269" fill="#ddfff0" font-size="12">Implementation</text>
+      <rect x="18" y="323" width="140" height="44" rx="7" fill="#302a3b" stroke="#62596f" stroke-dasharray="5 4"/>
+      <text x="30" y="350" fill="#b7abc9" font-size="12">Tests removed</text>
+      <text x="18" y="398" fill="#a79fc0" font-size="12">Keep production logic</text>
+    </g>
+
+    <g transform="translate(808 112)">
+      <rect width="152" height="420" rx="14" fill="#302344" stroke="#7445b8"/>
+      <text x="18" y="34" fill="#f4efff" font-size="18" font-weight="700">exclude</text>
+      <text x="18" y="57" fill="#b7abc9" font-size="12">Include no content</text>
+      <rect x="18" y="83" width="116" height="284" rx="7" fill="#201b2a" stroke="#62596f" stroke-dasharray="5 4"/>
+      <text x="76" y="223" text-anchor="middle" fill="#b7abc9" font-size="13">File omitted</text>
+      <text x="18" y="398" fill="#a79fc0" font-size="12">Zero file context</text>
+    </g>
+  </g>
+
+  <rect x="40" y="550" width="920" height="30" rx="8" fill="#191522"/>
+  <circle cx="58" cy="565" r="5" fill="#975dff"/>
+  <text x="71" y="570" fill="#b7abc9" font-family="system-ui, sans-serif" font-size="12">Retained</text>
+  <rect x="150" y="559" width="12" height="12" rx="2" fill="#302a3b" stroke="#62596f" stroke-dasharray="3 2"/>
+  <text x="171" y="570" fill="#b7abc9" font-family="system-ui, sans-serif" font-size="12">Omitted or language-dependent</text>
+  <text x="945" y="570" text-anchor="end" fill="#b7abc9" font-family="system-ui, sans-serif" font-size="12">Illustrative, not to scale</text>
+</svg>

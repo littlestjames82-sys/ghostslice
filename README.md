@@ -83,6 +83,12 @@ Modes, per file:
 | `headings` | (docs/notebooks) | (docs/notebooks) |
 | `structure` | (config/data files, below) | (config/data files, below) |
 
+![Illustration of GhostSlice slice modes: full keeps the file, signatures keeps declarations, interfaces keeps type contracts, strip-tests removes tests, and exclude keeps nothing.](docs/images/ghostslice-slice-modes.svg)
+
+This is a conceptual guide to the core modes; the exact retained syntax
+depends on the file language and parser. See the tables and language notes
+below for supported details.
+
 More modes (v0.4): Markdown files support `headings` (headings plus the
 first paragraph under each heading; docs still default to `full`, opt in
 per-glob via a profile). Jupyter notebooks (`.ipynb`) slice to a text
