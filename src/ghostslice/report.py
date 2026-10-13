@@ -17,6 +17,7 @@ from .pricing import estimate_cost, get_model, load_prices
 from .profile import load_profile
 from .scanner import scan
 from .secrets_scan import scan_scan_result
+from .workspaces import summarize_packages
 
 _CSS = """
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:2rem auto;max-width:960px;padding:0 1rem;color:#1c1b22}
@@ -49,6 +50,25 @@ def build_report(root, model_id: str = "claude-sonnet") -> str:
     before, after = estimate_context_tokens(root, profile=profile)
     cost_after = estimate_cost(after, model)
     hist = ledger_summary(root)
+    # v0.13: per-package subtotals, shown only for real monorepos.
+    packages = summarize_packages(result)
+    if len(packages) > 1:
+        pkg_rows = "".join(
+            f"<tr><td>{_e(p['label'])}</td><td>{_e(p['kind'])}</td>"
+            f"<td>{_e(p['source'])}</td><td>{p['files']:,}</td>"
+            f"<td>{p['tokens']:,}</td><td>{p['share']:.1f}%</td></tr>"
+            for p in packages)
+        packages_html = (
+            "<h2>Packages</h2>\n"
+            "<table><tr><th>Package</th><th>Kind</th><th>Source</th>"
+            f"<th>Files</th><th>Tokens</th><th>Share</th></tr>{pkg_rows}</table>\n"
+            "<p>Kinds: <em>declared</em> = named by a workspace manifest "
+            "(npm/pnpm/Cargo/go.work/uv); <em>detected</em> = fallback, a "
+            "top-level directory carrying its own manifest; the root "
+            "package is labelled (root). Shares are of original estimated "
+            "tokens.</p>")
+    else:
+        packages_html = ""
     max_tokens = max((f.tokens for f in result.files), default=1) or 1
 
     rows = []
@@ -90,6 +110,7 @@ Prices are a local, dated snapshot (as of {_e(prices.get('as_of'))}), not live.<
 <li>Sliced selection: {before:,} &rarr; {after:,} estimated tokens (saved {before-after:,})</li>
 <li>Pre-flight input cost at {_e(model.get('name', model['id']))}: ~${cost_after:.4f} for the sliced selection</li>
 </ul>
+{packages_html}
 <h2>Top files by estimated tokens</h2>
 <table><tr><th>File</th><th>Tokens</th><th>Lines</th><th>Heat</th></tr>{''.join(rows)}</table>
 <h2>Secrets</h2>

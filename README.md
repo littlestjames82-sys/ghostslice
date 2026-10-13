@@ -298,6 +298,35 @@ on what remains. Default is off — a plain export is byte-identical
 to v0.11. Lint rules L006/L007 read the same detectors, so lint,
 scan, and export never disagree about what these shapes are.
 
+### Monorepos: per-package subtotals (v0.13)
+
+Scanning a monorepo reports per-package subtotals (files, estimated
+tokens, share of the total) in `scan` (text + `--json`), the export
+manifest (`"package"` per file plus a top-level `"packages"`
+summary with sliced shares), `/api/scan`, and the HTML report.
+
+Package boundaries come from the workspace manifests at the
+project root — evidence first, in this order: npm `workspaces`
+(array or `{packages: [...]}`, `!` negations honoured),
+`pnpm-workspace.yaml`, Cargo `[workspace]` `members`/`exclude`
+(exclude cannot remove an explicitly listed member), `go.work`
+`use` directives, and `[tool.uv.workspace]` members in
+`pyproject.toml`. Members named by such a manifest are kind
+**declared**. If no manifest declares members, directories
+carrying their own manifest (top level, or one level below, like
+`packages/<name>`) are reported as kind **detected** — weaker
+evidence, labelled as such. Files outside every package belong to
+the root package (labelled `(root)`).
+
+Rules worth knowing: globs match one path segment (`**` counts as
+one segment — a documented simplification); glob-matched members
+must contain the ecosystem's manifest; declared members missing
+on disk and members that would escape the project root (skipped,
+with a warning) are listed in `scan` output and in the `--json`
+`"workspace"` block. Nested workspaces resolve outermost-first.
+Visibility only: selection, modes, and budgets are unchanged —
+there are no per-package budgets.
+
 ### Duplicates (v0.4)
 
 `scan` and `graph` report duplicate files: exact duplicates (sha256 of
@@ -611,6 +640,7 @@ src/ghostslice/
   secrets_scan.py  secret guard: provider token shapes, assignments, entropy (v0.4)
   duplicates.py exact (sha256) + near (line-shingle Jaccard) duplicates (v0.4)
   detect.py     generated/minified/vendored detection: header markers, estimator line shape, vendor paths/banners (v0.12)
+  workspaces.py monorepo detection (npm/pnpm/Cargo/go.work/uv + manifest fallback) and per-package subtotals (v0.13)
   lint.py       context lint rule engine L001-L010 over exporter.resolve_modes (v0.11)
   report.py     standalone self-contained HTML report (v0.4)
   fit.py        auto-fit budget downgrades for export/task --fit (v0.5)

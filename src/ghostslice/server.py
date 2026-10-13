@@ -16,6 +16,7 @@ from .scanner import scan
 from .secrets_scan import scan_scan_result
 from .slicer import MODES, slice_text
 from .tokens import METHOD as TOKEN_METHOD
+from .workspaces import summarize_packages
 
 _DASHBOARD = Path(__file__).with_name("dashboard.html")
 
@@ -76,6 +77,9 @@ class _State:
             "file_count": len(files),
             "token_method": TOKEN_METHOD,
             "files": files,
+            # v0.13: per-package subtotals (API only; the dashboard
+            # UI renders them from G17 on).
+            "packages": summarize_packages(self.scan),
             "profile": self.profile.to_dict(),
             "recommendations": self.recommendations,
             "history": ledger_summary(self.root),

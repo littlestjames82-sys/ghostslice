@@ -73,7 +73,8 @@ def _print_fit(fit_report) -> bool:
     return fit_report["fitted"]
 
 
-def _print_scan(result, model=None, prices=None, recs=None, secrets=None, dups=None) -> None:
+def _print_scan(result, model=None, prices=None, recs=None, secrets=None, dups=None,
+                packages=None, ws_missing=None, ws_warnings=None) -> None:
     print(f"Project: {result.root}")
     print(f"Files: {len(result.files)}  Estimated tokens: {result.total_tokens:,}")
     print(f"{'tokens':>9}  {'lines':>6}  file")
@@ -93,6 +94,20 @@ def _print_scan(result, model=None, prices=None, recs=None, secrets=None, dups=N
         print(f"{f.tokens:>9,}  {f.lines:>6}  {f.path}{suffix}")
     if len(result.files) > 200:
         print(f"... and {len(result.files) - 200} more files")
+    if packages and len(packages) > 1:
+        print(f"\nPackages ({len(packages)}):")
+        for p in packages:
+            src = f", {p['source']}" if p["source"] else ""
+            print(f"  {p['label']}  [{p['kind']}{src}]: {p['files']} file(s), "
+                  f"{p['tokens']:,} estimated tokens ({p['share']:.1f}% of total)")
+    if ws_missing:
+        print("\nWorkspace members declared but missing on disk:")
+        for m in ws_missing:
+            print(f"  {m}")
+    if ws_warnings:
+        print("\nWorkspace warnings:")
+        for w in ws_warnings:
+            print(f"  {w}")
     if model is not None:
         cost = estimate_cost(result.total_tokens, model)
         print(f"\nPre-flight (input cost, prices as of {prices.get('as_of')} from local prices.json, not live):")
@@ -455,7 +470,12 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(payload, indent=2))
             return 0
         model = get_model(prices, args.model or profile.model) if (args.model or profile.model) else None
-        _print_scan(result, model=model, prices=prices, recs=recs, secrets=findings, dups=dups)
+        from .workspaces import summarize_packages
+        ws = result.workspaces
+        _print_scan(result, model=model, prices=prices, recs=recs, secrets=findings,
+                    dups=dups, packages=summarize_packages(result),
+                    ws_missing=ws.missing if ws else None,
+                    ws_warnings=ws.warnings if ws else None)
         return 0
 
     if args.cmd == "graph":

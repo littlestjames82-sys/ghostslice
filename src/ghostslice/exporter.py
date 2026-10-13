@@ -18,6 +18,7 @@ from .ledger import append_record
 from .scanner import ScanResult, language_for, scan
 from .slicer import MODES, slice_text
 from .tokens import METHOD, estimate_tokens
+from .workspaces import summarize_packages
 
 SLICABLE = {"python", "typescript", "javascript", "go", "rust", "java", "csharp",
             "notebook", "php", "ruby", "kotlin", "swift",
@@ -185,6 +186,11 @@ def build_bundle(root: str | Path, out: str | Path,
     entries record `mode_reason` ("auto: generated (<marker>)").
     Explicit selections and profile modes always beat auto-shrink.
     Default (None + no profile option) changes nothing.
+
+    Manifest entries carry the file's `package` (v0.13, workspaces.py)
+    and the manifest gains a top-level `packages` summary; both are
+    additive — validate_bundle ignores them, so pre-v0.13 bundles
+    validate exactly as before.
     """
     selections = selections or {}
     preset = preset or (profile.preset if profile else None) or "claude-code"
@@ -229,6 +235,7 @@ def build_bundle(root: str | Path, out: str | Path,
             "path": entry.path,
             "mode": mode,
             "language": entry.language,
+            "package": entry.package,
             "original_tokens": sliced.original_tokens,
             "sliced_tokens": sliced.sliced_tokens,
             "sha256": digest,
@@ -263,6 +270,11 @@ def build_bundle(root: str | Path, out: str | Path,
         "total_sliced_tokens": total_after,
         "total_saved_tokens": total_before - total_after,
         "files": manifest_files,
+        # v0.13: per-package subtotals (additive; validators written
+        # before v0.13 ignore both this and the per-file "package").
+        "packages": summarize_packages(
+            result,
+            sliced_tokens={f["path"]: f["sliced_tokens"] for f in manifest_files}),
     }
     if fit_report is not None:
         manifest["fit"] = fit_report

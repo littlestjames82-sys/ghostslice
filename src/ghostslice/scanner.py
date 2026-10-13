@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .detect import detect_all, head_of
 from .tokens import estimate_tokens
+from .workspaces import WorkspaceInfo, detect_workspaces, summarize_packages
 
 DEFAULT_IGNORE_DIRS = {
     ".git", ".hg", ".svn", "node_modules", "dist", "build", "out",
@@ -200,6 +201,9 @@ class FileEntry:
     is_minified: bool = False
     is_vendored: bool = False
     detect_evidence: dict = field(default_factory=dict)
+    # v0.13: owning package (workspaces.py): posix rel path of the
+    # package root, "" for the root package / unpackaged root files.
+    package: str = ""
 
     def to_dict(self):
         return asdict(self)
@@ -209,6 +213,9 @@ class FileEntry:
 class ScanResult:
     root: str
     files: list[FileEntry] = field(default_factory=list)
+    # v0.13: workspace detection for the scanned root (None for a
+    # single-file scan and for hand-built results).
+    workspaces: WorkspaceInfo | None = None
 
     @property
     def total_tokens(self) -> int:
@@ -219,13 +226,25 @@ class ScanResult:
         return sum(f.size for f in self.files)
 
     def to_dict(self):
-        return {
+        payload = {
             "root": self.root,
             "total_tokens": self.total_tokens,
             "total_size": self.total_size,
             "file_count": len(self.files),
             "files": [f.to_dict() for f in self.files],
+            "packages": summarize_packages(self),
         }
+        if self.workspaces is not None:
+            # v0.13 (audit G08 F1): the detection evidence itself —
+            # declared-but-missing members and clamp warnings must
+            # be visible somewhere, not just recorded.
+            payload["workspace"] = {
+                "declared": self.workspaces.declared,
+                "is_monorepo": self.workspaces.is_monorepo,
+                "missing": list(self.workspaces.missing),
+                "warnings": list(self.workspaces.warnings),
+            }
+        return payload
 
 
 def _looks_binary(data: bytes) -> bool:
@@ -249,6 +268,10 @@ def scan(root: str | Path, ignore_matcher=None) -> ScanResult:
             _add_file(result, abspath, rel)
         return result
 
+    # v0.13: detect the package layout ONCE for the whole walk;
+    # every file added below is assigned its package by prefix.
+    result.workspaces = detect_workspaces(root)
+    package_for = result.workspaces.package_for
     gitignore = Gitignore(root)
     for dirpath, dirnames, filenames in os.walk(root):
         dirpath_p = Path(dirpath)
@@ -278,12 +301,13 @@ def scan(root: str | Path, ignore_matcher=None) -> ScanResult:
                 continue
             if ignore_matcher and ignore_matcher(rel_posix):
                 continue
-            _add_file(result, abspath, rel_posix)
+            _add_file(result, abspath, rel_posix, package=package_for(rel_posix))
     result.files.sort(key=lambda f: f.tokens, reverse=True)
     return result
 
 
-def _add_file(result: ScanResult, abspath: Path, rel_posix: str) -> None:
+def _add_file(result: ScanResult, abspath: Path, rel_posix: str,
+              package: str = "") -> None:
     suffix = abspath.suffix.lower()
     if suffix in BINARY_EXTS:
         return
@@ -317,4 +341,5 @@ def _add_file(result: ScanResult, abspath: Path, rel_posix: str) -> None:
         is_minified="minified" in evidence,
         is_vendored="vendored" in evidence,
         detect_evidence=evidence,
+        package=package,
     ))

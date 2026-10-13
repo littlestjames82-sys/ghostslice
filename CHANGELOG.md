@@ -3,6 +3,42 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [0.13.0] - 2026-10-13
+### Added
+- Monorepo / workspace support (`workspaces.py`): package
+  boundaries detected once per scan from root-level workspace
+  manifests — npm `workspaces` (array or `{packages: [...]}`,
+  `!` negations), `pnpm-workspace.yaml` (block list at any
+  indentation plus single-line flow lists), Cargo `[workspace]`
+  `members`/`exclude` (TOML-lite: quoted strings, comments inside
+  arrays; `exclude` cannot remove an explicitly listed member),
+  `go.work` `use` directives (single + block form), and
+  `[tool.uv.workspace]` members. Declared members that are
+  missing on disk are reported (`missing`); members escaping the
+  project root are skipped with a warning — both are visible in
+  `scan` text and in the `--json` `"workspace"` block.
+- Manifest fallback: when nothing is declared, top-level
+  directories (or their immediate subdirectories, the
+  `packages/<name>` shape) carrying a recognised manifest are
+  reported as kind `detected`, visibly distinct from `declared`.
+  Nested packages resolve outermost-first; `**` in a member glob
+  counts as one path segment (documented simplification).
+- Every scanned file gains a `package` field (owning package
+  root, `""` for the root package). Per-package subtotals
+  (files / original estimated tokens / share, plus sliced
+  tokens/share in bundles) appear in `scan` text (when more
+  than one package exists), `scan --json` (`"packages"`), the
+  export manifest (`"package"` per file, top-level
+  `"packages"`), `/api/scan`, and the HTML report.
+### Notes
+- Additive only: pre-v0.13 bundles still validate (the new
+  manifest keys are ignored by the validator), and single-package
+  projects see no new output beyond the JSON fields. Selection,
+  modes, budgets, graph and lint behaviour are unchanged;
+  per-package budgets are out of scope.
+- GhostBus verification: totals unchanged (129,555 -> 45,770
+  estimated tokens); all 42 files sit in the root package.
+
 ## [0.12.0] - 2026-10-13
 ### Added
 - Detection module (`detect.py`): generated / minified / vendored

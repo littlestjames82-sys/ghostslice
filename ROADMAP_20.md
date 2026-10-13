@@ -23,7 +23,7 @@ Baseline: v0.5.0, 149 tests passed.
 | G5 | Token estimator calibration: per-language factors, golden corpora, `calibrate` report | v0.10.0 | done |
 | G6 | Context lint: rule engine for context waste (oversize, generated, vendored, minified, giant lines) | v0.11.0 | done |
 | G7 | Generated/minified/vendored detection wired into scan, graph, export (opt-in auto-modes) | v0.12.0 | done |
-| G8 | Monorepo support: workspace detection (npm/Cargo/go/pyproject), per-package subtotals everywhere | v0.13.0 | pending |
+| G8 | Monorepo support: workspace detection (npm/Cargo/go/pyproject), per-package subtotals everywhere | v0.13.0 | done |
 | G9 | History analytics: trends, per-model $ saved, ASCII chart, JSON export + savings-history chart embedded in the HTML report (Ryan's mockups, Oct 13) | v0.14.0 | pending |
 | G10 | `init` wizard: analyze a project and generate a tuned .ghostslice.json (non-interactive --yes mode) | v0.15.0 | pending |
 | G11 | New bundle formats: Anthropic-style XML bundle + JSON bundle presets | v0.16.0 | pending |
@@ -199,3 +199,28 @@ the audit findings that drove the two improvement rounds.
   (caller inventory, protection interplay, manifest surface)
   with no new defects; its fixes were discoverability (profile
   docstring) and the docs set.
+- G8 (v0.13.0) DONE Oct 13, 2026: monorepo support shipped — new
+  workspaces.py detects package boundaries once per scan from
+  root manifests (npm workspaces array/object + "!" negations,
+  pnpm-workspace.yaml, Cargo [workspace] members/exclude,
+  go.work use directives, uv workspace members), with a manifest
+  fallback (top level + one below, the packages/<name> shape)
+  labelled "detected" vs "declared"; outermost wins, `**` counts
+  as one segment, escaping members are clamped with warnings,
+  missing members are reported. Every FileEntry gains `package`;
+  per-package subtotals (files / tokens / share, + sliced in
+  bundles) land in scan text + --json (with a "workspace"
+  evidence block), the export manifest (additive; old bundles
+  still validate), /api/scan, and the HTML report. GhostBus
+  unchanged: 129,555 -> 45,770, all files in the root package.
+  Tests 370 -> 398 (28 new). Audit rounds (audits/G08_audit.md):
+  round 1 headline fixes — detection missing/warnings were
+  recorded but invisible on every surface (now in scan text +
+  JSON), pnpm items at column 0 ended the list early, Cargo
+  exclude removed explicitly listed members (now glob-only,
+  per Cargo semantics), go.work/pnpm files now count as root
+  evidence, `**` behaviour pinned. Round 2 headline fixes —
+  a column-0 comment inside the pnpm list no longer ends it,
+  and single-line flow-style `packages: [...]` is parsed;
+  remaining TOML-lite limits and the all-or-nothing fallback
+  reviewed and accepted.
