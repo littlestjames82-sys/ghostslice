@@ -185,10 +185,53 @@ def _lite_symbols(source: str, language: str, path: str) -> set[str]:
     return {n for n in names if n not in _NOT_SYMBOLS and len(n) >= 2}
 
 
+_YAML_KEY_SYM_RE = re.compile(r"^\s*-?\s*\"?([A-Za-z_][\w.\-]*)\"?\s*:", re.M)
+_TOML_KEY_SYM_RE = re.compile(r"^\s*\"?([A-Za-z_][\w\-]*)\"?\s*=", re.M)
+_TOML_TABLE_SYM_RE = re.compile(r"^\[\[?([A-Za-z0-9_.\-]+)\]\]?", re.M)
+
+
+def _config_symbols(language: str, source: str) -> set[str]:
+    """Symbol names for config files (v0.9): mapping/table keys.
+
+    A task that names a config key (`database`, `api_token`) should
+    earn the symbol bonus on the file that defines it, exactly like
+    a function name in code. JSON keys come from a real parse (all
+    depths, capped); YAML/TOML keys from line patterns. Never raises.
+    """
+    names: set[str] = set()
+    try:
+        if language == "json":
+            import json as _json
+            data = _json.loads(source)
+            stack = [data]
+            seen = 0
+            while stack and seen < 500:
+                node = stack.pop()
+                if isinstance(node, dict):
+                    for k, v in node.items():
+                        names.add(str(k))
+                        seen += 1
+                        if isinstance(v, (dict, list)):
+                            stack.append(v)
+                elif isinstance(node, list):
+                    stack.extend(v[:5])
+        elif language == "yaml":
+            names.update(_YAML_KEY_SYM_RE.findall(source))
+        elif language == "toml":
+            names.update(_TOML_KEY_SYM_RE.findall(source))
+            for table in _TOML_TABLE_SYM_RE.findall(source):
+                names.update(seg for seg in table.split(".") if seg)
+    except Exception:
+        pass
+    return {n for n in names if n not in _NOT_SYMBOLS and len(n) >= 2}
+
+
 def symbols_for_source(language: str, source: str, path: str = "") -> set[str]:
     """All symbol names defined in one file (empty when not applicable)."""
     if language == "python":
         return _py_symbols(source)
+    if language in ("yaml", "toml", "json"):
+        return _config_symbols(language, source)
     if language in SLICABLE and language != "notebook":
         return _lite_symbols(source, language, path)
     return set()

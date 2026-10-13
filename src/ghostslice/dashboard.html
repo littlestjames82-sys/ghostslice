@@ -113,7 +113,7 @@ function render(){
       `<td><div class="bar" style="width:${h.width};background:${h.color}"></div>` +
       `<span class="path">${f.path}</span>${f.is_test?'<span class="tag">test</span>':''}${f.is_lockfile?'<span class="tag">lockfile</span>':''}` +
       `<div class="muted">${f.language} · ${f.lines} lines</div></td>` +
-      `<td><select data-act="mode">${['full','signatures','interfaces','strip-tests','exclude'].map(m=>`<option ${m===f.mode?'selected':''}>${m}</option>`).join('')}</select></td>` +
+      `<td><select data-act="mode">${['full','signatures','interfaces','structure','headings','strip-tests','exclude'].map(m=>`<option ${m===f.mode?'selected':''}>${m}</option>`).join('')}</select></td>` +
       `<td class="tokens">${fmt(currentTokens(f))}<div class="muted">of ${fmt(f.tokens)}</div></td>`;
     tr.querySelector('[data-act="toggle"]').addEventListener('change', (e)=>{
       f.mode = e.target.checked ? f.prev_mode || f.default_mode : 'exclude';

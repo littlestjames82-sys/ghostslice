@@ -35,6 +35,7 @@ from .profile import PRESETS, load_profile
 from .scanner import scan
 from .secrets_scan import scan_scan_result, scan_text
 from .selection import select_for_diff, select_for_task, select_for_task_breakdown
+from .configslice import CONFIG_LANGUAGES
 from .slicer import MODES, slice_text
 
 
@@ -417,7 +418,8 @@ def main(argv: list[str] | None = None) -> int:
         before = after = 0
         for entry in result.files:
             text = Path(entry.abspath).read_text(encoding="utf-8", errors="replace")
-            mode = args.mode if entry.language in SLICABLE or entry.language == "markdown" else "full"
+            mode = args.mode if entry.language in SLICABLE or entry.language == "markdown" \
+                or entry.language in CONFIG_LANGUAGES else "full"
             r = slice_text(entry.path, text, mode)
             before += r.original_tokens
             after += r.sliced_tokens

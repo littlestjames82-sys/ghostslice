@@ -19,7 +19,7 @@ Baseline: v0.5.0, 149 tests passed.
 | G1 | Watch mode: polling watcher, auto rescan/re-export on change, debounced, ledger-aware | v0.6.0 | done |
 | G2 | Task selection v2: symbol-name matching + import-graph boosting on top of TF-IDF | v0.7.0 | done |
 | G3 | C, C++, Scala parser-lite slicers (systems-language completion) | v0.8.0 | done |
-| G4 | Config slicing: shell/PowerShell + SQL + YAML/TOML structure mode (keys/structure, values optional) | v0.9.0 | pending |
+| G4 | Config slicing: shell/PowerShell + SQL + YAML/TOML structure mode (keys/structure, values optional) | v0.9.0 | done |
 | G5 | Token estimator calibration: per-language factors, golden corpora, `calibrate` report | v0.10.0 | pending |
 | G6 | Context lint: rule engine for context waste (oversize, generated, vendored, minified, giant lines) | v0.11.0 | pending |
 | G7 | Generated/minified/vendored detection wired into scan, graph, export (opt-in auto-modes) | v0.12.0 | pending |
@@ -96,3 +96,26 @@ the audit findings that drove the two improvement rounds.
   (`= 0;`, attributes, trailing returns) are now prototypes running
   to that line; K&R definitions are consequently read as
   prototypes (documented, still unsupported).
+- G4 (v0.9.0) DONE Oct 13, 2026: config slicing shipped — a new
+  `structure` mode (configslice.py) for YAML/TOML/JSON/SQL/shell/
+  PowerShell: key/DDL/function surface kept, values under a
+  documented rule (sensitive keys always placeholdered, segment
+  matching; numbers/bools/short enum-like strings kept; free text
+  and block scalars placeholdered wholesale; secret-scanner
+  backstop over every rendering), sequences/JSON arrays collapse
+  to an exemplar + count, homogeneous JSON maps >20 entries
+  collapse too, SQL INSERT summaries carry counted rows, config
+  keys joined the G2 symbol fallback. Config files still default
+  to full (GhostBus demo unchanged: 165,052 -> 53,339; only
+  scanner language labels moved). Tests 223 -> 276 (53 new).
+  Audit rounds (audits/G04_audit.md): round 1 headline fixes —
+  two CRITICAL leaks (indentless YAML sequences under sensitive
+  keys rendered their exemplar verbatim; one-line shell/PS
+  functions kept bodies that could hold assignment-shaped
+  secrets), sequences under sensitive keys now collapse
+  wholesale, blank-separated lists collapse correctly, TOML
+  trailing comments no longer corrupt arrays/strings, dashboard
+  mode dropdown gained structure/headings. Round 2 headline
+  fixes — PowerShell here-string opener with a trailing comment
+  no longer leaks its body into the rendering, and flow-style
+  YAML list items render through the flow renderer.

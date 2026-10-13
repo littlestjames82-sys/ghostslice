@@ -29,6 +29,7 @@ TEXT_EXTS = {
     ".html", ".css", ".sh", ".rb", ".go", ".rs", ".java", ".c", ".h",
     ".cpp", ".hpp", ".cc", ".cxx", ".hh", ".cs", ".php", ".swift", ".kt", ".kts", ".sql", ".xml",
     ".scala", ".sc",
+    ".bash", ".zsh", ".ps1", ".psm1",
     ".ipynb",
 }
 
@@ -52,6 +53,15 @@ LANGUAGE_BY_EXT = {
     ".c": "c", ".h": "c",
     ".cpp": "cpp", ".cc": "cpp", ".cxx": "cpp", ".hpp": "cpp", ".hh": "cpp",
     ".scala": "scala", ".sc": "scala",
+    # v0.9: config/data languages for the `structure` mode. Until now
+    # these extensions scanned as generic "text"; the label change is
+    # the only scanner-visible difference (file set and token counts
+    # are unchanged — unknown text extensions were already included).
+    ".yaml": "yaml", ".yml": "yaml",
+    ".toml": "toml",
+    ".sql": "sql",
+    ".sh": "shell", ".bash": "shell", ".zsh": "shell",
+    ".ps1": "powershell", ".psm1": "powershell",
     ".ipynb": "notebook",
 }
 

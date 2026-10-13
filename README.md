@@ -71,6 +71,7 @@ Modes, per file:
 | `strip-tests` | source with `test_*` / `Test*` definitions removed; a test file slices to empty | source with `describe`/`it`/`test` blocks removed; a test file slices to empty |
 | `exclude` | empty | empty |
 | `headings` | (docs/notebooks) | (docs/notebooks) |
+| `structure` | (config/data files, below) | (config/data files, below) |
 
 More modes (v0.4): Markdown files support `headings` (headings plus the
 first paragraph under each heading; docs still default to `full`, opt in
@@ -79,6 +80,66 @@ rendering: `signatures`/`full` keep code-cell source only (outputs and
 execution counts are stripped, markdown cells kept as comments) and
 `strip-tests` drops test cells. Malformed notebooks never crash the
 slicer.
+
+### Config and data files: `structure` mode (v0.9)
+
+YAML, TOML, JSON, SQL, shell and PowerShell files get a real slicing
+story. `structure` keeps a file's shape — key paths, table headers,
+DDL, function definitions — and replaces values under the rule below.
+`signatures` means the same surface for these languages; `interfaces`
+is the values-free variant (SQL: CREATE statements only). Config files
+still default to `full` in exports — opt in per-glob via a profile
+(`"modes": {"*.yaml": "structure"}`) or with `--mode structure`.
+
+- **YAML**: mapping keys and nesting kept; sequences collapse to one
+  rendered exemplar item plus a `… (+N more)` line; flow collections
+  render recursively; anchors kept, aliases pass through. Comments
+  are kept only in the leading header block or directly above a
+  mapping key at the same indent (section headers); trailing
+  comments are dropped.
+- **TOML**: table headers and dotted keys kept, order preserved;
+  multi-line strings and multi-line arrays collapse to one-line
+  placeholders; inline tables collapse to `{…}`.
+- **JSON**: real parse; key order preserved; arrays render one
+  exemplar element plus a `… (N more items)` marker; homogeneous
+  maps with more than 20 entries collapse to one exemplar entry.
+  Invalid JSON returns the source unchanged.
+- **SQL**: CREATE statements are kept in full (they are the schema);
+  INSERT collapses to a summary comment with a counted row total
+  (INSERT ... SELECT is labelled not countable); other statements
+  collapse to a one-line summary. Comments standing between
+  statements are preserved.
+- **Shell / PowerShell**: function definitions collapse to their
+  header line; top-level variable assignments are kept under the
+  value rule; the leading comment block is kept. Shell heredoc
+  bodies are never parsed as code; PowerShell here-strings are
+  placeholdered.
+
+**The value rule** (security is senior to convenience):
+
+1. A value under a sensitive-looking key is ALWAYS replaced by a
+   placeholder (`"…"`), whatever its type — a PIN under `password:`
+   is a number and still goes. Sensitive = any name segment (split
+   on non-alphanumerics and camelCase) in {password, passwd, pass,
+   pwd, secret, token, key, auth, credential(s), private, session,
+   cookie, bearer, jwt, apikey}, or the name containing "secret",
+   "password", "passwd" or "credential" anywhere. So `db_pass`,
+   `apiToken`, `client-secret` are sensitive; `monkey`, `tokenizer`
+   are not.
+2. Numbers, booleans and nulls under other keys are kept.
+3. A string under another key is kept only when it is clearly
+   enum-like: ≤ 24 chars, a single token of `[A-Za-z0-9._/+:-]`, or
+   an env/placeholder reference (`${...}`, `$VAR`); random-looking
+   strings (12+ chars mixing upper, lower and digits) are
+   placeholdered anyway. Long strings and free text always become
+   `"…"` (JSON: `"…(len N)"`).
+4. Block scalars, multi-line strings and other free-text constructs
+   are placeholdered wholesale.
+
+Every rendering also passes through the v0.4 secret scanner as a
+backstop: any output line it still flags has its value replaced.
+Structure mode is tested to never leak a planted secret in any of
+the six formats.
 
 ### Export: one-click agent bundle
 
@@ -435,6 +496,7 @@ src/ghostslice/
   tokens.py     token estimator (documented method)
   scanner.py    .gitignore-aware project scanner (nested .gitignore support)
   slicer.py     Python ast slicer + TS/JS parser-lite slicer (+ Go/Rust/Java/C# lite in v0.3, PHP/Ruby/Kotlin/Swift lite in v0.5, C/C++/Scala lite in v0.8)
+  configslice.py  structure mode for YAML/TOML/JSON/SQL/shell/PowerShell (v0.9): value rule + scanner backstop
   graph.py      import graph + prune recommendations + git changed-files
   secrets_scan.py  secret guard: provider token shapes, assignments, entropy (v0.4)
   duplicates.py exact (sha256) + near (line-shingle Jaccard) duplicates (v0.4)

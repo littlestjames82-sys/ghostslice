@@ -52,10 +52,11 @@ import ast
 import re
 from dataclasses import dataclass
 
+from .configslice import CONFIG_LANGUAGES, slice_config
 from .scanner import is_test_file, language_for
 from .tokens import estimate_tokens
 
-MODES = ("full", "signatures", "interfaces", "strip-tests", "exclude", "headings")
+MODES = ("full", "signatures", "interfaces", "structure", "strip-tests", "exclude", "headings")
 
 
 @dataclass
@@ -92,6 +93,12 @@ def slice_source(source: str, language: str, mode: str, path: str = "") -> str:
         return ""
     if mode == "headings" and language not in ("markdown", "notebook"):
         return source  # headings is a docs/notebook mode; other files stay full
+    if mode == "structure" and language not in CONFIG_LANGUAGES:
+        return source  # structure is a config/data mode; code files stay full
+    if language in CONFIG_LANGUAGES:
+        if mode in ("signatures", "interfaces", "structure"):
+            return slice_config(source, language, mode, path=path)
+        return source  # strip-tests: no test convention inside these files
     if language == "python":
         return _slice_python(source, mode)
     if language == "notebook":

@@ -3,6 +3,47 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [0.9.0] - 2026-10-13
+### Added
+- `structure` mode for config/data files (new module
+  `configslice.py`): YAML, TOML and JSON render their key shape
+  with values under a documented value rule; SQL keeps CREATE
+  statements in full and collapses INSERT/other statements to
+  summary comments (INSERT row counts counted, INSERT ... SELECT
+  labelled not countable); shell and PowerShell `signatures`
+  collapse function definitions and keep top-level assignments
+  under the same rule. `interfaces` is the values-free variant
+  (SQL: CREATE only). Config files still default to `full`;
+  structure is opt-in via profile or `--mode`.
+- The value rule: a value under a sensitive-looking key (segment
+  match: password/passwd/pass/pwd/secret/token/key/auth/
+  credential/private/session/cookie/bearer/jwt/apikey, plus
+  substring rules) is ALWAYS placeholdered, numbers included.
+  Numbers/booleans/nulls and short enum-like strings are kept
+  under other keys; long/free-text values and block scalars are
+  placeholdered wholesale. Every rendering is re-checked by the
+  secret scanner as a backstop (flagged output lines lose their
+  value portion).
+- YAML sequences collapse to one exemplar plus a count (a
+  sequence under a sensitive key collapses wholesale); JSON
+  arrays likewise, and homogeneous JSON maps over 20 entries
+  collapse to one exemplar entry.
+- Scanner language names for the new types (yaml, toml, sql,
+  shell, powershell — previously generic "text"; file set and
+  token counts unchanged), the `slice` CLI applies modes to them,
+  fit's rung table knows `structure`, the dashboard mode dropdown
+  offers `structure`/`headings`, and YAML/TOML/JSON top-level
+  keys now serve as task-selection symbols.
+### Notes
+- Audit: audits/G04_audit.md (two improve rounds). Round 1 fixed
+  two CRITICAL leaks (indentless YAML sequences under sensitive
+  keys rendered verbatim; one-line shell/PowerShell functions
+  kept bodies that could hold assignment-shaped secrets) plus a
+  sensitive-parent sequence rule, blank-line list collapsing,
+  and TOML trailing-comment corruption. Round 2 fixed a
+  PowerShell here-string variant and flow-style YAML list items.
+- GhostBus demo unchanged: 165,052 -> 53,339 estimated tokens.
+
 ## [0.8.0] - 2026-10-13
 ### Added
 - C, C++, and Scala parser-lite slicers (signatures, interfaces,

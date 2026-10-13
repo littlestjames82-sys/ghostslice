@@ -43,7 +43,7 @@ from .slicer import slice_text
 
 _LADDER = ["full", "signatures", "interfaces", "exclude"]
 _RUNG = {"full": 0, "signatures": 1, "interfaces": 2, "strip-tests": 2,
-         "headings": 2, "exclude": 3}
+         "headings": 2, "structure": 2, "exclude": 3}
 
 
 def _next_rung(mode: str) -> str | None:
