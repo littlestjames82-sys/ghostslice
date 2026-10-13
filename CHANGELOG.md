@@ -3,6 +3,51 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [0.8.0] - 2026-10-13
+### Added
+- C, C++, and Scala parser-lite slicers (signatures, interfaces,
+  strip-tests), wired through the scanner language map and
+  test-file detection, export defaults, the `slice` CLI, and the
+  task-selection symbol fallback (symbols are read from the
+  slicers' own signatures output, as for the other lite languages).
+  - C: preprocessor lines are surface in both reducing modes;
+    struct/union/enum blocks and typedefs are kept as declaration
+    surface; function definitions collapse to their signature,
+    prototypes are kept as-is (a header of prototypes barely
+    shrinks in signatures mode — pinned by a test). strip-tests
+    drops `test_*`/`testXxx` functions.
+  - C++: classes reduced to member signatures, namespaces
+    recursed, single-line template heads (standalone or inline),
+    enum class blocks, typedef/using kept; out-of-line definitions
+    (`int Store::total() const`), constructor initializer lists,
+    and split declarations (`= 0;` / attributes / trailing returns
+    on following lines) supported. strip-tests also drops gtest
+    `TEST`/`TEST_F`/`TEST_P` blocks. `.h` is C by convention;
+    C++ headers are `.hpp`/`.hh`.
+  - Scala: def/val/var signatures, class/object reduced to member
+    signatures, trait/enum kept in full; Scala 3 significant-
+    indentation bodies handled by an indentation fallback that
+    keeps more rather than less (an indented trait is kept whole).
+    strip-tests drops `@Test` defs, `test_*` defs, and
+    `test("...") { }` blocks.
+- The shared brace matcher gained language-gated awareness:
+  C/C++ preprocessor lines and their backslash continuations are
+  never brace-counted, C++ raw strings `R"delim(...)delim"` are
+  consumed whole, `'` digit separators (1'000'000) do not open
+  char literals, Scala block comments nest, and Scala
+  triple-quoted strings and `s"..."` interpolation are honoured.
+### Notes
+- Audit: audits/G03_audit.md (two improve rounds). The round-1
+  headline was a CRITICAL head-detection miss: qualified
+  (`Store::total`) and pointer-attached (`char *get_name`)
+  function names matched nothing, so out-of-line definitions
+  vanished and their bodies leaked; also fixed comment-blind
+  declaration scans and split declarations. Known lite limits
+  (documented in README): K&R parameter declarations are read as
+  prototypes, one-line class bodies lose their members,
+  `extern "C"` wrappers, C++ concepts/requires, Scala `given`
+  instances and extension methods.
+
 ## [0.7.0] - 2026-10-13
 ### Added
 - Task selection v2 for `ghostslice task --task`: symbol-name

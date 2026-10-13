@@ -20,7 +20,8 @@ from .slicer import MODES, slice_text
 from .tokens import METHOD, estimate_tokens
 
 SLICABLE = {"python", "typescript", "javascript", "go", "rust", "java", "csharp",
-            "notebook", "php", "ruby", "kotlin", "swift"}
+            "notebook", "php", "ruby", "kotlin", "swift",
+            "c", "cpp", "scala"}
 
 
 def default_mode_for(entry) -> str:

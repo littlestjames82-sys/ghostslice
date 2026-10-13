@@ -326,7 +326,7 @@ Tools: `scan_project`, `slice_file`, `estimate_cost`, `export_bundle`,
 Same zero-dependency stdlib pattern as the Ghost Hands MCP server: any
 MCP client that can spawn a stdio process can drive GhostSlice.
 
-### More languages (v0.3, v0.5)
+### More languages (v0.3, v0.5, v0.8)
 
 Go, Rust, Java, and C# joined Python and TypeScript/JavaScript in
 v0.3, with parser-lite `signatures` and `interfaces` modes and test
@@ -346,6 +346,33 @@ Ruby blocks are tracked by keyword/`end` matching (no braces); the
 others reuse the string/comment-aware brace matcher. Parser-lite
 honesty applies: conventional formatting slices well, exotic syntax
 may not.
+
+v0.8 adds C, C++, and Scala, same parser-lite label:
+
+| Language | signatures / interfaces keep | strip-tests drops |
+|---|---|---|
+| C | `#include` and other preprocessor lines, function signatures/prototypes, struct/union/enum blocks, typedefs | `test_*` / `testXxx` functions |
+| C++ | the C surface plus classes (member signatures), namespaces, templates, enum class | gtest `TEST`/`TEST_F`/`TEST_P` blocks, `test_*` functions |
+| Scala | `def` signatures, `val`/`var`, class/object declarations, trait/enum in full | `@Test` defs, `test_*` defs, `test("...") { }` blocks |
+
+C details: interfaces mode keeps the type surface (struct/union/
+enum/typedef, preprocessor) and drops free functions; a `.h` header
+of prototypes barely shrinks in signatures mode, which is correct —
+it is already all surface. `.h` is treated as C by convention (C++
+headers use `.hpp`/`.hh`); a C++ class in a `.h` file slices by the
+C rules and loses its class context. The brace matcher now also
+skips preprocessor lines (macro braces cannot corrupt it), consumes
+C++ raw strings whole, and treats `1'000'000` digit separators and
+`'{'` char literals correctly. C++ out-of-line definitions
+(`int Store::total() const`) and constructor initializer lists are
+supported. Scala details: block comments nest, triple-quoted
+strings and `s"..."` interpolation are honoured, and Scala 3
+significant-indentation bodies are handled by an indentation
+fallback that degrades to keeping more (an indented trait is kept
+in full), never less. Known lite limits for the three: K&R
+parameter declarations (read as a prototype), one-line class
+bodies, `extern "C"` wrappers, C++ concepts/requires clauses,
+Scala `given` instances and extension methods.
 
 ### Dashboard: visual context tree
 
@@ -407,7 +434,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 src/ghostslice/
   tokens.py     token estimator (documented method)
   scanner.py    .gitignore-aware project scanner (nested .gitignore support)
-  slicer.py     Python ast slicer + TS/JS parser-lite slicer (+ Go/Rust/Java/C# lite in v0.3, PHP/Ruby/Kotlin/Swift lite in v0.5)
+  slicer.py     Python ast slicer + TS/JS parser-lite slicer (+ Go/Rust/Java/C# lite in v0.3, PHP/Ruby/Kotlin/Swift lite in v0.5, C/C++/Scala lite in v0.8)
   graph.py      import graph + prune recommendations + git changed-files
   secrets_scan.py  secret guard: provider token shapes, assignments, entropy (v0.4)
   duplicates.py exact (sha256) + near (line-shingle Jaccard) duplicates (v0.4)

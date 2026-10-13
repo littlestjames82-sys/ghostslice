@@ -27,7 +27,8 @@ TEXT_EXTS = {
     ".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
     ".md", ".markdown", ".txt", ".json", ".yaml", ".yml", ".toml", ".cfg", ".ini",
     ".html", ".css", ".sh", ".rb", ".go", ".rs", ".java", ".c", ".h",
-    ".cpp", ".hpp", ".cs", ".php", ".swift", ".kt", ".kts", ".sql", ".xml",
+    ".cpp", ".hpp", ".cc", ".cxx", ".hh", ".cs", ".php", ".swift", ".kt", ".kts", ".sql", ".xml",
+    ".scala", ".sc",
     ".ipynb",
 }
 
@@ -46,6 +47,11 @@ LANGUAGE_BY_EXT = {
     ".go": "go", ".rs": "rust", ".java": "java", ".cs": "csharp",
     ".php": "php", ".rb": "ruby", ".kt": "kotlin", ".kts": "kotlin",
     ".swift": "swift",
+    # v0.8: .h is C by convention here (C++ headers use .hpp/.hh);
+    # .sc is treated as a Scala script (no competing mapping exists).
+    ".c": "c", ".h": "c",
+    ".cpp": "cpp", ".cc": "cpp", ".cxx": "cpp", ".hpp": "cpp", ".hh": "cpp",
+    ".scala": "scala", ".sc": "scala",
     ".ipynb": "notebook",
 }
 
@@ -66,13 +72,17 @@ def is_test_file(rel: str) -> bool:
             or ".spec." in name or name.startswith("test.") or name.endswith("_spec.rb") \
             or name.endswith("_test.rb") \
             or name.endswith("test.java") or name.endswith("tests.java") \
-            or name.endswith("test.cs") or name.endswith("tests.cs"):
+            or name.endswith("test.cs") or name.endswith("tests.cs") \
+            or name.endswith("_test.c") or name.endswith("_test.cpp") \
+            or name.endswith("_test.cc") or name.endswith("_test.cxx"):
         return True
     # Case-sensitive conventions the lowercased checks above would
     # over-match (e.g. "latest.php" must not count as a PHP test file):
     orig = p.name
     if orig.endswith(("Test.php", "Tests.php", "Test.kt", "Tests.kt",
-                      "Test.swift", "Tests.swift")):
+                      "Test.swift", "Tests.swift",
+                      "Test.scala", "Tests.scala", "Spec.scala",
+                      "Specs.scala", "Suite.scala", "Suites.scala")):
         return True
     return False
 

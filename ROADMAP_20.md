@@ -18,13 +18,13 @@ Baseline: v0.5.0, 149 tests passed.
 |---|------|---------|--------|
 | G1 | Watch mode: polling watcher, auto rescan/re-export on change, debounced, ledger-aware | v0.6.0 | done |
 | G2 | Task selection v2: symbol-name matching + import-graph boosting on top of TF-IDF | v0.7.0 | done |
-| G3 | C, C++, Scala parser-lite slicers (systems-language completion) | v0.8.0 | pending |
+| G3 | C, C++, Scala parser-lite slicers (systems-language completion) | v0.8.0 | done |
 | G4 | Config slicing: shell/PowerShell + SQL + YAML/TOML structure mode (keys/structure, values optional) | v0.9.0 | pending |
 | G5 | Token estimator calibration: per-language factors, golden corpora, `calibrate` report | v0.10.0 | pending |
 | G6 | Context lint: rule engine for context waste (oversize, generated, vendored, minified, giant lines) | v0.11.0 | pending |
 | G7 | Generated/minified/vendored detection wired into scan, graph, export (opt-in auto-modes) | v0.12.0 | pending |
 | G8 | Monorepo support: workspace detection (npm/Cargo/go/pyproject), per-package subtotals everywhere | v0.13.0 | pending |
-| G9 | History analytics: trends, per-model $ saved, ASCII chart, JSON export | v0.14.0 | pending |
+| G9 | History analytics: trends, per-model $ saved, ASCII chart, JSON export + savings-history chart embedded in the HTML report (Ryan's mockups, Oct 13) | v0.14.0 | pending |
 | G10 | `init` wizard: analyze a project and generate a tuned .ghostslice.json (non-interactive --yes mode) | v0.15.0 | pending |
 | G11 | New bundle formats: Anthropic-style XML bundle + JSON bundle presets | v0.16.0 | pending |
 | G12 | Redact-in-place export: --redact-secrets replaces secret values with placeholders instead of excluding files | v0.17.0 | pending |
@@ -32,10 +32,10 @@ Baseline: v0.5.0, 149 tests passed.
 | G14 | Python call graph: function-level graph, entry-point reachability, dead-function candidates | v0.19.0 | pending |
 | G15 | Performance: scan caching (.ghostslice-cache), parallel scan, benchmark proof, identical totals | v0.20.0 | pending |
 | G16 | Fuzz/robustness: malformed-input fuzzing for every slicer + encoding handling (BOM, UTF-16, latin-1) | v0.21.0 | pending |
-| G17 | Dashboard v2: slice preview diff highlighting + budget slider with live auto-fit preview | v0.22.0 | pending |
+| G17 | Dashboard v2: side-by-side slice preview (original vs slice, per Ryan's mockups, Oct 13) with diff highlighting + budget slider with live auto-fit preview | v0.22.0 | pending |
 | G18 | Plugin system: user slicers from .ghostslice-plugins/*.py, documented API, example plugin | v0.23.0 | pending |
 | G19 | CI pack: `ghostslice ci` one-shot (budget + secrets + lint) with PR markdown summary + sample GitHub Action | v0.24.0 | pending |
-| G20 | v1.0.0: `doctor` self-check, shell completions, docs restructure, full release-readiness audit | v1.0.0 | pending |
+| G20 | v1.0.0: `doctor` self-check, shell completions, docs restructure, full release-readiness audit + mockup polish (Ryan approved Oct 13): scan CLI top-N with heat bars + % of total + token/cost summary box, export --fit report table in the mockup style | v1.0.0 | pending |
 
 Progress log is appended here as each goal closes, with test counts and
 the audit findings that drove the two improvement rounds.
@@ -76,3 +76,23 @@ the audit findings that drove the two improvement rounds.
   gate recomputed keyword parts per file (now computed once per
   selection); scope edges of the constants fix (nested classes,
   bare annotations, walrus) reviewed and pinned.
+- G3 (v0.8.0) DONE Oct 13, 2026: C, C++, Scala parser-lite slicers
+  shipped — C keeps preprocessor lines + struct/union/enum/typedef
+  surface (a prototypes-only header barely shrinks in signatures,
+  pinned), C++ adds member signatures, namespaces, templates,
+  out-of-line definitions and split declarations, Scala adds
+  def/val/var + trait/enum full with a Scala 3 indentation fallback
+  that keeps more rather than less; the shared brace matcher gained
+  gated preprocessor skipping, C++ raw strings, digit separators,
+  Scala nested comments / triple-quoted strings / interpolation.
+  Tests 196 -> 223 (27 new). Audit rounds (audits/G03_audit.md):
+  round 1 headline fix — a CRITICAL head-detection miss: qualified
+  (Store::total) and pointer-attached (char *get_name) names
+  matched nothing, so out-of-line definitions vanished and their
+  bodies leaked (same flaw fixed in the G2 symbol regex); plus
+  ctor-init-list continuation, comment-blind declaration scans,
+  raw-string delimiter and Scala `=:=` guards. Round 2 headline
+  fix — split declarations whose `;` lands on a following line
+  (`= 0;`, attributes, trailing returns) are now prototypes running
+  to that line; K&R definitions are consequently read as
+  prototypes (documented, still unsupported).

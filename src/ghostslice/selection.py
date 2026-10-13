@@ -88,6 +88,15 @@ _METHOD_RE = re.compile(
     r"final|abstract|static|async|export|default|override|suspend|pub|"
     r"sealed|data)\s+)*([A-Za-z_$][\w$]*)\s*\(", re.M)
 _VAR_RE = re.compile(r"\b(?:const|let|var|val)\s+([A-Za-z_$][\w$]*)\s*[:=]")
+# C/C++ declaration lines in signatures output (v0.8): an optional
+# return-type prefix ending in whitespace (or a pointer/reference),
+# then the name and its parameter list. Constructors (no prefix, the
+# name itself capitalised or the class name) are covered because the
+# prefix group is optional. Only applied to c/cpp signatures output.
+_C_SYM_RE = re.compile(
+    r"^\s*[\w:<>,\*&\[\]~ ]*?"
+    r"([A-Za-z_~]\w*|operator\s*\S+?)\s*\([^;{}]*\)"
+    r"\s*(?:(?:const|noexcept|override|final|&|&&)\s*)*(?:\{|;)", re.M)
 _PY_DEF_RE = re.compile(r"^\s*(?:async\s+def|def|class)\s+([A-Za-z_]\w*)", re.M)
 _NOT_SYMBOLS = {
     "if", "for", "while", "switch", "catch", "return", "sizeof", "with",
@@ -171,6 +180,8 @@ def _lite_symbols(source: str, language: str, path: str) -> set[str]:
     names.update(_GO_FUNC_RE.findall(sig))
     names.update(_METHOD_RE.findall(sig))
     names.update(_VAR_RE.findall(sig))
+    if language in ("c", "cpp"):
+        names.update(m.group(1) for m in _C_SYM_RE.finditer(sig))
     return {n for n in names if n not in _NOT_SYMBOLS and len(n) >= 2}
 
 

@@ -31,6 +31,20 @@ Go/Rust/Java/C# (v0.3), PHP/Kotlin/Swift (v0.5): the same line-scan +
 brace-matching approach, reusing the string/comment-aware brace
 matcher. Ruby (v0.5): no braces to match, so blocks are tracked by
 opener keywords and closing `end` lines (indent-conventional Ruby).
+
+C/C++/Scala (v0.8): same parser-lite approach again. C keeps `#include`
+and other preprocessor lines as surface and treats struct/union/enum/
+typedef declarations as interface surface; C++ adds classes with
+member signatures, namespaces, and single-line template heads; Scala
+adds def/val/var signatures and class/object/trait declarations.
+The shared brace matcher gained, gated to these languages only:
+C/C++ preprocessor lines (and their backslash continuations) are
+never brace-counted, C++ raw strings R"delim(...)delim" are consumed
+whole, C++ digit separators (1'000'000) do not open char literals,
+and Scala block comments nest while `triple-quoted` strings and
+s"...${...}" interpolation are honoured. Scala 3 significant-
+indentation style (no braces) is handled by an indentation-based
+fallback that degrades to keeping more, never less.
 """
 from __future__ import annotations
 
@@ -98,6 +112,10 @@ def slice_source(source: str, language: str, mode: str, path: str = "") -> str:
         return _slice_ruby(source, mode, path)
     if language in ("php", "kotlin", "swift"):
         return _slice_brace_extra(source, mode, language, path)
+    if language in ("c", "cpp"):
+        return _slice_c_family(source, mode, language, path)
+    if language == "scala":
+        return _slice_scala(source, mode, path)
     # Other languages: only full / exclude / strip-tests (test files) apply.
     return source
 
@@ -308,53 +326,103 @@ def _brace_end(lines: list[str], start_idx: int, start_col: int = 0,
 
     String/comment aware (v0.4): braces inside '...', "...", `...`
     template literals (including ${...} interpolation and multi-line
-    templates), // line comments and /* ... */ block comments do not
+    templates), // line comments and /* ... */ comments do not
     affect depth. State persists across lines. Remaining parser-lite
     limits: regex literals containing braces (e.g. /}/) and nested
     backticks inside ${...} expressions can still confuse the count.
     For Go/Rust/Java/C#/Kotlin/Swift (lang set), single quotes use a
     char-literal heuristic so Rust lifetimes do not open a phantom
     string (and Swift apostrophes in code are not string delimiters).
+
+    v0.8 additions, each gated to the new languages so the languages
+    above are byte-for-byte unaffected:
+    - c/cpp: lines whose first non-space char is `#` (and their
+      backslash-continuation lines) are preprocessor, never scanned:
+      braces in macro definitions cannot corrupt the count.
+    - cpp: raw strings R"delim( ... )delim" (also u8R/uR/UR/LR) are
+      consumed whole; their contents may hold quotes and braces.
+    - c/cpp: a `'` between two digits is a digit separator
+      (1'000'000), never a char literal.
+    - scala: /* */ comments nest; triple-quoted strings are consumed
+      whole; s"..." / striple-quoted ${...} interpolation counts braces
+      like code ($$ is an escaped dollar, ignored).
     """
     depth = 0
     seen = False
-    state: str | None = None  # "'", '"', '`', 'line', 'block'
+    state: str | None = None  # "'", '"', '`', '"""', 'line', 'block', 'raw'
     escaped = False
-    interp: list[int] = []  # depths at which a template ${ opened
-    char_langs = lang in ("go", "rust", "java", "csharp", "kotlin", "swift")
+    interp: list[tuple[int, str]] = []  # (depth at ${ open, string state to resume)
+    block_depth = 0
+    raw_term = ""
+    pp_cont = False
+    char_langs = lang in ("go", "rust", "java", "csharp", "kotlin", "swift",
+                          "c", "cpp", "scala")
     for i in range(start_idx, len(lines)):
         line = lines[i]
         if i == start_idx and body_col is not None and body_col >= 0:
             j = body_col
         else:
             j = start_col if i == start_idx else 0
+        if lang in ("c", "cpp") and state is None:
+            # Preprocessor line (or macro continuation): never scanned.
+            if pp_cont or line.lstrip().startswith("#"):
+                pp_cont = line.rstrip().endswith("\\")
+                if seen and depth == 0:
+                    return i
+                continue
+            pp_cont = False
         while j < len(line):
             ch = line[j]
             nxt = line[j + 1] if j + 1 < len(line) else ""
             if state == "line":
                 break
+            if state == "raw":
+                idx = line.find(raw_term, j)
+                if idx < 0:
+                    j = len(line)
+                    continue
+                state = None
+                j = idx + len(raw_term)
+                continue
             if state == "block":
+                if lang == "scala" and ch == "/" and nxt == "*":
+                    block_depth += 1
+                    j += 2
+                    continue
                 if ch == "*" and nxt == "/":
-                    state = None
+                    block_depth -= 1
+                    if block_depth <= 0:
+                        state = None
                     j += 2
                     continue
                 j += 1
                 continue
-            if state in ("'", '"', "`"):
+            if state in ("'", '"', "`", '"""'):
                 if escaped:
                     escaped = False
                     j += 1
                     continue
-                if ch == "\\" and state != "`":
+                if ch == "\\" and state not in ("`", '"""'):
                     escaped = True
                     j += 1
                     continue
-                if state == "`" and ch == "$" and nxt == "{":
-                    interp.append(depth)
+                if lang == "scala" and state in ('"', '"""') and ch == "$" and nxt == "$":
+                    j += 2
+                    continue
+                if (state == "`" or (lang == "scala" and state in ('"', '"""'))) \
+                        and ch == "$" and nxt == "{":
+                    interp.append((depth, state))
                     depth += 1
                     seen = True
                     state = None
                     j += 2
+                    continue
+                if state == '"""':
+                    if line[j:j + 3] == '"""':
+                        state = None
+                        j += 3
+                    else:
+                        j += 1
                     continue
                 if ch == state:
                     state = None
@@ -366,9 +434,30 @@ def _brace_end(lines: list[str], start_idx: int, start_col: int = 0,
                 break
             if ch == "/" and nxt == "*":
                 state = "block"
+                block_depth = 1
                 j += 2
                 continue
+            if lang == "cpp" and ch == '"' and \
+                    re.search(r"(?:^|[^\w])(?:u8|u|U|L)?R$", line[:j]):
+                # Possible raw string: delimiter runs to the first '('.
+                k = j + 1
+                while k < len(line) and line[k] != "(" and k - j <= 16 \
+                        and line[k] not in ' )\\"':
+                    k += 1
+                if k < len(line) and line[k] == "(":
+                    state = "raw"
+                    raw_term = ")" + line[j + 1:k] + '"'
+                    j = k + 1
+                    continue
+            if lang == "scala" and ch == '"' and line[j:j + 3] == '"""':
+                state = '"""'
+                j += 3
+                continue
             if ch in ("'", '"', "`"):
+                if ch == "'" and lang in ("c", "cpp") and j > 0 \
+                        and line[j - 1].isdigit() and nxt.isdigit():
+                    j += 1  # digit separator, e.g. 1'000'000
+                    continue
                 if ch == "'" and char_langs and not _is_char_literal(line, j):
                     j += 1
                     continue
@@ -380,9 +469,8 @@ def _brace_end(lines: list[str], start_idx: int, start_col: int = 0,
                 seen = True
             elif ch == "}":
                 depth -= 1
-                if interp and depth == interp[-1]:
-                    interp.pop()
-                    state = "`"
+                if interp and depth == interp[-1][0]:
+                    state = interp.pop()[1]
                     j += 1
                     continue
                 if seen and depth == 0:
@@ -1240,6 +1328,757 @@ def _slice_ruby(source: str, mode: str, path: str = "") -> str:
                 i = _rb_block_end(lines, i) + 1
             else:
                 i += 1
+        text = "\n".join(out).strip()
+        return text + ("\n" if text else "")
+    return source
+
+
+# ---------------------------------------------------------------------------
+# C / C++ (parser-lite, v0.8)
+#
+# Same honesty label as the other lite slicers: line scanning plus the
+# shared string/comment-aware brace matcher (extended in v0.8 with
+# preprocessor skipping, C++ raw strings, and digit separators).
+# Conventional formatting only: one declaration per line, multi-line
+# signatures gathered while parentheses are unbalanced, opening brace
+# on the declaration line or alone on the next line (K&R functions).
+#
+# C: preprocessor lines are surface and kept in both reducing modes;
+# struct/union/enum blocks and typedefs are declaration surface (kept
+# in full in signatures AND interfaces, the Go/Rust rule); function
+# definitions collapse to their signature, prototypes are kept as-is;
+# interfaces drops free functions. A .h header of prototypes barely
+# shrinks in signatures mode — correct behaviour, pinned by a test.
+#
+# C++ adds: classes/structs reduced to member signatures, namespaces
+# recursed, templates (a template head on its own line is carried onto
+# the next declaration; single-line template heads work inline), enum
+# (incl. enum class) blocks in full, typedef/using kept. strip-tests
+# drops gtest TEST/TEST_F/TEST_P blocks (in non-test-named files;
+# *_test.cpp etc. are dropped wholesale by slice_source) and
+# test-named functions; C strip-tests drops test-named functions.
+# Known lite limits: K&R parameter declarations (a K&R definition
+# is read as a prototype: head kept, body not stripped), declarations
+# split with the return type on its own line, one-line class bodies
+# (members on the declaration line itself are not reduced), extern
+# "C" blocks (their functions are still found, the wrapper is
+# dropped), and C++ requires-clauses / concepts.
+# ---------------------------------------------------------------------------
+
+_PREPROC_RE = re.compile(r"^\s*#")
+_C_TYPE_RE = re.compile(r"^\s*(typedef\s+)?(struct|union|enum)\s*(\w+)?")
+_CPP_ENUM_RE = re.compile(r"^\s*enum\s+(class\s+|struct\s+)?(\w+)?")
+_CPP_CLASS_RE = re.compile(
+    r"^\s*(?:template\s*<.*>\s*)?(class|struct|union)\s+([A-Za-z_]\w*)")
+_CPP_NS_RE = re.compile(r"^\s*(inline\s+)?namespace\s*([\w:]*)\s*(=\s*[\w:]+)?\s*$"
+                        r"|^\s*(inline\s+)?namespace\s*([\w:]*)\s*\{")
+_C_HEAD_RE = re.compile(
+    r"^\s*(?:template\s*<[^;{}]*>\s*)?"
+    r"(?P<prefix>[\w:<>,\*&\[\]~ ]*?)"
+    r"(?P<name>~?[A-Za-z_]\w*|operator\s*\S+?)\s*\(")
+_C_NOT_FUNCS = {"if", "for", "while", "switch", "return", "sizeof",
+                "catch", "do", "else", "case", "goto"}
+_GTEST_RE = re.compile(r"^\s*(TEST|TEST_F|TEST_P|TYPED_TEST|TYPED_TEST_P)\s*\(")
+_ACCESS_RE = re.compile(r"^\s*(public|private|protected)\s*:\s*$")
+
+
+def _mask_quotes(line: str) -> str:
+    """Same-length copy with literal and comment interiors blanked.
+
+    Keeps indices aligned so paren/brace positions found in the masked
+    line are valid in the original. Handles '...' and "..." with
+    backslash escapes, `//` line comments, and same-line `/* ... */`
+    block comments (string state wins, so `http://` inside a literal
+    is safe; a block comment that spans lines is masked only on its
+    opening line). A `'` between digits (digit separator) is left
+    alone.
+    """
+    out = list(line)
+    state: str | None = None
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        nxt = line[i + 1] if i + 1 < len(line) else ""
+        if state == "line":
+            out[i] = " "
+            i += 1
+            continue
+        if state is None:
+            if ch == "/" and nxt == "/":
+                state = "line"
+                out[i] = " "
+                i += 1
+                continue
+            if ch == "/" and nxt == "*":
+                end = line.find("*/", i + 2)
+                stop = len(line) if end < 0 else end + 2
+                for k in range(i, stop):
+                    out[k] = " "
+                i = stop
+                continue
+            if ch in ("'", '"'):
+                if ch == "'" and i > 0 and line[i - 1].isdigit() \
+                        and i + 1 < len(line) and line[i + 1].isdigit():
+                    i += 1
+                    continue
+                state = ch
+            i += 1
+            continue
+        if ch == "\\":
+            out[i] = " "
+            if i + 1 < len(line):
+                out[i + 1] = " "
+            i += 2
+            continue
+        if ch == state:
+            state = None
+        else:
+            out[i] = " "
+        i += 1
+    return "".join(out)
+
+
+def _find_block_brace(lines, i, limit=5):
+    """(line, col) of a block-opening `{` at paren depth 0, or None when
+    a `;` at depth 0 comes first (a statement, not a block)."""
+    depth = 0
+    for t in range(i, min(i + limit, len(lines))):
+        masked = _mask_quotes(lines[t])
+        for idx, ch in enumerate(masked):
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+            elif depth == 0 and ch == "{":
+                return (t, idx)
+            elif depth == 0 and ch == ";":
+                return None
+    return None
+
+
+def _stmt_end(lines, i, limit=6):
+    """Index of the line where the statement starting at `i` ends (`;`)."""
+    for t in range(i, min(i + limit, len(lines))):
+        if ";" in _mask_quotes(lines[t]):
+            return t
+    return i
+
+
+def _c_func_head(lines, i, lang, bare_name=None):
+    """Detect a C/C++ function head starting at line `i`.
+
+    Returns {"name", "kind" ("def"|"proto"), "head_end", "body_line",
+    "body_col"} or None. `bare_name` (a class name, inside a class
+    body) additionally allows return-type-less heads: constructors
+    and destructors. A `=` before the parameter `(` (initialisers,
+    assignments) and `typedef` lines are rejected, as are control
+    keywords wearing a return type (`return f(x);` etc.).
+    """
+    masked = _mask_quotes(lines[i])
+    if masked.lstrip().startswith("typedef"):
+        return None
+    m = _C_HEAD_RE.match(masked)
+    if not m:
+        return None
+    name = m.group("name")
+    base = name.lstrip("~").split()[-1] if name.startswith("operator") else name.lstrip("~")
+    if base in _C_NOT_FUNCS or name in _C_NOT_FUNCS:
+        return None
+    prefix = m.group("prefix") or ""
+    if prefix.strip():
+        # The prefix is everything before the name: return type and
+        # modifiers (or a `Class::` qualifier). It can never contain
+        # parens/braces/semicolons (the regex charset excludes them)
+        # and it cannot start with a control keyword wearing a type:
+        # `return f(x);` is a statement, not a head.
+        first = prefix.strip().split(None, 1)[0]
+        if first in _C_NOT_FUNCS:
+            return None
+    elif bare_name is None or base != bare_name:
+        # No return type at all: only a constructor/destructor of
+        # the enclosing class (bare_name) may omit it.
+        return None
+    paren = masked.find("(", m.start("name"))
+    if paren < 0 or "=" in masked[:paren]:
+        return None
+    if masked[paren + 1:].lstrip().startswith("*"):
+        return None  # function-pointer declarator, not a function head
+    depth = 0
+    j = i
+    while j < len(lines) and j - i <= 12:
+        txt = _mask_quotes(lines[j])
+        depth += txt.count("(") - txt.count(")")
+        if depth <= 0:
+            close = txt.rfind(")")
+            rest = txt[close + 1:] if close >= 0 else ""
+            if "{" in rest:
+                bcol = lines[j].find("{", lines[j].rfind(")"))
+                return {"name": name, "kind": "def", "head_end": j,
+                        "body_line": j, "body_col": bcol}
+            if rest.rstrip().endswith(";"):
+                return {"name": name, "kind": "proto", "head_end": j,
+                        "body_line": -1, "body_col": -1}
+            k = j + 1
+            while k < len(lines) and not lines[k].strip():
+                k += 1
+            if k < len(lines) and lines[k].lstrip().startswith("{"):
+                return {"name": name, "kind": "def", "head_end": j,
+                        "body_line": k, "body_col": lines[k].find("{")}
+            if ";" not in rest:
+                # Continued declarations: a constructor initializer
+                # list or a trailing return type may sit between the
+                # parameter list and the body brace; a split
+                # declaration (`= 0;` or an attribute on its own line,
+                # a split trailing return) ends at a `;` on a later
+                # line and is a prototype whose head runs to it.
+                for k in range(j + 1, min(j + 5, len(lines))):
+                    txt2 = _mask_quotes(lines[k])
+                    if not txt2.strip():
+                        continue
+                    semi = txt2.find(";")
+                    brace = txt2.find("{")
+                    if brace >= 0 and (semi < 0 or brace < semi):
+                        return {"name": name, "kind": "def", "head_end": j,
+                                "body_line": k,
+                                "body_col": lines[k].find("{")}
+                    if semi >= 0:
+                        return {"name": name, "kind": "proto",
+                                "head_end": k, "body_line": -1,
+                                "body_col": -1}
+            return None
+        j += 1
+    return None
+
+
+def _c_head_end(lines, head, lang):
+    """First line index AFTER the function described by `head`."""
+    if head["kind"] == "def":
+        return _brace_end(lines, head["body_line"],
+                          body_col=head["body_col"], lang=lang) + 1
+    return head["head_end"] + 1
+
+
+def _c_sig_text(lines, i, head):
+    parts = []
+    last = head["body_line"] if head["kind"] == "def" else head["head_end"]
+    for t in range(i, last + 1):
+        seg = lines[t]
+        if head["kind"] == "def" and t == head["body_line"]:
+            seg = seg[:head["body_col"]]
+        parts.append(seg.strip())
+    sig = " ".join(p for p in parts if p)
+    if head["kind"] == "def":
+        return sig + " { /* ... */ }"
+    return sig
+
+
+def _c_type_block(lines, i, lang):
+    """struct/union/enum (optionally typedef'd) starting at line `i`.
+
+    Returns ("block", end) / ("stmt", end) / None.
+    """
+    if not _C_TYPE_RE.match(_mask_quotes(lines[i])):
+        return None
+    found = _find_block_brace(lines, i)
+    if found is None:
+        return ("stmt", _stmt_end(lines, i))
+    bl, bcol = found
+    return ("block", _brace_end(lines, bl, body_col=bcol, lang=lang))
+
+
+def _is_test_func_name(name: str) -> bool:
+    base = name.lstrip("~")
+    if not base.lower().startswith("test"):
+        return False
+    if len(base) == 4:
+        return True
+    ch = base[4]
+    return ch == "_" or ch.isupper() or ch.isdigit()
+
+
+def _slice_c(source: str, mode: str, lang: str) -> str:
+    lines = source.splitlines()
+    out: list[str] = []
+    i = 0
+    pp_cont = False
+    while i < len(lines):
+        line = lines[i]
+        masked = _mask_quotes(line)
+        if pp_cont or _PREPROC_RE.match(line):
+            out.append(line.rstrip())
+            pp_cont = line.rstrip().endswith("\\")
+            i += 1
+            continue
+        pp_cont = False
+        head = _c_func_head(lines, i, lang)
+        if head is not None:
+            nxt = _c_head_end(lines, head, lang)
+            if mode == "signatures":
+                out.append(_c_sig_text(lines, i, head))
+            i = nxt
+            continue
+        tb = _c_type_block(lines, i, lang)
+        if tb is not None:
+            kind, end = tb
+            if kind == "block":
+                out.extend(ln.rstrip() for ln in lines[i:end + 1])
+                out.append("")
+            else:
+                # A statement: typedefs and forward declarations are
+                # type surface (both modes); a struct/enum *variable*
+                # is signatures-only surface.
+                stmt = " ".join(_mask_quotes(ln) for ln in lines[i:end + 1])
+                if masked.lstrip().startswith("typedef") or re.match(
+                        r"^\s*(struct|union|enum)\s+\w+\s*;$", stmt.strip()) \
+                        or mode == "signatures":
+                    out.extend(ln.rstrip() for ln in lines[i:end + 1])
+            i = end + 1
+            continue
+        if masked.lstrip().startswith("typedef"):
+            end = _stmt_end(lines, i)
+            out.extend(ln.rstrip() for ln in lines[i:end + 1])
+            i = end + 1
+            continue
+        if mode == "signatures" and ";" in masked and not masked.lstrip().startswith("}"):
+            end = _stmt_end(lines, i)
+            out.extend(ln.rstrip() for ln in lines[i:end + 1])
+            i = end + 1
+            continue
+        i += 1
+    text = "\n".join(out).strip()
+    return text + ("\n" if text else "")
+
+
+def _cpp_decls(lines, i0, end, mode, out, class_name=None):
+    """Process C++ declarations in lines[i0:end], appending to `out`.
+
+    Used for the top level (class_name=None), namespace interiors,
+    and class interiors (class_name set: constructors/destructors may
+    omit the return type and member signatures are kept in both
+    reducing modes). Returns nothing; callers advance by block spans.
+    """
+    i = i0
+    pp_cont = False
+    pending: list[str] = []  # template head lines awaiting a declaration
+    while i < end:
+        line = lines[i]
+        masked = _mask_quotes(line)
+        stripped = masked.strip()
+        if pp_cont or _PREPROC_RE.match(line):
+            out.append(line.rstrip())
+            pp_cont = line.rstrip().endswith("\\")
+            i += 1
+            continue
+        pp_cont = False
+        if stripped.startswith("template") and (stripped.startswith("template <")
+                                                or stripped.startswith("template<")):
+            # Template head: gather while angle brackets are unbalanced.
+            j = i
+            ang = 0
+            while j < end and j - i <= 4:
+                ang += _mask_quotes(lines[j]).count("<") - _mask_quotes(lines[j]).count(">")
+                j += 1
+                if ang <= 0:
+                    break
+            rest = _mask_quotes(lines[j - 1])
+            after = rest[rest.rfind(">") + 1:].strip() if ">" in rest else ""
+            if not after:
+                pending = [ln.rstrip() for ln in lines[i:j]]
+                i = j
+                continue
+            # else: declaration shares the line; fall through and let the
+            # matchers (which accept a template prefix) handle this line.
+        if class_name is None and _CPP_NS_RE.match(masked) \
+                and not masked.rstrip().endswith(";"):
+            found = _find_block_brace(lines, i)
+            if found is not None:
+                bl, bcol = found
+                bend = _brace_end(lines, bl, body_col=bcol, lang="cpp")
+                header = " ".join(
+                    ln.strip() for ln in lines[i:bl] + [lines[bl][:bcol]]).strip()
+                out.extend(pending)
+                pending = []
+                out.append(header + " {")
+                _cpp_decls(lines, bl + 1, bend, mode, out)
+                out.append("}")
+                out.append("")
+                i = bend + 1
+                continue
+        _tm = _C_TYPE_RE.match(masked)
+        if _CPP_ENUM_RE.match(masked) or (_tm and _tm.group(2) == "enum") \
+                or (masked.lstrip().startswith("typedef") and _tm):
+            tb = _c_type_block(lines, i, "cpp")
+            if tb is not None:
+                kind, tend = tb
+                out.extend(pending)
+                pending = []
+                out.extend(ln.rstrip() for ln in lines[i:tend + 1])
+                out.append("")
+                i = tend + 1
+                continue
+        cm = _CPP_CLASS_RE.match(masked)
+        if cm:
+            found = _find_block_brace(lines, i)
+            if found is None:
+                tend = _stmt_end(lines, i)  # forward declaration / alias-ish
+                out.extend(pending)
+                pending = []
+                out.extend(ln.rstrip() for ln in lines[i:tend + 1])
+                i = tend + 1
+                continue
+            bl, bcol = found
+            bend = _brace_end(lines, bl, body_col=bcol, lang="cpp")
+            header = " ".join(
+                ln.strip() for ln in lines[i:bl] + [lines[bl][:bcol]]).strip()
+            out.extend(pending)
+            pending = []
+            out.append(header + " {")
+            _cpp_decls(lines, bl + 1, bend, mode, out,
+                       class_name=cm.group(2))
+            out.append("}")
+            out.append("")
+            i = bend + 1
+            continue
+        if masked.lstrip().startswith(("typedef", "using ")):
+            found = _find_block_brace(lines, i)
+            if found is not None:
+                # typedef class/enum/struct with a body: emit the block.
+                bl, bcol = found
+                tend = _brace_end(lines, bl, body_col=bcol, lang="cpp")
+            else:
+                tend = _stmt_end(lines, i)
+            out.extend(pending)
+            pending = []
+            out.extend(ln.rstrip() for ln in lines[i:tend + 1])
+            i = tend + 1
+            continue
+        if class_name is not None and _ACCESS_RE.match(masked):
+            out.append(line.rstrip())
+            i += 1
+            continue
+        head = _c_func_head(lines, i, "cpp", bare_name=class_name)
+        if head is not None:
+            nxt = _c_head_end(lines, head, "cpp")
+            if mode == "signatures" or class_name is not None:
+                out.extend(pending)
+                out.append(_c_sig_text(lines, i, head))
+            pending = []
+            i = nxt
+            continue
+        if (class_name is not None or mode == "signatures") \
+                and ";" in masked and not stripped.startswith("}"):
+            tend = _stmt_end(lines, i)
+            out.extend(ln.rstrip() for ln in lines[i:tend + 1])
+            i = tend + 1
+            continue
+        i += 1
+    out.extend(pending)
+
+
+def _slice_cpp(source: str, mode: str) -> str:
+    lines = source.splitlines()
+    out: list[str] = []
+    _cpp_decls(lines, 0, len(lines), mode, out)
+    text = "\n".join(out).strip()
+    return text + ("\n" if text else "")
+
+
+def _c_family_strip_tests(lines, lang, source):
+    drop: set[int] = set()
+    i = 0
+    while i < len(lines):
+        if lang == "cpp" and _GTEST_RE.match(lines[i]):
+            found = _find_block_brace(lines, i, limit=3)
+            if found is not None:
+                bl, bcol = found
+                end = _brace_end(lines, bl, body_col=bcol, lang=lang)
+                for ln in range(i, end + 1):
+                    drop.add(ln)
+                i = end + 1
+                continue
+            i += 1
+            continue
+        head = _c_func_head(lines, i, lang)
+        if head is not None and _is_test_func_name(head["name"]):
+            end = _c_head_end(lines, head, lang)
+            for ln in range(i, end):
+                drop.add(ln)
+            i = end
+            continue
+        i += 1
+    kept = [ln for idx, ln in enumerate(lines) if idx not in drop]
+    text = "\n".join(kept)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip("\n")
+    return text + ("\n" if text else "")
+
+
+def _slice_c_family(source: str, mode: str, lang: str, path: str = "") -> str:
+    lines = source.splitlines()
+    if mode == "strip-tests":
+        return _c_family_strip_tests(lines, lang, source)
+    if mode in ("signatures", "interfaces"):
+        if lang == "c":
+            return _slice_c(source, mode, lang)
+        return _slice_cpp(source, mode)
+    return source
+
+
+# ---------------------------------------------------------------------------
+# Scala (parser-lite, v0.8)
+#
+# Line scanning + the shared brace matcher (v0.8 extensions: nested
+# block comments, triple-quoted strings, s-interpolation). Keeps
+# package/import lines, def signatures, val/var declarations, and
+# class/object/trait/enum declarations; traits and enums are kept in
+# full (declaration surface, the Go/Rust rule), classes/objects are
+# reduced to member signatures. interfaces drops top-level defs.
+#
+# Scala 3 significant-indentation style (type bodies with no braces,
+# opened by a trailing `:`) is handled by an indentation fallback:
+# the body region is the run of more-indented lines, and members are
+# collected from it with the same def/val/type logic. Degradation
+# rule: when a construct cannot be understood, MORE is kept (a trait
+# body in full, a def head with its body region skipped by indent),
+# never less — the output can be longer than ideal, never corrupted.
+# strip-tests drops @Test-annotated defs, test-named defs, and
+# test("...") { } blocks (munit/FunSuite style in ordinary files);
+# *Spec/*Suite/Test files are dropped wholesale by slice_source.
+# Known lite limits: `given` instances, extension methods, defs whose
+# parameter lists use brace-block default arguments spanning lines,
+# and one-line `class Foo { def bar = 1 }` bodies (contents on the
+# declaration line itself are not reduced).
+# ---------------------------------------------------------------------------
+
+_SC_IMPORT_RE = re.compile(r"^\s*(package|import)\b")
+_SC_TYPE_RE = re.compile(
+    r"^\s*(?:(?:abstract|final|sealed|open|case|transparent|infix|opaque)\s+)*"
+    r"(class|object|trait|enum)\s+([A-Za-z_]\w*)")
+_SC_ALIAS_RE = re.compile(
+    r"^\s*(?:(?:abstract|opaque)\s+)*type\s+([A-Za-z_]\w*)")
+_SC_DEF_RE = re.compile(
+    r"^\s*(?:(?:public|private|protected|override|final|abstract|sealed|"
+    r"inline|open|erased)\s+)*def\s+([A-Za-z_]\w*|[^\s(\[:]+)?")
+_SC_VAL_RE = re.compile(
+    r"^\s*(?:(?:private|protected|override|final|abstract|sealed|lazy)\s+)*"
+    r"(val|var)\s+([A-Za-z_]\w*)")
+_SC_TEST_BLOCK_RE = re.compile(r"^\s*test\s*\(")
+
+
+def _indent_of(line: str) -> int:
+    return len(line) - len(line.lstrip())
+
+
+def _indent_block_end(lines, start, limit):
+    """Last index of the indented region opened at `start` (blank lines
+    do not end the region). Returns `start` when there is no region."""
+    base = _indent_of(lines[start])
+    last = start
+    j = start + 1
+    while j < limit:
+        if not lines[j].strip():
+            j += 1
+            continue
+        if _indent_of(lines[j]) > base:
+            last = j
+            j += 1
+        else:
+            break
+    return last
+
+
+def _scala_def(lines, i, limit):
+    """Detect a def starting at line `i`.
+
+    Returns (sig_text, next_i, name) or None. Bodies: brace bodies are
+    skipped with the shared matcher; `= expr` bodies by indentation
+    (the expression is the run of lines more indented than the def,
+    or the rest of the head line); no body = abstract def.
+    """
+    m = _SC_DEF_RE.match(lines[i])
+    if not m:
+        return None
+    name = m.group(1) or ""
+    pad = lines[i][: len(lines[i]) - len(lines[i].lstrip())]
+    # Gather the head: while parens are unbalanced or lines end in ','.
+    j = i
+    paren = 0
+    while j < limit and j - i <= 12:
+        txt = _mask_quotes(lines[j])
+        paren += txt.count("(") - txt.count(")")
+        j += 1
+        if paren <= 0 and not lines[j - 1].rstrip().endswith(","):
+            break
+    head_end = j - 1
+    # Scan the masked head at paren depth 0 for a body brace or '='.
+    body = None
+    eq = None
+    depth = 0
+    for t in range(i, head_end + 1):
+        txt = _mask_quotes(lines[t])
+        for idx, ch in enumerate(txt):
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+            elif depth == 0 and ch == "{" and body is None:
+                body = (t, idx)
+            elif depth == 0 and ch == "=" and eq is None:
+                # Only a standalone `=` is the body equals: `=:=`,
+                # `==`, `>=`, `<=`, `!=` are signature operators.
+                prev = txt[idx - 1] if idx > 0 else " "
+                after = txt[idx + 1] if idx + 1 < len(txt) else " "
+                if prev not in "=<>!" and after not in "=:>":
+                    eq = (t, idx)
+        if body is not None:
+            break
+    if body is not None:
+        bl, bcol = body
+        parts = [lines[t].strip() for t in range(i, bl)]
+        parts.append(lines[bl][:bcol].strip())
+        sig = " ".join(p for p in parts if p)
+        nxt = _brace_end(lines, bl, body_col=bcol, lang="scala") + 1
+        return (pad + sig + " { /* ... */ }", min(nxt, limit), name)
+    if eq is not None:
+        et, ecol = eq
+        parts = [lines[t].strip() for t in range(i, et)]
+        parts.append(lines[et][:ecol].strip())
+        sig = " ".join(p for p in parts if p)
+        base = _indent_of(lines[i])
+        nxt = head_end + 1
+        while nxt < limit:
+            if lines[nxt].strip() and _indent_of(lines[nxt]) <= base:
+                break
+            nxt += 1
+        return (pad + sig + " = ...", nxt, name)
+    parts = [lines[t].strip() for t in range(i, head_end + 1)]
+    return (pad + " ".join(p for p in parts if p), head_end + 1, name)
+
+
+def _scala_region(lines, i0, end, mode, out, in_type=False):
+    """Process Scala declarations in lines[i0:end] into `out`.
+
+    Works at the top level, inside brace-delimited type bodies, and
+    inside Scala 3 indented type bodies — construct spans are computed
+    per construct (brace span, indented span, or single line), so the
+    two styles can mix.
+    """
+    i = i0
+    while i < end:
+        line = lines[i]
+        masked = _mask_quotes(line)
+        if _SC_IMPORT_RE.match(line):
+            out.append(line.rstrip())
+            i += 1
+            continue
+        tm = _SC_TYPE_RE.match(line)
+        if tm:
+            kind, _name = tm.group(1), tm.group(2)
+            found = _find_block_brace(lines, i, limit=4)
+            if found is not None:
+                bl, bcol = found
+                bend = _brace_end(lines, bl, body_col=bcol, lang="scala")
+                if kind in ("trait", "enum"):
+                    out.extend(ln.rstrip() for ln in lines[i:bend + 1])
+                    out.append("")
+                else:
+                    header = " ".join(
+                        ln.strip() for ln in lines[i:bl] + [lines[bl][:bcol]]).strip()
+                    out.append(header + " {")
+                    _scala_region(lines, bl + 1, bend, mode, out, in_type=True)
+                    out.append("}")
+                    out.append("")
+                i = bend + 1
+                continue
+            region_end = _indent_block_end(lines, i, end)
+            if region_end == i:
+                out.append(line.rstrip())  # bodyless declaration line
+                i += 1
+                continue
+            if kind in ("trait", "enum"):
+                out.extend(ln.rstrip() for ln in lines[i:region_end + 1])
+                out.append("")
+            else:
+                out.append(line.rstrip())
+                _scala_region(lines, i + 1, region_end + 1, mode, out,
+                              in_type=True)
+            i = region_end + 1
+            continue
+        if _SC_ALIAS_RE.match(line):
+            out.append(line.rstrip())
+            i += 1
+            continue
+        d = _scala_def(lines, i, end)
+        if d is not None:
+            sig, nxt, _name = d
+            if mode == "signatures" or in_type:
+                out.append(sig)
+            i = nxt
+            continue
+        vm = _SC_VAL_RE.match(line)
+        if vm:
+            if mode == "signatures" or in_type:
+                out.append(line.rstrip())
+            if "{" in masked:
+                i = _brace_end(lines, i, body_col=masked.find("{"),
+                               lang="scala") + 1
+            else:
+                i += 1
+            continue
+        i += 1
+
+
+def _scala_strip_tests(lines, source):
+    drop: set[int] = set()
+    i = 0
+    pending: int | None = None
+    while i < len(lines):
+        stripped = lines[i].strip()
+        if stripped.startswith("@Test"):
+            if pending is None:
+                pending = i
+            i += 1
+            continue
+        if stripped.startswith("@"):
+            i += 1
+            continue
+        if _SC_TEST_BLOCK_RE.match(lines[i]):
+            found = _find_block_brace(lines, i, limit=3)
+            if found is not None:
+                bl, bcol = found
+                end = _brace_end(lines, bl, body_col=bcol, lang="scala")
+                for ln in range(i, end + 1):
+                    drop.add(ln)
+                i = end + 1
+                pending = None
+                continue
+        d = _scala_def(lines, i, len(lines))
+        if d is not None:
+            _sig, nxt, name = d
+            if pending is not None or _is_test_func_name(name):
+                start = pending if pending is not None else i
+                for ln in range(start, nxt):
+                    drop.add(ln)
+                i = nxt
+            else:
+                i = nxt
+            pending = None
+            continue
+        if stripped:
+            pending = None
+        i += 1
+    kept = [ln for idx, ln in enumerate(lines) if idx not in drop]
+    text = "\n".join(kept)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip("\n")
+    return text + ("\n" if text else "")
+
+
+def _slice_scala(source: str, mode: str, path: str = "") -> str:
+    lines = source.splitlines()
+    if mode == "strip-tests":
+        return _scala_strip_tests(lines, source)
+    if mode in ("signatures", "interfaces"):
+        out: list[str] = []
+        _scala_region(lines, 0, len(lines), mode, out)
         text = "\n".join(out).strip()
         return text + ("\n" if text else "")
     return source
