@@ -41,6 +41,11 @@ class _State:
         from .duplicates import find_duplicates
         self.duplicates = find_duplicates(self.scan)
         self.secrets = scan_scan_result(self.scan)
+        from .lint import lint_project
+        self.lint = lint_project(self.root, profile=self.profile,
+                                 scan_result=self.scan, graph=self.graph,
+                                 recs=self.recommendations,
+                                 dups=self.duplicates, secrets=self.secrets)
         self.by_path = {f.path: f for f in self.scan.files}
         self._mode_tokens_cache: dict[tuple[str, str], int] = {}
 
@@ -114,6 +119,8 @@ def make_server(root: str, port: int = 8765, host: str = "127.0.0.1"):
             elif parsed.path == "/api/secrets":
                 self._json(200, {"findings": state.secrets, "count": len(state.secrets),
                                  "note": "values redacted to first 4 characters"})
+            elif parsed.path == "/api/lint":
+                self._json(200, state.lint)
             elif parsed.path == "/api/history":
                 self._json(200, ledger_summary(state.root))
             elif parsed.path == "/api/preview":

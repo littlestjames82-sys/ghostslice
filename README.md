@@ -219,6 +219,43 @@ dashboard `/api/secrets` endpoint and the MCP `check_secrets` tool.
 This is a heuristic guard, not a guarantee: review findings, and do
 not treat a clean scan as proof a tree is secret-free.
 
+### Context lint (v0.11)
+
+```bash
+ghostslice lint ~/my-project            # exit 1 only on error-severity findings
+ghostslice lint ~/my-project --strict   # warnings fail too
+ghostslice lint ~/my-project --json     # same payload as /api/lint and MCP lint_project
+```
+
+Lint judges the selection an export *would* produce — file modes are
+resolved by the exporter's own `resolve_modes`, never a second copy —
+and flags context waste before you spend tokens on it. Each finding
+has a stable rule id, a severity, the estimated token cost, what
+acting on it recovers, and a concrete action:
+
+| Rule | Flags |
+|---|---|
+| L001 | a file over 20,000 estimated tokens still at full mode |
+| L002 | slicable code at full mode whose signatures slice saves >= 60% and >= 2,000 tokens |
+| L003 | graph prune candidates (unreachable / no importers) still included |
+| L004 | exact / near-duplicate files with more than one copy included |
+| L005 | likely secrets in a file slated for inclusion (error severity; metadata only, never values) |
+| L006 | giant lines (avg or p95 line length over 400 chars — the minified/compact shape; detection only) |
+| L007 | generated-code header markers (`@generated`, "do not edit", ...) at full mode |
+| L008 | test files included at full mode |
+| L009 | a lockfile not excluded (possible via a profile mode override) |
+| L010 | 20+ tiny files (< 10 tokens each) adding manifest noise (info) |
+
+Totals never double-count: flagged tokens union distinct files, and
+potential savings take the best saving per file. Tune rules in the
+profile's `"lint"` section — per-rule severity (`off`/`info`/`warn`/
+`error`) and numeric options (e.g. `"L001": {"threshold_tokens":
+5000}`); unknown rule ids, severities, or option names are a loud
+error at load, never a silent ignore. Exit codes: 0 clean (or
+warnings only), 1 on errors (or warnings with `--strict`), 2 on
+config/usage errors. Also on the dashboard as `/api/lint` and as the
+MCP `lint_project` tool.
+
 ### Duplicates (v0.4)
 
 `scan` and `graph` report duplicate files: exact duplicates (sha256 of
@@ -326,7 +363,8 @@ paste/attach the bundle in Cursor; meant to live as a `.cursor-context`
 directory), and `copilot` (v0.5: adds a `prompt.md` shaped for GitHub
 Copilot Chat, one `## File:` section per file with fenced code blocks).
 Nested `.gitignore` files in subdirectories are honoured, scoped to
-their subtree.
+their subtree. An optional `"lint"` section tunes the context linter
+per rule (see Context lint above).
 
 ### Budget gate for CI (v0.2)
 
@@ -397,7 +435,7 @@ ghostslice mcp    # stdio JSON-RPC, newline-delimited
 ```
 
 Tools: `scan_project`, `slice_file`, `estimate_cost`, `export_bundle`,
-`check_secrets` (v0.4).
+`check_secrets` (v0.4), `lint_project` (v0.11).
 Same zero-dependency stdlib pattern as the Ghost Hands MCP server: any
 MCP client that can spawn a stdio process can drive GhostSlice.
 
@@ -528,6 +566,7 @@ src/ghostslice/
   graph.py      import graph + prune recommendations + git changed-files
   secrets_scan.py  secret guard: provider token shapes, assignments, entropy (v0.4)
   duplicates.py exact (sha256) + near (line-shingle Jaccard) duplicates (v0.4)
+  lint.py       context lint rule engine L001-L010 over exporter.resolve_modes (v0.11)
   report.py     standalone self-contained HTML report (v0.4)
   fit.py        auto-fit budget downgrades for export/task --fit (v0.5)
   bundlediff.py bundle-vs-bundle diff by manifest (v0.5)

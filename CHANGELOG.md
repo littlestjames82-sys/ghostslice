@@ -3,6 +3,38 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [0.11.0] - 2026-10-13
+### Added
+- Context lint (`ghostslice lint`, new module `lint.py`): a rule
+  engine that flags context waste in the selection an export would
+  produce. Ten rules with stable ids — L001 oversize file at full
+  mode (>20,000 estimated tokens), L002 full-mode slicable code
+  (signatures save >= 60% and >= 2,000), L003 graph prune
+  candidates still included, L004 duplicate copies both included,
+  L005 secrets slated for inclusion (error severity, metadata
+  only), L006 giant lines (avg/p95 over 400 chars, detection
+  only), L007 generated-code header markers at full, L008 test
+  files at full, L009 lockfiles not excluded, L010 tiny-file
+  manifest noise (info). Every finding carries the estimated
+  token cost, the recoverable saving, and a concrete action;
+  totals union distinct files and take the best saving per file,
+  so overlapping rules never double-count.
+- Lint surfaces: CLI text + `--json`, dashboard `/api/lint`, and
+  the MCP `lint_project` tool all return the same payload.
+  Exit codes: 1 only on error-severity findings by default;
+  `--strict` promotes warnings to failure; 2 on config/usage
+  errors.
+- Profile `"lint"` section: per-rule severity override
+  (off/info/warn/error) and numeric threshold options. Unknown
+  rule ids, severities, and option names are a loud load error.
+### Changed
+- Exporter mode resolution extracted into `exporter.resolve_modes`
+  and shared by `build_bundle`, `estimate_context_tokens`, and
+  the linter, so lint can never drift from what an export would
+  do (pinned by a manifest-parity test). No behaviour change for
+  valid profiles; an unknown profile mode now raises the same
+  ValueError in `estimate_context_tokens` that bundles always did.
+
 ## [0.10.0] - 2026-10-13
 ### Added
 - Estimator calibration (method v2): the BPE-like raw split is now

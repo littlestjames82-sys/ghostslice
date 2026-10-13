@@ -34,6 +34,46 @@ def default_mode_for(entry) -> str:
     return "full"
 
 
+def resolve_modes(result, profile=None, selections=None, include=None,
+                  default_mode=None, secret_files=None) -> dict[str, str]:
+    """Resolve every scanned file's mode exactly as an export would.
+
+    Shared by build_bundle, estimate_context_tokens and the context
+    linter (lint.py) so every surface judges the same selection — a
+    second, drifting copy of this logic is the classic lint bug.
+
+    Precedence: a file outside `include` (when given) is excluded;
+    explicit `selections` win; then profile per-glob modes; then the
+    caller's `default_mode` (slicable files get it, tests always
+    strip); then built-in defaults. Paths in `secret_files` are
+    forced to `exclude` (the --exclude-secrets path). Raises
+    ValueError on an unknown mode from any source.
+    """
+    selections = selections or {}
+    secret_files = secret_files or set()
+    resolved: dict[str, str] = {}
+    for entry in result.files:
+        if include is not None and entry.path not in include:
+            mode = "exclude"
+        else:
+            mode = selections.get(entry.path)
+        if mode is None and profile is not None:
+            mode = profile.mode_for(entry.path)
+        if mode is None:
+            if default_mode and entry.language in SLICABLE and not entry.is_test:
+                mode = default_mode
+            elif default_mode and entry.is_test:
+                mode = "strip-tests"
+            else:
+                mode = default_mode_for(entry)
+        if entry.path in secret_files:
+            mode = "exclude"  # --exclude-secrets forces exclusion (v0.4)
+        if mode not in MODES:
+            raise ValueError(f"unknown mode for {entry.path}: {mode}")
+        resolved[entry.path] = mode
+    return resolved
+
+
 def build_bundle(root: str | Path, out: str | Path,
                  selections: dict[str, str] | None = None,
                  default_mode: str | None = None,
@@ -97,26 +137,9 @@ def build_bundle(root: str | Path, out: str | Path,
 
     # Resolve every file's starting mode first, so --fit can downgrade
     # from exactly the modes a plain export would have used.
-    resolved: dict[str, str] = {}
-    for entry in result.files:
-        if include is not None and entry.path not in include:
-            mode = "exclude"
-        else:
-            mode = selections.get(entry.path)
-        if mode is None and profile is not None:
-            mode = profile.mode_for(entry.path)
-        if mode is None:
-            if default_mode and entry.language in SLICABLE and not entry.is_test:
-                mode = default_mode
-            elif default_mode and entry.is_test:
-                mode = "strip-tests"
-            else:
-                mode = default_mode_for(entry)
-        if entry.path in secret_files:
-            mode = "exclude"  # --exclude-secrets forces exclusion (v0.4)
-        if mode not in MODES:
-            raise ValueError(f"unknown mode for {entry.path}: {mode}")
-        resolved[entry.path] = mode
+    resolved = resolve_modes(result, profile=profile, selections=selections,
+                             include=include, default_mode=default_mode,
+                             secret_files=secret_files)
     fit_report = None
     if fit is not None:
         from .fit import fit_modes
@@ -237,16 +260,10 @@ def estimate_context_tokens(root: str | Path, profile=None,
     """(total original, total sliced) tokens for the default/profile selection."""
     ignore_matcher = profile.is_ignored if (profile and profile.path) else None
     result: ScanResult = scan(root, ignore_matcher=ignore_matcher)
+    resolved = resolve_modes(result, profile=profile, default_mode=default_mode)
     before = after = 0
     for entry in result.files:
-        mode = profile.mode_for(entry.path) if profile is not None else None
-        if mode is None:
-            if default_mode and entry.language in SLICABLE and not entry.is_test:
-                mode = default_mode
-            elif default_mode and entry.is_test:
-                mode = "strip-tests"
-            else:
-                mode = default_mode_for(entry)
+        mode = resolved[entry.path]
         if mode == "full":
             before += entry.tokens
             after += entry.tokens

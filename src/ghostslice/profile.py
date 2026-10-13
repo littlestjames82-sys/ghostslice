@@ -12,6 +12,20 @@ Example:
 
 All fields are optional. The CLI loads the profile automatically when a
 command targets a project directory that contains the file.
+
+An optional "lint" section (v0.11) tunes the context linter per rule:
+
+  "lint": {
+    "L001": {"severity": "error", "threshold_tokens": 5000},
+    "L006": "off"
+  }
+
+Each rule id maps to a severity string ("off" | "info" | "warn" |
+"error") or an object with a "severity" plus rule-specific numeric
+options (the allowed option names live in lint.RULES). Unknown rule
+ids, severities, option names, or non-positive option values are a
+loud ValueError at load time — a typo'd rule id must never silently
+disable (or fail to disable) a rule.
 """
 from __future__ import annotations
 
@@ -48,6 +62,9 @@ def match_glob(pattern: str, rel: str) -> bool:
     return False
 
 
+LINT_SEVERITIES = ("off", "info", "warn", "error")
+
+
 @dataclass
 class Profile:
     ignore: list[str] = field(default_factory=list)
@@ -57,6 +74,8 @@ class Profile:
     entry_points: list[str] = field(default_factory=list)
     preset: str | None = None
     path: str | None = None  # where it was loaded from, if any
+    # v0.11: normalised lint config {rule_id: {"severity": str, option: number}}
+    lint: dict = field(default_factory=dict)
 
     def is_ignored(self, rel: str) -> bool:
         return any(match_glob(p, rel) for p in self.ignore)
@@ -74,8 +93,56 @@ class Profile:
             "ignore": self.ignore, "modes": self.modes, "model": self.model,
             "budget_tokens": self.budget_tokens,
             "entry_points": self.entry_points, "preset": self.preset,
-            "path": self.path,
+            "path": self.path, "lint": self.lint,
         }
+
+
+def _parse_lint_section(raw, candidate: Path) -> dict:
+    """Validate + normalise the profile's "lint" section.
+
+    Rule ids and allowed option names come from lint.RULES (imported
+    lazily: lint.py depends on the exporter/scanner stack, and this
+    keeps profile.py importable without it). Anything unrecognised is
+    a loud ValueError, never a silent ignore.
+    """
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"{candidate}: 'lint' must be an object mapping rule ids to settings")
+    from .lint import RULES
+    out: dict = {}
+    for rule_id, cfg in raw.items():
+        if rule_id not in RULES:
+            raise ValueError(
+                f"{candidate}: unknown lint rule {rule_id!r} "
+                f"(known: {', '.join(sorted(RULES))})")
+        if isinstance(cfg, str):
+            cfg = {"severity": cfg}
+        if not isinstance(cfg, dict):
+            raise ValueError(
+                f"{candidate}: lint rule {rule_id} must be a severity string or an object")
+        allowed_options = set(RULES[rule_id]["options"])
+        norm: dict = {}
+        for key, val in cfg.items():
+            if key == "severity":
+                if val not in LINT_SEVERITIES:
+                    raise ValueError(
+                        f"{candidate}: lint rule {rule_id}: unknown severity {val!r} "
+                        f"(choose from {', '.join(LINT_SEVERITIES)})")
+                norm["severity"] = val
+            elif key in allowed_options:
+                if isinstance(val, bool) or not isinstance(val, (int, float)) or val <= 0:
+                    raise ValueError(
+                        f"{candidate}: lint rule {rule_id}: option {key!r} "
+                        f"must be a positive number")
+                norm[key] = val
+            else:
+                raise ValueError(
+                    f"{candidate}: lint rule {rule_id}: unknown option {key!r} "
+                    f"(allowed: severity{', ' if allowed_options else ''}"
+                    f"{', '.join(sorted(allowed_options))})")
+        out[rule_id] = norm
+    return out
 
 
 def load_profile(root: str | Path) -> Profile:
@@ -98,4 +165,5 @@ def load_profile(root: str | Path) -> Profile:
         entry_points=list(data.get("entry_points") or []),
         preset=preset,
         path=str(candidate),
+        lint=_parse_lint_section(data.get("lint"), candidate),
     )

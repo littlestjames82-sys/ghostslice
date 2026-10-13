@@ -215,7 +215,7 @@ class TestMCPHandle(unittest.TestCase):
         self.assertEqual(resp["result"]["serverInfo"]["name"], "ghostslice")
         resp = handle_message({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         names = {t["name"] for t in resp["result"]["tools"]}
-        self.assertEqual(names, {"scan_project", "slice_file", "estimate_cost", "export_bundle", "check_secrets"})
+        self.assertEqual(names, {"scan_project", "slice_file", "estimate_cost", "export_bundle", "check_secrets", "lint_project"})
 
     def test_unknown_method_errors(self):
         resp = handle_message({"jsonrpc": "2.0", "id": 3, "method": "nope"})
@@ -262,7 +262,7 @@ class TestMCPStdio(unittest.TestCase):
                 d = json.loads(line)
                 by_id[d["id"]] = d
             self.assertEqual(by_id[1]["result"]["serverInfo"]["name"], "ghostslice")
-            self.assertEqual(len(by_id[2]["result"]["tools"]), 5)
+            self.assertEqual(len(by_id[2]["result"]["tools"]), 6)
             scan_payload = json.loads(by_id[3]["result"]["content"][0]["text"])
             self.assertEqual(scan_payload["file_count"], 1)
             slice_payload = json.loads(by_id[4]["result"]["content"][0]["text"])

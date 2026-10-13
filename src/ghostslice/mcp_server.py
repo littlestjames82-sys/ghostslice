@@ -7,6 +7,7 @@ Tools:
   scan_project   {path}                          -> scan totals + per-file tokens + recommendations
   slice_file     {path, file, mode}              -> sliced text + before/after token estimates
   estimate_cost  {path, model?}                  -> pre-flight cost for the default selection
+  lint_project   {path, strict?}                 -> context-lint findings (rules L001-L010) + exit code
   export_bundle  {path, out, preset?}            -> writes a bundle, returns manifest totals
 
 Token counts are estimates (see tokens.py); prices are the local dated
@@ -60,6 +61,18 @@ TOOLS = [
             "properties": {
                 "path": {"type": "string"},
                 "model": {"type": "string", "default": "claude-sonnet"},
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "lint_project",
+        "description": "Lint a project's default export selection for context waste (rules L001-L010: oversize files, full-mode slicable code, dead weight, duplicates, secrets, giant lines, generated files, tests, lockfiles, tiny-file noise). Findings carry estimated token costs; secret findings are metadata only. Returns the lint payload plus an exit_code field (1 on any error finding, or on warnings when strict is true).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "strict": {"type": "boolean", "default": False},
             },
             "required": ["path"],
         },
@@ -154,12 +167,22 @@ def _check_secrets(args: dict) -> dict:
             "note": "values redacted to first 4 characters; pattern types only"}
 
 
+def _lint_project(args: dict) -> dict:
+    from .lint import lint_exit_code, lint_project
+    profile = load_profile(args["path"])
+    payload = lint_project(args["path"], profile=profile)
+    payload = dict(payload)
+    payload["exit_code"] = lint_exit_code(payload, strict=bool(args.get("strict")))
+    return payload
+
+
 _DISPATCH = {
     "scan_project": _scan_project,
     "slice_file": _slice_file,
     "estimate_cost": _estimate_cost,
     "export_bundle": _export_bundle,
     "check_secrets": _check_secrets,
+    "lint_project": _lint_project,
 }
 
 

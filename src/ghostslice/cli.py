@@ -8,6 +8,7 @@ Commands:
   ghostslice export       <path> -o <bundle> [--mode MODE] [--model ID] [--preset P] [--fit N]
   ghostslice watch        <path> [--export] [-o <bundle>] [--interval S] [--debounce S] [--once] [--max-events N] [--fit N]
   ghostslice check-budget <path> [--max-tokens N]
+  ghostslice lint         <path> [--json] [--strict]
   ghostslice check        <bundle>
   ghostslice diff         <bundleA> <bundleB> [--json]
   ghostslice history      <path> [--json]
@@ -109,6 +110,21 @@ def _print_scan(result, model=None, prices=None, recs=None, secrets=None, dups=N
         print("  Recommendations to review, not instructions: dynamic imports can hide real use.")
 
 
+def _print_lint(payload) -> None:
+    findings = payload["findings"]
+    print(f"Lint: {payload['root']} (token counts are estimates)")
+    if not findings:
+        print("  No findings. The default export selection looks clean.")
+    for f in findings:
+        where = f["path"] or "(project)"
+        print(f"  [{f['severity']}] {f['rule']} {where} — {f['message']}")
+        print(f"          action: {f['action']}")
+    c = payload["counts"]
+    print(f"Findings: {c['error']} error, {c['warn']} warn, {c['info']} info; "
+          f"flagged files hold ~{payload['flagged_tokens']:,} estimated tokens; "
+          f"up to ~{payload['potential_savings']:,} recoverable.")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ghostslice", description="GhostSlice: agent context & prompt optimizer (token counts are estimates)")
     parser.add_argument("--version", action="version", version=f"ghostslice {__version__}")
@@ -195,6 +211,12 @@ def main(argv: list[str] | None = None) -> int:
     p_watch.add_argument("--fit", type=int, default=None, metavar="N",
                          help="with --export: auto-fit the bundle to N estimated tokens, as in export --fit")
 
+    p_lint = sub.add_parser("lint", help="lint the default export selection for context waste (rules L001-L010)")
+    p_lint.add_argument("path")
+    p_lint.add_argument("--json", action="store_true")
+    p_lint.add_argument("--strict", action="store_true",
+                        help="exit 1 on warnings too (default: exit 1 only on error-severity findings)")
+
     p_budget = sub.add_parser("check-budget", help="exit non-zero if the selected context exceeds a token budget (CI gate)")
     p_budget.add_argument("path")
     p_budget.add_argument("--max-tokens", type=int, default=None,
@@ -263,10 +285,32 @@ def main(argv: list[str] | None = None) -> int:
 
     # All remaining commands target a project path (or a bundle for check).
     target = getattr(args, "path", None) or getattr(args, "bundle", None)
-    profile = load_profile(target) if target else load_profile(".")
+    try:
+        profile = load_profile(target) if target else load_profile(".")
+    except ValueError as exc:
+        if args.cmd == "lint":
+            print(f"lint: invalid profile: {exc}", file=sys.stderr)
+            return 2
+        raise
 
     if profile.path:
         print(f"Profile: {profile.path}", file=sys.stderr)
+
+    if args.cmd == "lint":
+        from .lint import lint_exit_code, lint_project
+        try:
+            payload = lint_project(args.path, profile=profile)
+        except FileNotFoundError:
+            print(f"lint: no such project: {args.path}", file=sys.stderr)
+            return 2
+        except ValueError as exc:
+            print(f"lint: {exc}", file=sys.stderr)
+            return 2
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            _print_lint(payload)
+        return lint_exit_code(payload, strict=args.strict)
 
     if args.cmd == "secrets":
         result = _scan_with_profile(args.path, profile)

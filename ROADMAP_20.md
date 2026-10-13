@@ -21,7 +21,7 @@ Baseline: v0.5.0, 149 tests passed.
 | G3 | C, C++, Scala parser-lite slicers (systems-language completion) | v0.8.0 | done |
 | G4 | Config slicing: shell/PowerShell + SQL + YAML/TOML structure mode (keys/structure, values optional) | v0.9.0 | done |
 | G5 | Token estimator calibration: per-language factors, golden corpora, `calibrate` report | v0.10.0 | done |
-| G6 | Context lint: rule engine for context waste (oversize, generated, vendored, minified, giant lines) | v0.11.0 | pending |
+| G6 | Context lint: rule engine for context waste (oversize, generated, vendored, minified, giant lines) | v0.11.0 | done |
 | G7 | Generated/minified/vendored detection wired into scan, graph, export (opt-in auto-modes) | v0.12.0 | pending |
 | G8 | Monorepo support: workspace detection (npm/Cargo/go/pyproject), per-package subtotals everywhere | v0.13.0 | pending |
 | G9 | History analytics: trends, per-model $ saved, ASCII chart, JSON export + savings-history chart embedded in the HTML report (Ryan's mockups, Oct 13) | v0.14.0 | pending |
@@ -148,3 +148,30 @@ the audit findings that drove the two improvement rounds.
   Round 2 headline fix — the docstring's measured v1 implied
   rates are now pinned by a test so corpus edits cannot silently
   invalidate the evidence table.
+- G6 (v0.11.0) DONE Oct 13, 2026: context lint shipped — rule
+  engine L001-L010 over modes from exporter.resolve_modes
+  (extracted from build_bundle and shared with
+  estimate_context_tokens, so lint judges exactly the exporter's
+  selection; manifest-parity test pins it). Rules reuse graph
+  recommendations (L003, duplicate-derived entries owned by
+  L004), duplicates (L004), and the secret guard (L005, error
+  severity, metadata only). Findings carry token cost, recoverable
+  saving, and an action; totals union distinct files / max saving
+  per file (no double-count). Exit codes: 1 on errors only,
+  --strict promotes warnings, 2 for config/usage errors; profile
+  "lint" section tunes severity (incl. off) + thresholds with
+  loud validation of ids/severities/option names. Same payload on
+  CLI --json, /api/lint, and MCP lint_project. Self-lint on this
+  repo: 4 warns, all justified (intentional prices.json package
+  duplicate; compact-JSON L006 shapes; the minified calibration
+  fixture). GhostBus lint: no errors (its flagged keys were fixed
+  earlier today). Tests 293 -> 334 (41 new). Audit rounds
+  (audits/G06_audit.md): round 1 headline fix — L004 named the
+  group's first file as the keep reference even when excluded;
+  now names the first INCLUDED copy. Round 2 headline fixes —
+  rule messages are the single source of the token cost (CLI no
+  longer appends a duplicate "(est. ...)" suffix; L003/L005/L007
+  messages gained their counts) and L006's message names the
+  giant-line shape instead of overclaiming "minified". Known
+  cost logged for G15: find_duplicates runs twice per lint
+  (inside recommendations + for L004).
