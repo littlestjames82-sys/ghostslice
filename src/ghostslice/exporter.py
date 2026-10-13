@@ -19,7 +19,7 @@ from .scanner import ScanResult, scan
 from .slicer import MODES, slice_text
 from .tokens import METHOD, estimate_tokens
 
-SLICABLE = {"python", "typescript", "javascript", "go", "rust", "java", "csharp"}
+SLICABLE = {"python", "typescript", "javascript", "go", "rust", "java", "csharp", "notebook"}
 
 
 def default_mode_for(entry) -> str:
@@ -38,7 +38,8 @@ def build_bundle(root: str | Path, out: str | Path,
                  profile=None,
                  include: set[str] | None = None,
                  preset: str | None = None,
-                 record_history: bool = True) -> dict:
+                 record_history: bool = True,
+                 exclude_secrets: bool = False) -> dict:
     """Slice `root` into bundle dir `out`. Returns the manifest dict.
 
     Mode precedence: explicit `selections` > profile modes (`.ghostslice.json`)
@@ -61,6 +62,10 @@ def build_bundle(root: str | Path, out: str | Path,
     preset = preset or (profile.preset if profile else None) or "claude-code"
     ignore_matcher = profile.is_ignored if (profile and profile.path) else None
     result: ScanResult = scan(root, ignore_matcher=ignore_matcher)
+    secret_files: set[str] = set()
+    if exclude_secrets:
+        from .secrets_scan import scan_scan_result
+        secret_files = {f["path"] for f in scan_scan_result(result)}
     out = Path(out)
     files_dir = out / "files"
     files_dir.mkdir(parents=True, exist_ok=True)
@@ -84,6 +89,8 @@ def build_bundle(root: str | Path, out: str | Path,
                 mode = "strip-tests"
             else:
                 mode = default_mode_for(entry)
+        if entry.path in secret_files:
+            mode = "exclude"  # --exclude-secrets forces exclusion (v0.4)
         if mode not in MODES:
             raise ValueError(f"unknown mode for {entry.path}: {mode}")
         source = Path(entry.abspath).read_text(encoding="utf-8", errors="replace")

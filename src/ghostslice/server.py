@@ -13,6 +13,7 @@ from .ledger import summary as ledger_summary
 from .pricing import load_prices
 from .profile import load_profile
 from .scanner import scan
+from .secrets_scan import scan_scan_result
 from .slicer import MODES, slice_text
 
 _DASHBOARD = Path(__file__).with_name("dashboard.html")
@@ -36,6 +37,9 @@ class _State:
         self.scan = scan(self.root, ignore_matcher=matcher)
         self.graph = build_graph(self.scan)
         self.recommendations = recommendations(self.scan, self.graph, self.profile)
+        from .duplicates import find_duplicates
+        self.duplicates = find_duplicates(self.scan)
+        self.secrets = scan_scan_result(self.scan)
         self.by_path = {f.path: f for f in self.scan.files}
         self._mode_tokens_cache: dict[tuple[str, str], int] = {}
 
@@ -104,7 +108,11 @@ def make_server(root: str, port: int = 8765, host: str = "127.0.0.1"):
                 self._json(200, payload)
             elif parsed.path == "/api/graph":
                 self._json(200, {"graph": state.graph,
-                                 "recommendations": state.recommendations})
+                                 "recommendations": state.recommendations,
+                                 "duplicates": state.duplicates})
+            elif parsed.path == "/api/secrets":
+                self._json(200, {"findings": state.secrets, "count": len(state.secrets),
+                                 "note": "values redacted to first 4 characters"})
             elif parsed.path == "/api/history":
                 self._json(200, ledger_summary(state.root))
             elif parsed.path == "/api/preview":

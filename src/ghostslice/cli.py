@@ -30,6 +30,7 @@ from .ledger import summary as ledger_summary
 from .pricing import estimate_cost, get_model, load_prices, models, preflight
 from .profile import PRESETS, load_profile
 from .scanner import scan
+from .secrets_scan import scan_scan_result, scan_text
 from .selection import select_for_diff, select_for_task
 from .slicer import MODES, slice_text
 
@@ -39,7 +40,17 @@ def _scan_with_profile(path, profile):
     return scan(path, ignore_matcher=matcher)
 
 
-def _print_scan(result, model=None, prices=None, recs=None) -> None:
+def _warn_secrets(findings, heading="WARNING: possible secrets detected") -> None:
+    if not findings:
+        return
+    print(f"\n{heading} ({len(findings)} finding(s), values redacted):", file=sys.stderr)
+    for f in findings:
+        print(f"  {f['path']}:{f['line']}  {f['type']}  ({f['redacted']})", file=sys.stderr)
+    print("  Review these files before sharing the bundle. "
+          "Use --exclude-secrets (export) to force-exclude flagged files.", file=sys.stderr)
+
+
+def _print_scan(result, model=None, prices=None, recs=None, secrets=None, dups=None) -> None:
     print(f"Project: {result.root}")
     print(f"Files: {len(result.files)}  Estimated tokens: {result.total_tokens:,}")
     print(f"{'tokens':>9}  {'lines':>6}  file")
@@ -57,6 +68,17 @@ def _print_scan(result, model=None, prices=None, recs=None) -> None:
         cost = estimate_cost(result.total_tokens, model)
         print(f"\nPre-flight (input cost, prices as of {prices.get('as_of')} from local prices.json, not live):")
         print(f"  {model['name']}: ~${cost:.4f} for {result.total_tokens:,} estimated tokens")
+    if secrets:
+        print(f"\nSecrets warning ({len(secrets)} finding(s), values redacted):")
+        for f in secrets[:20]:
+            print(f"  {f['path']}:{f['line']}  {f['type']}  ({f['redacted']})")
+        print("  Run `ghostslice secrets <path>` for the full list; export with --exclude-secrets to force-exclude flagged files.")
+    if dups and (dups.get("exact") or dups.get("near")):
+        print("\nDuplicates:")
+        for g in dups.get("exact", []):
+            print(f"  exact: {', '.join(g['files'])}  (up to {g['potential_savings']:,} estimated tokens)")
+        for pair in dups.get("near", []):
+            print(f"  near ({pair['similarity']}): {' <-> '.join(pair['files'])}")
     if recs:
         total = sum(r["potential_savings"] for r in recs)
         print(f"\nPrune recommendations ({len(recs)} candidates, up to {total:,} estimated tokens):")
@@ -100,6 +122,23 @@ def main(argv: list[str] | None = None) -> int:
                           help="apply this mode to slicable files (default: signatures, tests stripped, lockfiles excluded)")
     p_export.add_argument("--preset", choices=PRESETS, default=None)
     p_export.add_argument("--model", default="claude-sonnet")
+    p_export.add_argument("--exclude-secrets", action="store_true",
+                          help="force-exclude files flagged by the secret guard")
+
+    p_secrets = sub.add_parser("secrets", help="scan a project for likely secrets (exit 1 if findings; values redacted)")
+    p_secrets.add_argument("path")
+    p_secrets.add_argument("--json", action="store_true")
+
+    p_report = sub.add_parser("report", help="write a standalone HTML report for a project")
+    p_report.add_argument("path")
+    p_report.add_argument("-o", "--out", required=True)
+    p_report.add_argument("--model", default="claude-sonnet")
+
+    p_explain = sub.add_parser("explain", help="explain why one file is included/excluded and how it is sliced")
+    p_explain.add_argument("path")
+    p_explain.add_argument("file", help="file path relative to the project root")
+    p_explain.add_argument("--mode", choices=MODES, default=None,
+                           help="explicit mode override to explain (as export --mode would apply)")
 
     p_budget = sub.add_parser("check-budget", help="exit non-zero if the selected context exceeds a token budget (CI gate)")
     p_budget.add_argument("path")
@@ -144,20 +183,110 @@ def main(argv: list[str] | None = None) -> int:
     if profile.path:
         print(f"Profile: {profile.path}", file=sys.stderr)
 
+    if args.cmd == "secrets":
+        result = _scan_with_profile(args.path, profile)
+        findings = scan_scan_result(result)
+        if args.json:
+            print(json.dumps({"findings": findings, "count": len(findings)}, indent=2))
+        elif findings:
+            print(f"Possible secrets in {args.path} ({len(findings)} finding(s), values redacted):")
+            for f in findings:
+                print(f"  {f['path']}:{f['line']}  {f['type']}  ({f['redacted']})")
+        else:
+            print("No likely secrets found.")
+        return 1 if findings else 0
+
+    if args.cmd == "report":
+        from .report import write_report
+        out = write_report(args.path, args.out, model_id=args.model or profile.model or "claude-sonnet")
+        print(f"Report: {out}")
+        return 0
+
+    if args.cmd == "explain":
+        from .duplicates import find_duplicates
+        from .exporter import default_mode_for
+        from .graph import importers_of as _imp_of
+        result = _scan_with_profile(args.path, profile)
+        rel = args.file.replace("\\", "/").lstrip("./")
+        by_path = {f.path: f for f in result.files}
+        entry = by_path.get(rel)
+        if entry is None:
+            print(f"{rel}: NOT included in the scan")
+            from .scanner import Gitignore
+            root_p = Path(args.path)
+            if profile.path and profile.is_ignored(rel):
+                print("  reason: excluded by .ghostslice.json profile ignore rule")
+            elif root_p.is_dir() and Gitignore(root_p).ignored(rel):
+                print("  reason: excluded by .gitignore")
+            elif not (root_p / rel).exists():
+                print("  reason: file does not exist under the project root")
+            else:
+                print("  reason: skipped by scanner defaults (binary, ignored directory, or unknown type)")
+            return 0
+        if args.mode:
+            mode, why = args.mode, "explicit --mode override"
+        else:
+            pmode = profile.mode_for(rel) if profile.path else None
+            if pmode:
+                mode, why = pmode, "profile .ghostslice.json per-glob mode"
+            else:
+                mode = default_mode_for(entry)
+                if entry.is_test:
+                    why = "default: test file -> strip-tests"
+                elif entry.is_lockfile:
+                    why = "default: lockfile -> exclude"
+                elif entry.language in ("python", "typescript", "javascript", "go", "rust", "java", "csharp", "notebook"):
+                    why = f"default: {entry.language} code -> signatures"
+                else:
+                    why = "default: non-code file stays full"
+        source = Path(entry.abspath).read_text(encoding="utf-8", errors="replace")
+        sliced = slice_text(rel, source, mode)
+        graph = build_graph(result)
+        rev = _imp_of(graph)
+        dups = find_duplicates(result)
+        dup_notes = []
+        for g in dups["exact"]:
+            if rel in g["files"]:
+                dup_notes.append(f"exact duplicate of {', '.join(p for p in g['files'] if p != rel)}")
+        for pair in dups["near"]:
+            if rel in pair["files"]:
+                other = pair["files"][0] if pair["files"][1] == rel else pair["files"][1]
+                dup_notes.append(f"near-duplicate of {other} (similarity {pair['similarity']})")
+        file_secrets = scan_text(rel, source)
+        print(f"{rel}: included")
+        print(f"  language: {entry.language}  test: {entry.is_test}  lockfile: {entry.is_lockfile}")
+        print(f"  mode: {mode}  ({why})")
+        print(f"  tokens (estimated): {sliced.original_tokens:,} -> {sliced.sliced_tokens:,} (saved {sliced.saved_tokens:,})")
+        print(f"  imports: {', '.join(graph.get(rel, {}).get('imports', [])) or '(none in project)'}")
+        print(f"  imported by: {', '.join(rev.get(rel, [])) or '(nothing)'}")
+        print(f"  duplicates: {'; '.join(dup_notes) or 'none'}")
+        if file_secrets:
+            print(f"  secrets: {len(file_secrets)} finding(s) (redacted):")
+            for f in file_secrets:
+                print(f"    line {f['line']}  {f['type']}  ({f['redacted']})")
+        else:
+            print("  secrets: none")
+        return 0
+
     if args.cmd == "scan":
+        from .duplicates import find_duplicates
         result = _scan_with_profile(args.path, profile)
         graph = build_graph(result)
         recs = recommendations(result, graph, profile)
+        findings = scan_scan_result(result)
+        dups = find_duplicates(result)
         if args.json:
             payload = result.to_dict()
             payload["token_method"] = "estimates (BPE-like split, not exact tokenizer counts)"
             payload["recommendations"] = recs
+            payload["secrets"] = findings
+            payload["duplicates"] = dups
             payload["profile"] = profile.to_dict()
             payload["history"] = ledger_summary(args.path)
             print(json.dumps(payload, indent=2))
             return 0
         model = get_model(prices, args.model or profile.model) if (args.model or profile.model) else None
-        _print_scan(result, model=model, prices=prices, recs=recs)
+        _print_scan(result, model=model, prices=prices, recs=recs, secrets=findings, dups=dups)
         return 0
 
     if args.cmd == "graph":
@@ -165,10 +294,12 @@ def main(argv: list[str] | None = None) -> int:
         graph = build_graph(result)
         recs = recommendations(result, graph, profile)
         if args.json:
+            from .duplicates import find_duplicates
             print(json.dumps({
                 "graph": graph,
                 "importers": importers_of(graph),
                 "recommendations": recs,
+                "duplicates": find_duplicates(result),
             }, indent=2))
             return 0
         print(f"Import graph for {result.root} ({len(graph)} files)")
@@ -183,6 +314,14 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  {r['tokens']:>9,}  {r['path']}  ({r['reason']}; {r['detail']})")
         else:
             print("\nNo prune recommendations.")
+        from .duplicates import find_duplicates
+        dups = find_duplicates(result)
+        if dups["exact"] or dups["near"]:
+            print("\nDuplicates:")
+            for g in dups["exact"]:
+                print(f"  exact: {', '.join(g['files'])}")
+            for pair in dups["near"]:
+                print(f"  near ({pair['similarity']}): {' <-> '.join(pair['files'])}")
         return 0
 
     if args.cmd == "slice":
@@ -199,7 +338,7 @@ def main(argv: list[str] | None = None) -> int:
         before = after = 0
         for entry in result.files:
             text = Path(entry.abspath).read_text(encoding="utf-8", errors="replace")
-            mode = args.mode if entry.language in ("python", "typescript", "javascript", "go", "rust", "java", "csharp") else "full"
+            mode = args.mode if entry.language in ("python", "typescript", "javascript", "go", "rust", "java", "csharp", "notebook", "markdown") else "full"
             r = slice_text(entry.path, text, mode)
             before += r.original_tokens
             after += r.sliced_tokens
@@ -226,6 +365,8 @@ def main(argv: list[str] | None = None) -> int:
             for rel in chosen:
                 print(f"  score {scores.get(rel, 0):>4}  {rel}  ({selections[rel]})")
             include = set(chosen)
+        _warn_secrets([f for f in scan_scan_result(result) if f["path"] in include],
+                      heading="WARNING: possible secrets in selected files")
         manifest = build_bundle(args.path, args.out, selections=selections,
                                 include=include, profile=profile, preset=args.preset)
         model = get_model(prices, args.model)
@@ -237,8 +378,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if check["ok"] else 1
 
     if args.cmd == "export":
+        _export_scan = _scan_with_profile(args.path, profile)
+        _warn_secrets(scan_scan_result(_export_scan))
         manifest = build_bundle(args.path, args.out, default_mode=args.mode,
-                                profile=profile, preset=args.preset)
+                                profile=profile, preset=args.preset,
+                                exclude_secrets=args.exclude_secrets)
         model = get_model(prices, args.model or profile.model or "claude-sonnet")
         pf = preflight(manifest["total_original_tokens"], manifest["total_sliced_tokens"], model, prices)
         print(f"Bundle: {args.out} (preset: {manifest.get('preset')})")

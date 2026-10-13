@@ -16,8 +16,10 @@ Python: real parsing with the stdlib `ast` module.
 
 TypeScript/JavaScript: "parser-lite".
   This is NOT a real parser. It is line scanning + regexes + brace
-  matching that ignores braces inside strings/comments only
-  approximately. It handles the common, conventional shapes:
+  matching that is string/comment aware since v0.4 (braces inside
+  strings, template literals, and // or /* */ comments do not count;
+  braces inside regex literals can still confuse it). It handles the
+  common, conventional shapes:
   `function foo(...) {`, `export const foo = (...) => {`,
   `class Foo { method(...) { ... } }`, `interface Foo { ... }`,
   `type Foo = ...;`, `enum Foo { ... }`, and describe/it/test blocks.
@@ -34,7 +36,7 @@ from dataclasses import dataclass
 from .scanner import is_test_file, language_for
 from .tokens import estimate_tokens
 
-MODES = ("full", "signatures", "interfaces", "strip-tests", "exclude")
+MODES = ("full", "signatures", "interfaces", "strip-tests", "exclude", "headings")
 
 
 @dataclass
@@ -69,8 +71,20 @@ def slice_source(source: str, language: str, mode: str, path: str = "") -> str:
         return source
     if mode == "strip-tests" and path and is_test_file(path):
         return ""
+    if mode == "headings" and language not in ("markdown", "notebook"):
+        return source  # headings is a docs/notebook mode; other files stay full
     if language == "python":
         return _slice_python(source, mode)
+    if language == "notebook":
+        return _slice_notebook(source, mode, path)
+    if language == "markdown":
+        if mode == "headings":
+            return _slice_markdown_headings(source)
+        if mode in ("signatures", "interfaces"):
+            return _slice_markdown_headings(source)
+        if mode == "strip-tests":
+            return source
+        return source
     if language in ("typescript", "javascript"):
         return _slice_ts(source, mode)
     if language in ("go", "rust", "java", "csharp"):
@@ -269,33 +283,104 @@ def _body_brace_col(line: str) -> int:
     return line.find("{")
 
 
+def _is_char_literal(line: str, j: int) -> bool:
+    """Heuristic for Go/Rust/Java/C# single quotes: `'a'`, `'\\n'`, `'{'`
+    are char literals, while Rust lifetimes (`'a`, `'static`) are not.
+    Returns True when the quote at j opens a short char literal."""
+    rest = line[j + 1:j + 6]
+    if rest.startswith("\\") and len(rest) >= 3 and rest[2] == "'":
+        return True
+    return len(rest) >= 2 and rest[1] == "'" and rest[0] not in ("'", "\\")
+
+
 def _brace_end(lines: list[str], start_idx: int, start_col: int = 0,
-               body_col: int | None = None) -> int:
-    """Return index of the line where the brace opened at/after start closes."""
+               body_col: int | None = None, lang: str = "") -> int:
+    """Return index of the line where the brace opened at/after start closes.
+
+    String/comment aware (v0.4): braces inside '...', "...", `...`
+    template literals (including ${...} interpolation and multi-line
+    templates), // line comments and /* ... */ block comments do not
+    affect depth. State persists across lines. Remaining parser-lite
+    limits: regex literals containing braces (e.g. /}/) and nested
+    backticks inside ${...} expressions can still confuse the count.
+    For Go/Rust/Java/C# (lang set), single quotes use a char-literal
+    heuristic so Rust lifetimes do not open a phantom string.
+    """
     depth = 0
     seen = False
+    state: str | None = None  # "'", '"', '`', 'line', 'block'
+    escaped = False
+    interp: list[int] = []  # depths at which a template ${ opened
+    char_langs = lang in ("go", "rust", "java", "csharp")
     for i in range(start_idx, len(lines)):
         line = lines[i]
         if i == start_idx and body_col is not None and body_col >= 0:
             j = body_col
         else:
             j = start_col if i == start_idx else 0
-        in_str: str | None = None
         while j < len(line):
             ch = line[j]
-            if in_str:
-                if ch == in_str and line[j - 1] != "\\":
-                    in_str = None
-            elif ch in ("'", '"', "`"):
-                in_str = ch
-            elif ch == "{":
+            nxt = line[j + 1] if j + 1 < len(line) else ""
+            if state == "line":
+                break
+            if state == "block":
+                if ch == "*" and nxt == "/":
+                    state = None
+                    j += 2
+                    continue
+                j += 1
+                continue
+            if state in ("'", '"', "`"):
+                if escaped:
+                    escaped = False
+                    j += 1
+                    continue
+                if ch == "\\" and state != "`":
+                    escaped = True
+                    j += 1
+                    continue
+                if state == "`" and ch == "$" and nxt == "{":
+                    interp.append(depth)
+                    depth += 1
+                    seen = True
+                    state = None
+                    j += 2
+                    continue
+                if ch == state:
+                    state = None
+                j += 1
+                continue
+            # code state
+            if ch == "/" and nxt == "/":
+                state = "line"
+                break
+            if ch == "/" and nxt == "*":
+                state = "block"
+                j += 2
+                continue
+            if ch in ("'", '"', "`"):
+                if ch == "'" and char_langs and not _is_char_literal(line, j):
+                    j += 1
+                    continue
+                state = ch
+                j += 1
+                continue
+            if ch == "{":
                 depth += 1
                 seen = True
             elif ch == "}":
                 depth -= 1
+                if interp and depth == interp[-1]:
+                    interp.pop()
+                    state = "`"
+                    j += 1
+                    continue
                 if seen and depth == 0:
                     return i
             j += 1
+        if state == "line":
+            state = None
+        escaped = False
         if seen and depth == 0:
             return i
     return len(lines) - 1
@@ -503,8 +588,8 @@ _TEST_FN_RES = {
 }
 
 
-def _block_end(lines, start):
-    return _brace_end(lines, start, body_col=lines[start].find("{"))
+def _block_end(lines, start, lang=""):
+    return _brace_end(lines, start, body_col=lines[start].find("{"), lang=lang)
 
 
 def _lite_type_kind(line: str, lang: str) -> str | None:
@@ -542,7 +627,7 @@ def _lite_keep_full_type(kind: str | None, lang: str, mode: str) -> bool:
 
 def _lite_class_members(lines, start, lang):
     """Member signatures of a class/impl block starting at `start`."""
-    end = _block_end(lines, start)
+    end = _block_end(lines, start, lang)
     header = _sig_before_body(lines[start]) + " {"
     out = [header]
     i = start + 1
@@ -552,14 +637,14 @@ def _lite_class_members(lines, start, lang):
         if _lite_is_func(line, lang):
             if "{" in line:
                 out.append(_sig_before_body(line) + " { /* ... */ }")
-                i = _block_end(lines, i) + 1
+                i = _block_end(lines, i, lang) + 1
             else:  # abstract / interface method ending in ;
                 out.append(line.rstrip())
                 i += 1
         elif _lite_type_kind(line, lang) or _JV_TYPE_RE.match(line):
             kind = _lite_type_kind(line, lang)
             if "{" in line and _lite_keep_full_type(kind, lang, "signatures"):
-                bend = _block_end(lines, i)
+                bend = _block_end(lines, i, lang)
                 out.extend(ln.rstrip() for ln in lines[i:bend + 1])
                 i = bend + 1
             elif "{" in line:
@@ -615,7 +700,7 @@ def _lite_signatures(lines, lang, mode):
                 out.append(line.rstrip())
                 i += 1
         elif kind and "{" in line and _lite_keep_full_type(kind, lang, mode):
-            end = _block_end(lines, i)
+            end = _block_end(lines, i, lang)
             out.extend(ln.rstrip() for ln in lines[i:end + 1])
             out.append("")
             i = end + 1
@@ -624,17 +709,17 @@ def _lite_signatures(lines, lang, mode):
                 sub, nxt = _lite_class_members(lines, i, lang)
                 out.extend(sub); out.append(""); i = nxt
             elif mode == "interfaces":
-                i = _block_end(lines, i) + 1  # impl/class bodies are not interfaces in go/rust
+                i = _block_end(lines, i, lang) + 1  # impl/class bodies are not interfaces in go/rust
             else:
                 sub, nxt = _lite_class_members(lines, i, lang)
                 out.extend(sub); out.append(""); i = nxt
         elif _lite_is_func(line, lang):
             if mode == "interfaces" and lang in ("go", "rust"):
-                i = _block_end(lines, i) + 1 if "{" in line else i + 1
+                i = _block_end(lines, i, lang) + 1 if "{" in line else i + 1
             elif "{" in line:
                 sig = _sig_before_body(line)
                 out.append(sig + (" { /* ... */ }" if lang != "go" else " { /* ... */ }"))
-                i = _block_end(lines, i) + 1
+                i = _block_end(lines, i, lang) + 1
             else:
                 out.append(line.rstrip())
                 i = _statement_end(lines, i) + 1
@@ -658,7 +743,7 @@ def _lite_strip_tests(lines, lang, source):
                (re.match(r"^\s*#\[cfg\(test\)\]", lines[i]) and i + 1 < len(lines)
                     and "{" in lines[i + 1]):
                 start = i + 1 if lines[i].lstrip().startswith("#[") else i
-                end = _block_end(lines, start) if "{" in lines[start] else i
+                end = _block_end(lines, start, lang) if "{" in lines[start] else i
                 for ln in range(i, end + 1):
                     drop.add(ln)
                 i = end + 1
@@ -667,7 +752,7 @@ def _lite_strip_tests(lines, lang, source):
                 while j < len(lines) and not _RS_FN_RE.match(lines[j]):
                     j += 1
                 if j < len(lines):
-                    end = _block_end(lines, j) if "{" in lines[j] else j
+                    end = _block_end(lines, j, lang) if "{" in lines[j] else j
                     for ln in range(i, end + 1):
                         drop.add(ln)
                     i = end + 1
@@ -695,12 +780,12 @@ def _lite_strip_tests(lines, lang, source):
                 j = i
                 while j < min(i + 4, len(lines)) and "{" not in lines[j] and not lines[j].rstrip().endswith(";"):
                     j += 1
-                end = _block_end(lines, j) if j < len(lines) and "{" in lines[j] else start
+                end = _block_end(lines, j, lang) if j < len(lines) and "{" in lines[j] else start
                 for ln in range(start, end + 1):
                     drop.add(ln)
                 i = end + 1
                 continue
-            end = _block_end(lines, start) if "{" in lines[start] else start
+            end = _block_end(lines, start, lang) if "{" in lines[start] else start
             for ln in range(start, end + 1):
                 drop.add(ln)
             i = end + 1
@@ -721,3 +806,118 @@ def _slice_brace_lite(source: str, mode: str, lang: str, path: str = "") -> str:
         text = "\n".join(out).strip()
         return text + ("\n" if text else "")
     return source
+
+
+# ---------------------------------------------------------------------------
+# Jupyter notebooks (.ipynb) — stdlib json parsing (v0.4)
+#
+# A notebook is JSON: cells with cell_type + source. Slicing returns a
+# *text* rendering (GhostSlice bundles are text), not re-serialised JSON:
+#   signatures / full-ish : code cells' source only — outputs and
+#       execution counts are never included (they live outside `source`,
+#       so they are stripped by construction); markdown cells are kept
+#       as `#`-prefixed comments so narrative survives.
+#   interfaces: same rendering (notebooks have no separate interface
+#       surface; documented, not a distinct algorithm).
+#   strip-tests: code cells mentioning test markers (test_, assert in a
+#       test-named cell, `pytest`, `unittest`) are dropped.
+#   headings: markdown headings + code cell first lines as comments.
+# Malformed notebooks never crash: unparsable JSON returns the source
+# unchanged for full, and "" for reducing modes with the raw text kept
+# only under full.
+# ---------------------------------------------------------------------------
+
+def _nb_cell_source(cell) -> str:
+    src = cell.get("source", "")
+    if isinstance(src, list):
+        return "".join(str(s) for s in src)
+    return str(src or "")
+
+
+def _slice_notebook(source: str, mode: str, path: str = "") -> str:
+    import json as _json
+    try:
+        nb = _json.loads(source)
+        cells = nb.get("cells")
+        if not isinstance(cells, list):
+            raise ValueError("no cells")
+    except Exception:
+        return source if mode == "full" else ""
+    parts: list[str] = []
+    for idx, cell in enumerate(cells):
+        if not isinstance(cell, dict):
+            continue
+        ctype = cell.get("cell_type", "")
+        text = _nb_cell_source(cell).rstrip()
+        if mode == "strip-tests":
+            low = text.lower()
+            if ctype == "code" and ("def test_" in low or "pytest" in low
+                                    or "unittest" in low or low.lstrip().startswith("test")):
+                continue
+        if ctype == "markdown":
+            if mode == "headings":
+                for ln in text.splitlines():
+                    if ln.lstrip().startswith("#"):
+                        parts.append(ln)
+                continue
+            commented = "\n".join(f"# {ln}" if ln else "#" for ln in text.splitlines())
+            parts.append(commented)
+        elif ctype == "code":
+            if not text:
+                continue
+            if mode == "headings":
+                first = text.splitlines()[0] if text.splitlines() else ""
+                parts.append(f"# %% cell {idx}: {first}")
+            else:
+                parts.append(f"# %% cell {idx}\n{text}")
+        elif ctype == "raw":
+            continue
+    out = "\n\n".join(p for p in parts if p).strip()
+    return out + ("\n" if out else "")
+
+
+# ---------------------------------------------------------------------------
+# Markdown headings mode (v0.4)
+#
+# Keeps every ATX heading plus the first paragraph (first run of
+# non-blank lines) directly under it, plus any content before the
+# first heading's first paragraph. Fenced code blocks under a heading
+# are not treated as its paragraph.
+# ---------------------------------------------------------------------------
+
+def _slice_markdown_headings(source: str) -> str:
+    lines = source.splitlines()
+    out: list[str] = []
+    i = 0
+    n = len(lines)
+    # Preamble: keep lines up to and including first paragraph.
+    while i < n and not lines[i].lstrip().startswith("#"):
+        out.append(lines[i])
+        i += 1
+        if i < n and not lines[i - 1].strip() and out and any(l.strip() for l in out):
+            break
+    while i < n:
+        line = lines[i]
+        if line.lstrip().startswith("#"):
+            out.append(line)
+            i += 1
+            # skip blank lines, keep them minimal
+            while i < n and not lines[i].strip():
+                i += 1
+            # first paragraph: consecutive non-blank, non-heading lines
+            para: list[str] = []
+            in_fence = False
+            while i < n and lines[i].strip() and not lines[i].lstrip().startswith("#"):
+                if lines[i].lstrip().startswith("```"):
+                    if not para:
+                        break
+                    in_fence = not in_fence
+                para.append(lines[i])
+                i += 1
+            out.extend(para)
+            out.append("")
+        else:
+            i += 1
+    text = "\n".join(out).strip()
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text + ("\n" if text else "")

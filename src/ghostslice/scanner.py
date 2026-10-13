@@ -25,9 +25,10 @@ BINARY_EXTS = {
 
 TEXT_EXTS = {
     ".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
-    ".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".cfg", ".ini",
+    ".md", ".markdown", ".txt", ".json", ".yaml", ".yml", ".toml", ".cfg", ".ini",
     ".html", ".css", ".sh", ".rb", ".go", ".rs", ".java", ".c", ".h",
     ".cpp", ".hpp", ".cs", ".php", ".swift", ".kt", ".sql", ".xml",
+    ".ipynb",
 }
 
 LOCKFILES = {
@@ -41,8 +42,9 @@ LANGUAGE_BY_EXT = {
     ".ts": "typescript", ".tsx": "typescript",
     ".js": "javascript", ".jsx": "javascript",
     ".mjs": "javascript", ".cjs": "javascript",
-    ".md": "markdown", ".txt": "text", ".json": "json",
+    ".md": "markdown", ".markdown": "markdown", ".txt": "text", ".json": "json",
     ".go": "go", ".rs": "rust", ".java": "java", ".cs": "csharp",
+    ".ipynb": "notebook",
 }
 
 

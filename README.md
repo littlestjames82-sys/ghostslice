@@ -70,6 +70,15 @@ Modes, per file:
 | `interfaces` | classes, type aliases, Protocol/ABC-style defs | `interface` / `type` / `enum` declarations only |
 | `strip-tests` | source with `test_*` / `Test*` definitions removed; a test file slices to empty | source with `describe`/`it`/`test` blocks removed; a test file slices to empty |
 | `exclude` | empty | empty |
+| `headings` | (docs/notebooks) | (docs/notebooks) |
+
+More modes (v0.4): Markdown files support `headings` (headings plus the
+first paragraph under each heading; docs still default to `full`, opt in
+per-glob via a profile). Jupyter notebooks (`.ipynb`) slice to a text
+rendering: `signatures`/`full` keep code-cell source only (outputs and
+execution counts are stripped, markdown cells kept as comments) and
+`strip-tests` drops test cells. Malformed notebooks never crash the
+slicer.
 
 ### Export: one-click agent bundle
 
@@ -93,6 +102,49 @@ A bundle contains:
 
 `ghostslice check` re-reads the bundle and verifies that every hash and
 token total in `manifest.json` matches what is actually on disk.
+
+### Secret guard (v0.4)
+
+```bash
+ghostslice secrets ~/my-project        # exit 1 if findings; values redacted
+ghostslice scan ~/my-project           # scan output includes a secrets section
+ghostslice export ~/my-project -o bundle --exclude-secrets   # force-exclude flagged files
+```
+
+Before you hand a bundle to an agent (or paste it anywhere), GhostSlice
+checks the files that would be exported for likely secrets: AWS
+AKIA/ASIA keys, GitHub `ghp_`/`gho_` tokens, OpenAI/Anthropic `sk-`
+keys, Slack tokens, private-key blocks, passwords embedded in URLs,
+sensitive-named assignments (`API_TOKEN=...`, `DATABASE_PASSWORD=...`),
+and generic high-entropy assignments. `export` and `task` warn loudly
+on stderr and list findings as file:line + pattern type, redacted to
+the first 4 characters - the secret value itself is never printed in
+full. Placeholders do not flag: `example`, `xxx`, `your-key-here`,
+`changeme`, `dummy`, `sample`, `fixture`, `${ENV}` references, and
+empty values are all treated as benign. Also available as the
+dashboard `/api/secrets` endpoint and the MCP `check_secrets` tool.
+This is a heuristic guard, not a guarantee: review findings, and do
+not treat a clean scan as proof a tree is secret-free.
+
+### Duplicates (v0.4)
+
+`scan` and `graph` report duplicate files: exact duplicates (sha256 of
+normalized content) and near-duplicates (line-shingle Jaccard >= 0.85,
+only for files with at least 8 distinct lines and 200 normalized
+characters, to avoid boilerplate noise). A duplicate copy appears in
+prune recommendations with its token cost as the potential saving.
+
+### Report + explain (v0.4)
+
+```bash
+ghostslice report ~/my-project -o report.html   # single self-contained HTML file
+ghostslice explain ~/my-project src/util.py     # why included/excluded, mode, tokens, graph, flags
+```
+
+The report needs no JavaScript and loads no external assets: scan
+totals, top files by tokens with heat bars, sliced estimate and cost,
+prune recommendations, duplicates, redacted secret findings, and
+savings history, all in one file (violet accent #6716f3).
 
 ### Graph: dependency map + prune recommendations (v0.2)
 
@@ -162,7 +214,8 @@ dashboard total the estimated savings across runs.
 ghostslice mcp    # stdio JSON-RPC, newline-delimited
 ```
 
-Tools: `scan_project`, `slice_file`, `estimate_cost`, `export_bundle`.
+Tools: `scan_project`, `slice_file`, `estimate_cost`, `export_bundle`,
+`check_secrets` (v0.4).
 Same zero-dependency stdlib pattern as the Ghost Hands MCP server: any
 MCP client that can spawn a stdio process can drive GhostSlice.
 
@@ -203,7 +256,18 @@ that writes a `.claude_context` bundle inside the served project.
   `ast` parser. TS/JS uses line scanning, regexes, and brace matching;
   it handles conventional shapes (functions, arrow functions, classes,
   interfaces, types, enums, test blocks) and can slice exotic syntax
-  imperfectly.
+  imperfectly. Since v0.4 the brace matching is string/comment aware:
+  braces inside `'...'`, `"..."`, and `` `...` `` template literals
+  (including `${...}` interpolation and multi-line templates), `//`
+  comments, and `/* ... */` comments do not affect depth, and the same
+  awareness applies to the Go/Rust/Java/C# lite slicers (with a
+  char-literal heuristic so Rust lifetimes like `'a` do not open a
+  phantom string). Remaining known limit: braces inside regex literals
+  (e.g. `/}/`) and nested backticks inside `${...}` expressions can
+  still confuse the counter.
+- **Secret scanning is a heuristic guard, not a guarantee** (see
+  Secret guard above): it favours not flagging placeholders over
+  catching every possible secret shape.
 
 ## Tests
 
@@ -221,6 +285,9 @@ src/ghostslice/
   scanner.py    .gitignore-aware project scanner (nested .gitignore support)
   slicer.py     Python ast slicer + TS/JS parser-lite slicer (+ Go/Rust/Java/C# lite in v0.3)
   graph.py      import graph + prune recommendations + git changed-files
+  secrets_scan.py  secret guard: provider token shapes, assignments, entropy (v0.4)
+  duplicates.py exact (sha256) + near (line-shingle Jaccard) duplicates (v0.4)
+  report.py     standalone self-contained HTML report (v0.4)
   profile.py    .ghostslice.json profile loader
   selection.py  task keyword / git-diff context selection
   ledger.py     .ghostslice-history.jsonl savings ledger

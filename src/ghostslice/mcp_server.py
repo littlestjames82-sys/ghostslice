@@ -64,6 +64,15 @@ TOOLS = [
         },
     },
     {
+        "name": "check_secrets",
+        "description": "Scan a project for likely secrets in files that would be exported. Findings are redacted (path, line, pattern type only).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+        },
+    },
+    {
         "name": "export_bundle",
         "description": "Export a context bundle (manifest.json, PROMPT.md, sliced files) for a project.",
         "inputSchema": {
@@ -137,11 +146,19 @@ def _export_bundle(args: dict) -> dict:
     }
 
 
+def _check_secrets(args: dict) -> dict:
+    from .secrets_scan import scan_path
+    findings = scan_path(args["path"])
+    return {"findings": findings, "count": len(findings),
+            "note": "values redacted to first 4 characters; pattern types only"}
+
+
 _DISPATCH = {
     "scan_project": _scan_project,
     "slice_file": _slice_file,
     "estimate_cost": _estimate_cost,
     "export_bundle": _export_bundle,
+    "check_secrets": _check_secrets,
 }
 
 

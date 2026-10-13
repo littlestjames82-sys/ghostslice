@@ -212,6 +212,45 @@ def recommendations(scan_result, graph: dict, profile=None) -> list[dict]:
             "detail": detail,
             "importers": rev.get(entry.path, []),
         })
+    # Duplicate copies are prune candidates too (v0.4): keep the first
+    # file of an exact group / the first file of a near pair, flag the rest.
+    try:
+        from .duplicates import find_duplicates
+        dups = find_duplicates(scan_result)
+    except Exception:
+        dups = {"exact": [], "near": []}
+    have = {r["path"] for r in out}
+    for group in dups.get("exact", []):
+        keep = group["files"][0]
+        for path in group["files"][1:]:
+            if path in have or path in entries:
+                continue
+            f = by_path.get(path)
+            if f is None:
+                continue
+            out.append({
+                "path": path, "tokens": f.tokens,
+                "potential_savings": f.tokens,
+                "reason": f"exact duplicate of {keep}",
+                "detail": "sha256 of normalized content matches; keep one copy",
+                "importers": rev.get(path, []),
+            })
+            have.add(path)
+    for pair in dups.get("near", []):
+        keep, path = pair["files"][0], pair["files"][1]
+        if path in have or path in entries:
+            continue
+        f = by_path.get(path)
+        if f is None:
+            continue
+        out.append({
+            "path": path, "tokens": f.tokens,
+            "potential_savings": f.tokens,
+            "reason": f"near-duplicate of {keep} (similarity {pair['similarity']})",
+            "detail": "line-shingle Jaccard >= 0.85; review before pruning",
+            "importers": rev.get(path, []),
+        })
+        have.add(path)
     out.sort(key=lambda r: r["tokens"], reverse=True)
     return out
 
