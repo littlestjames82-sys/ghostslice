@@ -3,6 +3,43 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [0.16.0] - 2026-10-13
+### Added
+- Two export presets (G11), both rendered from the same in-memory
+  slice results as PROMPT.md — never re-read or re-sliced:
+  - `anthropic-xml`: adds `context.xml`, one well-formed XML
+    document in Anthropic's `<documents>` shape. Each included file
+    is a `<document index mode package original_tokens
+    sliced_tokens sha256>` with `<source>` and
+    `<document_content>`; every other manifest file is listed
+    under `<excluded>` with its mode and reason (mode `exclude`,
+    or an empty slice). Content is escaped by ElementTree (no
+    CDATA); characters XML 1.0 cannot represent are replaced by
+    U+FFFD in context.xml only — `files/` keeps the canonical
+    bytes.
+  - `json`: adds `context.json`, a single JSON object
+    (`project`, `generated_by`, `version`, `model`, `totals`,
+    `files` with per-file mode/language/package/tokens/sha256/
+    content, `excluded`) for other tools and agents to consume.
+- `ghostslice check` validates either artifact when present: XML
+  and JSON must parse, per-file content must equal the bundle's
+  own sliced bytes (XML compared after the documented U+FFFD
+  step), per-file sha256 and JSON totals must match the manifest,
+  and the document/file set must mirror the manifest exactly.
+  Truncated or tampered artifacts fail with clear messages;
+  bundles without an artifact validate exactly as before. The
+  result gains an additive `artifacts_checked` list.
+- Wrapper cost is reported, not hidden: the manifest gains
+  `wrapper_artifacts` per artifact — `bytes`, `estimated_tokens`
+  (the artifact as written, escaping included), and
+  `overhead_estimated_tokens` (artifact estimate minus the sliced
+  total: the markup cost beyond the slices the artifact contains)
+  — and the export/task CLI prints both figures. Manifest totals
+  still count file slices only.
+- The MCP `export_bundle` preset enum (which follows PRESETS)
+  exposes both new presets; `build_bundle` accepts an optional
+  `model` recorded in context.json.
+
 ## [0.15.0] - 2026-10-13
 ### Added
 - `ghostslice init <project>`: generates a tuned `.ghostslice.json`

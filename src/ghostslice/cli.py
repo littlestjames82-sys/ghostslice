@@ -99,6 +99,18 @@ def _print_history_trend(data) -> None:
           f"(min {min(after_vals):,}, max {max(after_vals):,})")
 
 
+def _print_wrapper(manifest) -> None:
+    """Print the v0.16 wrapper lines: the artifact CONTAINS the
+    slices, so report its own total and the markup overhead beyond
+    the sliced total separately — the manifest totals themselves
+    count file slices only and never fold the wrapper in."""
+    for name, info in (manifest.get("wrapper_artifacts") or {}).items():
+        print(f"Wrapper: {name} is ~{info['estimated_tokens']:,} estimated tokens "
+              f"in total ({info['bytes']:,} bytes), of which "
+              f"~{info['overhead_estimated_tokens']:,} is format overhead beyond "
+              "the sliced totals above; manifest totals count the file slices only.")
+
+
 def _scan_with_profile(path, profile):
     matcher = profile.is_ignored if profile.path else None
     return scan(path, ignore_matcher=matcher)
@@ -671,11 +683,12 @@ def main(argv: list[str] | None = None) -> int:
         manifest = build_bundle(args.path, args.out, selections=selections,
                                 include=include, profile=profile, preset=args.preset,
                                 fit=args.fit, fit_protect_selections=False,
-                                task_scores=task_scores)
+                                task_scores=task_scores, model=args.model)
         model = get_model(prices, args.model)
         pf = preflight(manifest["total_original_tokens"], manifest["total_sliced_tokens"], model, prices)
         print(f"Bundle: {args.out} (preset: {manifest.get('preset')})")
         print(f"Estimated tokens (whole project -> selection): {pf['before_tokens']:,} -> {pf['after_tokens']:,}")
+        _print_wrapper(manifest)
         fitted = _print_fit(manifest.get("fit"))
         check = validate_bundle(args.out)
         print(f"Validation: {'OK' if check['ok'] else 'FAILED: ' + '; '.join(check['errors'])}")
@@ -684,12 +697,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "export":
         _export_scan = _scan_with_profile(args.path, profile)
         _warn_secrets(scan_scan_result(_export_scan))
+        model_id = args.model or profile.model or "claude-sonnet"
         manifest = build_bundle(args.path, args.out, default_mode=args.mode,
                                 profile=profile, preset=args.preset,
                                 exclude_secrets=args.exclude_secrets,
                                 auto_shrink=True if args.auto_shrink else None,
-                                fit=args.fit)
-        model = get_model(prices, args.model or profile.model or "claude-sonnet")
+                                fit=args.fit, model=model_id)
+        model = get_model(prices, model_id)
         pf = preflight(manifest["total_original_tokens"], manifest["total_sliced_tokens"], model, prices)
         print(f"Bundle: {args.out} (preset: {manifest.get('preset')})")
         print(f"Files: {len(manifest['files'])}")
@@ -699,6 +713,7 @@ def main(argv: list[str] | None = None) -> int:
             for f in auto:
                 print(f"  {f['path']}  ({f['mode_reason']})")
         print(f"Estimated tokens: {pf['before_tokens']:,} -> {pf['after_tokens']:,} (saved {pf['saved_tokens']:,})")
+        _print_wrapper(manifest)
         print(f"Pre-flight input cost at {pf['model_name']} (prices as of {pf['prices_as_of']}, local, not live): "
               f"~${pf['before_cost_usd']:.4f} -> ~${pf['after_cost_usd']:.4f}")
         fitted = _print_fit(manifest.get("fit"))

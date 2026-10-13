@@ -196,6 +196,84 @@ Per-file mode changes, original/sliced token deltas, added and removed
 files, and totals. Exit 0 for any two valid bundles; if either bundle
 fails validation, diff reports which one and exits 1.
 
+### XML and JSON bundles (v0.16)
+
+Two presets add a single-file rendering of the whole bundle, built
+from the same in-memory slice results as `PROMPT.md` (never re-read
+or re-sliced), for consumers that do not want the `files/` tree:
+
+```bash
+ghostslice export ~/my-project -o bundle --preset anthropic-xml
+ghostslice export ~/my-project -o bundle --preset json
+```
+
+**`anthropic-xml` → `context.xml`** — one well-formed XML document in
+Anthropic's document shape:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<documents>
+  <document index="1" mode="signatures" package=""
+            original_tokens="120" sliced_tokens="45" sha256="...">
+    <source>src/app.py</source>
+    <document_content>...sliced text, XML-escaped...</document_content>
+  </document>
+  <excluded>
+    <file path="package-lock.json" mode="exclude" reason="excluded (mode: exclude)"/>
+  </excluded>
+</documents>
+```
+
+Documents appear in manifest order (`index` is 1-based). `package` is
+the v0.13 workspace package of the file ("" for the root package).
+Every manifest file is either a `<document>` or listed under
+`<excluded>` — excluded files (mode `exclude`) and files whose slice
+came out empty (e.g. a test file under `strip-tests`), each with its
+reason. Content is escaped with Python's ElementTree (never
+hand-rolled, never CDATA), so code full of `]]>`, `<`, `>` and `&`
+round-trips exactly. The one lossy step: characters XML 1.0 cannot
+represent (most C0 controls, lone surrogates) are replaced by U+FFFD
+in `context.xml` only — `files/` and `context.json` keep the
+canonical bytes.
+
+**`json` → `context.json`** — one JSON object for other tools and
+agents:
+
+```json
+{
+  "tool": "ghostslice", "version": "...", "preset": "json",
+  "generated_by": "ghostslice ...", "generated_at": "...",
+  "project": "my-project", "root": "/abs/path", "model": "claude-sonnet",
+  "token_method": "...",
+  "totals": {"original_tokens": 0, "sliced_tokens": 0, "saved_tokens": 0},
+  "files": [{"path": "...", "mode": "...", "language": "...",
+             "package": "", "original_tokens": 0, "sliced_tokens": 0,
+             "sha256": "...", "content": "...sliced text..."}],
+  "excluded": [{"path": "...", "mode": "exclude", "reason": "..."}]
+}
+```
+
+`model` is the export's model id, or `null` when the export was not
+made through the CLI. `files` carries exactly the included set (same
+files and contents as `PROMPT.md`), in manifest order.
+
+**Wrapper overhead, stated honestly:** the artifact contains the
+slices, so pasting it costs its own total, of which only the markup
+beyond the slices is overhead. The manifest totals do not count
+either figure — totals stay about the file slices, unchanged. The
+manifest records the wrapper under `wrapper_artifacts` per
+artifact: `bytes`, `estimated_tokens` (the artifact as written,
+escaping included), and `overhead_estimated_tokens` (the artifact
+estimate minus the sliced total, itself an estimate, clamped at
+0). The export/task CLI prints both numbers.
+
+**Validation:** `ghostslice check` validates either artifact when
+present — the XML must parse, the JSON must parse, per-file content
+must equal the bundle's own sliced bytes (XML compared after the
+documented U+FFFD step), per-file and total hashes/totals must match
+the manifest. Truncated or tampered artifacts fail with a clear
+message. Bundles without an artifact validate exactly as before.
+
 ### Secret guard (v0.4)
 
 ```bash
@@ -431,8 +509,12 @@ Export presets: `claude-code` (the `.claude_context` bundle), `aider`
 Aider with `--read`), `generic` (adds a lowercase `prompt.md`),
 `cursor` (v0.5: adds `prompt.md` plus a `README.txt` explaining how to
 paste/attach the bundle in Cursor; meant to live as a `.cursor-context`
-directory), and `copilot` (v0.5: adds a `prompt.md` shaped for GitHub
-Copilot Chat, one `## File:` section per file with fenced code blocks).
+directory), `copilot` (v0.5: adds a `prompt.md` shaped for GitHub
+Copilot Chat, one `## File:` section per file with fenced code blocks),
+`anthropic-xml` (v0.16: adds `context.xml`, an Anthropic-style XML
+document of the slices), and `json` (v0.16: adds `context.json`, a
+machine-consumable JSON object of the slices). See
+"XML and JSON bundles" below for both schemas.
 Nested `.gitignore` files in subdirectories are honoured, scoped to
 their subtree. An optional `"lint"` section tunes the context linter
 per rule (see Context lint above), and `"auto_shrink": true` makes
@@ -737,7 +819,7 @@ src/ghostslice/
   ledger.py     .ghostslice-history.jsonl savings ledger
   mcp_server.py stdio MCP server (v0.3)
   pricing.py    local prices.json loader + cost estimator
-  exporter.py   bundle builder + validator (presets: claude-code/aider/generic/cursor/copilot)
+  exporter.py   bundle builder + validator (presets: claude-code/aider/generic/cursor/copilot/anthropic-xml/json)
   watch.py      polling watch mode: debounced rescan + auto re-export (v0.6)
   server.py     stdlib http.server dashboard API
   dashboard.html  single-page dashboard UI (violet accent #6716f3)

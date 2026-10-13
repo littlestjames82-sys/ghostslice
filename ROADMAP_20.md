@@ -26,7 +26,7 @@ Baseline: v0.5.0, 149 tests passed.
 | G8 | Monorepo support: workspace detection (npm/Cargo/go/pyproject), per-package subtotals everywhere | v0.13.0 | done |
 | G9 | History analytics: trends, per-model $ saved, ASCII chart, JSON export + savings-history chart embedded in the HTML report (Ryan's mockups, Oct 13) | v0.14.0 | done |
 | G10 | `init` wizard: analyze a project and generate a tuned .ghostslice.json (non-interactive --yes mode) | v0.15.0 | done |
-| G11 | New bundle formats: Anthropic-style XML bundle + JSON bundle presets | v0.16.0 | pending |
+| G11 | New bundle formats: Anthropic-style XML bundle + JSON bundle presets | v0.16.0 | done |
 | G12 | Redact-in-place export: --redact-secrets replaces secret values with placeholders instead of excluding files | v0.17.0 | pending |
 | G13 | Symbol-level slicing: keep named symbols + their in-file dependencies (Python ast, TS lite) | v0.18.0 | pending |
 | G14 | Python call graph: function-level graph, entry-point reachability, dead-function candidates | v0.19.0 | pending |
@@ -285,3 +285,28 @@ the audit findings that drove the two improvement rounds.
   Round 2 headline fix — a .ghostslice.json that is a directory,
   or any unwritable target, is a clean exit 2 instead of a
   write_text traceback.
+- G11 (v0.16.0) DONE Oct 13, 2026: XML + JSON bundle formats
+  shipped — `anthropic-xml` preset writes context.xml (Anthropic
+  <documents> shape: per-file <document> with source + escaped
+  document_content and mode/token/sha256 attributes in manifest
+  order, plus an <excluded> section with reasons for excluded and
+  empty-slice files) and `json` preset writes context.json
+  (project/generated_by/model/totals + per-file content), both
+  rendered from build_bundle's single in-memory slicing pass so
+  they cannot diverge from PROMPT.md/files. Escaping is
+  ElementTree-only (no CDATA); XML-illegal characters become
+  U+FFFD in context.xml only, files/ keeps canonical bytes.
+  `ghostslice check` validates either artifact when present
+  (parse, content vs the bundle's own slices, sha256 + totals vs
+  manifest, exact file-set mirror; additive artifacts_checked),
+  and wrapper overhead is measured on the artifact as written and
+  reported in manifest wrapper_artifacts + the CLI — totals still
+  count slices only. Tests 462 -> 488 (26 new). Audit rounds
+  (audits/G11_audit.md): round 1 headline fix — the new validator
+  crashed with AttributeError on a valid-JSON-but-wrong-shaped
+  context.json; shape guards (_json_records) now make it report
+  clean errors, never raise, with regression tests. Round 2 was a
+  probe battery (wrong-typed values, duplicate documents, stray
+  artifacts in plain bundles — presence validation confirmed
+  deliberate) with no new defects; its fixes were the documented
+  choices and the PRESETS/profile/CLI/README consistency guard.

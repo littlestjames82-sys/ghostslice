@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -129,6 +130,116 @@ def resolve_modes_detailed(result, profile=None, selections=None,
     return resolved, reasons
 
 
+def _xml_safe_text(text: str) -> str:
+    """`text` with every character XML 1.0 cannot represent replaced
+    by U+FFFD. XML 1.0 Char ::= #x9 | #xA | #xD | [#x20-#xD7FF] |
+    [#xE000-#xFFFD] | [#x10000-#x10FFFF]. Lone surrogates
+    (#xD800-#xDFFF) fall inside the first range numerically but
+    cannot be encoded as UTF-8, so they are replaced too, as are the
+    per-plane noncharacters U+xFFFE/U+xFFFF. Everything else —
+    including DEL and the C1 controls — is legal XML 1.0 and passes
+    through untouched, so context.xml content round-trips exactly
+    for every file whose slice is XML-representable.
+    """
+    out: list[str] = []
+    for ch in text:
+        cp = ord(ch)
+        if (cp in (0x9, 0xA, 0xD)
+                or (0x20 <= cp <= 0xD7FF and not 0xD800 <= cp <= 0xDFFF)
+                or 0xE000 <= cp <= 0xFFFD
+                or (0x10000 <= cp <= 0x10FFFF and (cp & 0xFFFE) != 0xFFFE)):
+            out.append(ch)
+        else:
+            out.append("\uFFFD")
+    return "".join(out)
+
+
+def render_context_xml(included: list[dict], excluded: list[dict]) -> str:
+    """Render the `anthropic-xml` preset artifact (context.xml).
+
+    `included` records are manifest entries plus a "content" key
+    (the sliced text), in manifest order; `excluded` records are
+    {"path", "mode", "reason"} for every manifest file that carries
+    no content (mode exclude, or a slice that came out empty).
+
+    Schema (also documented in README):
+      <documents>
+        <document index="1" mode="signatures" package=""
+                  original_tokens="120" sliced_tokens="45" sha256="...">
+          <source>src/app.py</source>
+          <document_content>...sliced text...</document_content>
+        </document>
+        ...
+        <excluded>
+          <file path="..." mode="exclude" reason="..."/>
+        </excluded>
+      </documents>
+
+    Content is escaped by ElementTree — never hand-rolled, never
+    CDATA — and passed through _xml_safe_text first, so the output
+    is always well-formed. files/ keeps the canonical slice bytes.
+    """
+    root_el = ET.Element("documents")
+    for i, rec in enumerate(included, start=1):
+        doc = ET.SubElement(root_el, "document", {
+            "index": str(i),
+            "mode": rec["mode"],
+            "package": rec["package"],
+            "original_tokens": str(rec["original_tokens"]),
+            "sliced_tokens": str(rec["sliced_tokens"]),
+            "sha256": rec["sha256"],
+        })
+        src = ET.SubElement(doc, "source")
+        src.text = rec["path"]
+        content = ET.SubElement(doc, "document_content")
+        content.text = _xml_safe_text(rec["content"])
+    if excluded:
+        ex_el = ET.SubElement(root_el, "excluded")
+        for rec in excluded:
+            ET.SubElement(ex_el, "file", {
+                "path": rec["path"], "mode": rec["mode"],
+                "reason": rec["reason"]})
+    ET.indent(root_el, space="  ")
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n'
+            + ET.tostring(root_el, encoding="unicode") + "\n")
+
+
+def render_context_json(manifest: dict, included: list[dict],
+                        excluded: list[dict], model: str | None) -> str:
+    """Render the `json` preset artifact (context.json): one JSON
+    object with the same included file set and sliced contents as
+    PROMPT.md, in manifest order, built from the same in-memory
+    slice results (never re-read from disk). Excluded/empty files
+    land in "excluded" with their mode and reason. "model" is the
+    CLI's model id when the caller supplied one, else null."""
+    payload = {
+        "tool": "ghostslice",
+        "version": __version__,
+        "preset": "json",
+        "generated_by": f"ghostslice {__version__}",
+        "generated_at": manifest["generated_at"],
+        "project": Path(manifest["root"]).name,
+        "root": manifest["root"],
+        "model": model,
+        "token_method": manifest["token_method"],
+        "totals": {
+            "original_tokens": manifest["total_original_tokens"],
+            "sliced_tokens": manifest["total_sliced_tokens"],
+            "saved_tokens": manifest["total_saved_tokens"],
+        },
+        "files": [
+            {"path": r["path"], "mode": r["mode"], "language": r["language"],
+             "package": r["package"],
+             "original_tokens": r["original_tokens"],
+             "sliced_tokens": r["sliced_tokens"], "sha256": r["sha256"],
+             "content": r["content"]}
+            for r in included
+        ],
+        "excluded": excluded,
+    }
+    return json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+
+
 def build_bundle(root: str | Path, out: str | Path,
                  selections: dict[str, str] | None = None,
                  default_mode: str | None = None,
@@ -140,7 +251,8 @@ def build_bundle(root: str | Path, out: str | Path,
                  auto_shrink: bool | None = None,
                  fit: int | None = None,
                  fit_protect_selections: bool = True,
-                 task_scores: dict | None = None) -> dict:
+                 task_scores: dict | None = None,
+                 model: str | None = None) -> dict:
     """Slice `root` into bundle dir `out`. Returns the manifest dict.
 
     Mode precedence: explicit `selections` > profile modes (`.ghostslice.json`)
@@ -173,6 +285,25 @@ def build_bundle(root: str | Path, out: str | Path,
         Chat: an instruction header plus one `## File:` section per
         sliced file with the content in a fenced code block, ready to
         paste into a Copilot Chat session.
+      - anthropic-xml (v0.16): also writes context.xml, one
+        well-formed XML document in Anthropic's <documents> shape
+        (see render_context_xml for the schema), rendered from the
+        same in-memory slice results as PROMPT.md.
+      - json (v0.16): also writes context.json, a single JSON object
+        with project/totals plus every included file's sliced
+        content (see render_context_json), for other tools/agents
+        to consume programmatically.
+
+    The two v0.16 artifacts are wrappers: they contain the slices,
+    and their markup adds tokens the manifest totals do not count
+    (totals stay about the file slices). The manifest therefore
+    gains an additive `wrapper_artifacts` entry for them —
+    {name: {bytes, estimated_tokens, overhead_estimated_tokens}} —
+    and the export CLI prints both the artifact total and the
+    overhead beyond the sliced total.
+
+    `model` (v0.16): the caller's model id, recorded only in the
+    json preset's context.json ("model" key); None when not given.
 
     `task_scores` (v0.7): optional {path: {"tfidf", "symbol", "graph",
     "total"}} breakdown from selection.select_for_task_breakdown. When
@@ -221,6 +352,8 @@ def build_bundle(root: str | Path, out: str | Path,
     manifest_files = []
     prompt_parts: list[str] = []
     copilot_parts: list[str] = []
+    included: list[dict] = []   # manifest entries + "content", manifest order
+    excluded_records: list[dict] = []
     total_before = 0
     total_after = 0
 
@@ -249,8 +382,17 @@ def build_bundle(root: str | Path, out: str | Path,
                 "tfidf": bd["tfidf"], "symbol": bd["symbol"], "graph": bd["graph"],
             }
         manifest_files.append(manifest_entry)
-        if mode == "exclude" or not sliced.text:
+        if mode == "exclude":
+            excluded_records.append({
+                "path": entry.path, "mode": mode,
+                "reason": manifest_entry.get("mode_reason") or "excluded (mode: exclude)"})
             continue
+        if not sliced.text:
+            excluded_records.append({
+                "path": entry.path, "mode": mode,
+                "reason": f"empty slice (mode: {mode})"})
+            continue
+        included.append({**manifest_entry, "content": sliced.text})
         dest = files_dir / entry.path
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(sliced.text, encoding="utf-8")
@@ -278,14 +420,38 @@ def build_bundle(root: str | Path, out: str | Path,
     }
     if fit_report is not None:
         manifest["fit"] = fit_report
-    (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     prompt = (
         "# Optimized agent context bundle (GhostSlice)\n\n"
         f"Estimated tokens: {total_after} (was {total_before}, saved {total_before - total_after}). "
         "Token counts are estimates, see manifest.json for the method.\n"
         + "".join(prompt_parts)
     )
+    # v0.16 wrapper artifacts: rendered from the same in-memory slice
+    # results collected above (never re-read/re-sliced), BEFORE the
+    # manifest is written so the manifest can carry their overhead.
+    wrapper_texts: dict[str, str] = {}
+    if preset == "anthropic-xml":
+        wrapper_texts["context.xml"] = render_context_xml(included, excluded_records)
+    elif preset == "json":
+        wrapper_texts["context.json"] = render_context_json(
+            manifest, included, excluded_records, model)
+    if wrapper_texts:
+        manifest["wrapper_artifacts"] = {}
+        for name, text in wrapper_texts.items():
+            est = estimate_tokens(text)
+            manifest["wrapper_artifacts"][name] = {
+                "bytes": len(text.encode("utf-8")),
+                "estimated_tokens": est,
+                # The artifact CONTAINS the slices; only the markup
+                # beyond them is overhead. (Both figures are the raw
+                # estimator applied to different texts, so the
+                # difference is itself an estimate; clamped at 0.)
+                "overhead_estimated_tokens": max(0, est - total_after),
+            }
+    (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     (out / "PROMPT.md").write_text(prompt, encoding="utf-8")
+    for name, text in wrapper_texts.items():
+        (out / name).write_text(text, encoding="utf-8")
     if preset == "generic":
         (out / "prompt.md").write_text(prompt, encoding="utf-8")
     elif preset == "cursor":
@@ -356,13 +522,151 @@ def estimate_context_tokens(root: str | Path, profile=None,
     return before, after
 
 
+def _json_records(kind: str, items, errors: list[str]) -> list[dict]:
+    """Shape-guard a list-of-objects field of a wrapper artifact.
+
+    The artifact is input a validator must judge, not trust: a
+    non-list field earns one clear error and is treated as empty,
+    and non-object entries earn one error each and are skipped.
+    Validation reports; it never raises on shape.
+    """
+    if items is None:
+        return []
+    if not isinstance(items, list):
+        errors.append(f"{kind}: expected a list, got {type(items).__name__}")
+        return []
+    out: list[dict] = []
+    for i, item in enumerate(items):
+        if not isinstance(item, dict):
+            errors.append(f"{kind}: entry {i} is not an object")
+            continue
+        out.append(item)
+    return out
+
+
+def _validate_wrapper_artifacts(bundle: Path, manifest: dict,
+                                  disk_texts: dict[str, str],
+                                  on_disk: set[str],
+                                  errors: list[str]) -> list[str]:
+    """Validate the v0.16 preset artifacts (context.xml / context.json)
+    when present in the bundle. Returns the artifact names checked.
+
+    Both artifacts must mirror the manifest exactly: every
+    content-bearing manifest file (one written under files/) appears
+    with content equal to the bundle's own sliced bytes (the XML
+    rendering compared after _xml_safe_text, which is the documented
+    lossy step for XML-illegal characters) and a sha256 equal to
+    the manifest's; every other manifest file is listed as excluded.
+    Bundles without either artifact are untouched by this check.
+    """
+    by_path = {e["path"]: e for e in manifest["files"]}
+    expected_excluded = {p for p in by_path if p not in on_disk}
+    checked: list[str] = []
+
+    def _check_files(kind: str, records: list[dict], safe) -> set[str]:
+        seen: set[str] = set()
+        for rec in records:
+            p = rec["path"]
+            if p in seen:
+                errors.append(f"{kind}: duplicate entry for {p}")
+                continue
+            seen.add(p)
+            entry = by_path.get(p)
+            if entry is None:
+                errors.append(f"{kind}: entry for unknown file {p}")
+                continue
+            if p not in on_disk:
+                errors.append(f"{kind}: content for {p} but no sliced file in bundle")
+                continue
+            if rec["sha256"] != entry["sha256"]:
+                errors.append(f"{kind}: sha256 for {p} != manifest sha256")
+            if rec["content"] != safe(disk_texts.get(p, "")):
+                errors.append(f"{kind}: content mismatch for {p}")
+        for p in sorted(on_disk - seen):
+            errors.append(f"{kind}: missing entry for {p}")
+        return seen
+
+    def _check_excluded(kind: str, listed: set[str]) -> None:
+        for p in sorted(expected_excluded - listed):
+            errors.append(f"{kind}: excluded list is missing {p}")
+        for p in sorted(listed - expected_excluded):
+            errors.append(f"{kind}: excluded list names {p}, which carries content")
+
+    xml_path = bundle / "context.xml"
+    if xml_path.is_file():
+        checked.append("context.xml")
+        try:
+            root_el = ET.parse(xml_path).getroot()
+        except ET.ParseError as exc:
+            errors.append(f"context.xml: not well-formed XML ({exc})")
+            root_el = None
+        if root_el is not None:
+            if root_el.tag != "documents":
+                errors.append(f"context.xml: root element is <{root_el.tag}>, expected <documents>")
+            records = []
+            for doc in root_el.findall("document"):
+                src = doc.find("source")
+                content = doc.find("document_content")
+                records.append({
+                    "path": (src.text or "") if src is not None else "",
+                    "sha256": doc.get("sha256"),
+                    "content": (content.text or "") if content is not None else "",
+                })
+            _check_files("context.xml", records, _xml_safe_text)
+            ex_el = root_el.find("excluded")
+            listed = ({f.get("path") for f in ex_el.findall("file")}
+                      if ex_el is not None else set())
+            _check_excluded("context.xml", listed)
+
+    json_path = bundle / "context.json"
+    if json_path.is_file():
+        checked.append("context.json")
+        try:
+            payload = json.loads(json_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            errors.append(f"context.json: invalid JSON ({exc})")
+            payload = None
+        if payload is not None:
+            if not isinstance(payload, dict):
+                errors.append("context.json: top level is not a JSON object")
+            else:
+                totals = payload.get("totals") or {}
+                expected_totals = {
+                    "original_tokens": manifest["total_original_tokens"],
+                    "sliced_tokens": manifest["total_sliced_tokens"],
+                    "saved_tokens": manifest["total_saved_tokens"],
+                }
+                if totals != expected_totals:
+                    errors.append(
+                        f"context.json: totals {totals} != manifest totals {expected_totals}")
+                records = [{
+                    "path": f.get("path", ""),
+                    "sha256": f.get("sha256"),
+                    "content": f.get("content") or "",
+                } for f in _json_records("context.json files",
+                                         payload.get("files"), errors)]
+                _check_files("context.json", records, lambda t: t)
+                listed = {f.get("path") for f in _json_records(
+                    "context.json excluded", payload.get("excluded"), errors)}
+                _check_excluded("context.json", listed)
+    return checked
+
+
 def validate_bundle(bundle: str | Path) -> dict:
-    """Re-check a bundle: hashes and sliced-token totals must match disk."""
+    """Re-check a bundle: hashes and sliced-token totals must match disk.
+
+    When the bundle carries a v0.16 preset artifact (context.xml or
+    context.json), the artifact is validated against the manifest
+    too (see _validate_wrapper_artifacts); bundles without one
+    validate exactly as before.
+    """
     bundle = Path(bundle)
     manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
     errors: list[str] = []
     checked = 0
     total_sliced = 0
+    disk_texts: dict[str, str] = {}
+    on_disk: set[str] = set()
     for entry in manifest["files"]:
         if entry["mode"] == "exclude":
             # Excluded files may not exist on disk; their sliced tokens are 0.
@@ -378,6 +682,8 @@ def validate_bundle(bundle: str | Path) -> dict:
                 continue
         else:
             text = dest.read_text(encoding="utf-8", errors="replace")
+            on_disk.add(entry["path"])
+        disk_texts[entry["path"]] = text
         digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
         if digest != entry["sha256"]:
             # An empty slice hashes as empty even when no file was written;
@@ -393,10 +699,13 @@ def validate_bundle(bundle: str | Path) -> dict:
     if total_sliced != manifest["total_sliced_tokens"]:
         errors.append(
             f"total_sliced_tokens {manifest['total_sliced_tokens']} != recomputed {total_sliced}")
+    artifacts = _validate_wrapper_artifacts(bundle, manifest, disk_texts,
+                                            on_disk, errors)
     return {
         "ok": not errors,
         "errors": errors,
         "files_checked": checked,
         "total_sliced_tokens": total_sliced,
         "total_original_tokens": manifest["total_original_tokens"],
+        "artifacts_checked": artifacts,
     }
