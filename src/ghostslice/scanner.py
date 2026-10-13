@@ -27,7 +27,7 @@ TEXT_EXTS = {
     ".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
     ".md", ".markdown", ".txt", ".json", ".yaml", ".yml", ".toml", ".cfg", ".ini",
     ".html", ".css", ".sh", ".rb", ".go", ".rs", ".java", ".c", ".h",
-    ".cpp", ".hpp", ".cs", ".php", ".swift", ".kt", ".sql", ".xml",
+    ".cpp", ".hpp", ".cs", ".php", ".swift", ".kt", ".kts", ".sql", ".xml",
     ".ipynb",
 }
 
@@ -44,6 +44,8 @@ LANGUAGE_BY_EXT = {
     ".mjs": "javascript", ".cjs": "javascript",
     ".md": "markdown", ".markdown": "markdown", ".txt": "text", ".json": "json",
     ".go": "go", ".rs": "rust", ".java": "java", ".cs": "csharp",
+    ".php": "php", ".rb": "ruby", ".kt": "kotlin", ".kts": "kotlin",
+    ".swift": "swift",
     ".ipynb": "notebook",
 }
 
@@ -62,8 +64,15 @@ def is_test_file(rel: str) -> bool:
             or name.endswith(".test.ts") \
             or name.endswith(".test.tsx") or name.endswith(".test.js") or name.endswith(".test.jsx") \
             or ".spec." in name or name.startswith("test.") or name.endswith("_spec.rb") \
+            or name.endswith("_test.rb") \
             or name.endswith("test.java") or name.endswith("tests.java") \
             or name.endswith("test.cs") or name.endswith("tests.cs"):
+        return True
+    # Case-sensitive conventions the lowercased checks above would
+    # over-match (e.g. "latest.php" must not count as a PHP test file):
+    orig = p.name
+    if orig.endswith(("Test.php", "Tests.php", "Test.kt", "Tests.kt",
+                      "Test.swift", "Tests.swift")):
         return True
     return False
 

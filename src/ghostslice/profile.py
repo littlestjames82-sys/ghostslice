@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 PROFILE_NAME = ".ghostslice.json"
-PRESETS = ("claude-code", "aider", "generic")
+PRESETS = ("claude-code", "aider", "generic", "cursor", "copilot")
 
 
 def match_glob(pattern: str, rel: str) -> bool:

@@ -4,10 +4,11 @@ Commands:
   ghostslice scan         <path> [--json] [--model ID]
   ghostslice graph        <path> [--json]
   ghostslice slice        <path> --mode MODE -o <dir>
-  ghostslice task         <path> (--task "words" | --diff) [--budget N] -o <bundle> [--preset P]
-  ghostslice export       <path> -o <bundle> [--mode MODE] [--model ID] [--preset P]
+  ghostslice task         <path> (--task "words" | --diff) [--budget N] [--fit N] -o <bundle> [--preset P]
+  ghostslice export       <path> -o <bundle> [--mode MODE] [--model ID] [--preset P] [--fit N]
   ghostslice check-budget <path> [--max-tokens N]
   ghostslice check        <bundle>
+  ghostslice diff         <bundleA> <bundleB> [--json]
   ghostslice history      <path> [--json]
   ghostslice mcp                              (stdio MCP server, see mcp_server.py)
   ghostslice serve        <path> --port 8765
@@ -24,7 +25,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .exporter import build_bundle, estimate_context_tokens, validate_bundle
+from .exporter import SLICABLE, build_bundle, estimate_context_tokens, validate_bundle
 from .graph import build_graph, importers_of, recommendations
 from .ledger import summary as ledger_summary
 from .pricing import estimate_cost, get_model, load_prices, models, preflight
@@ -48,6 +49,23 @@ def _warn_secrets(findings, heading="WARNING: possible secrets detected") -> Non
         print(f"  {f['path']}:{f['line']}  {f['type']}  ({f['redacted']})", file=sys.stderr)
     print("  Review these files before sharing the bundle. "
           "Use --exclude-secrets (export) to force-exclude flagged files.", file=sys.stderr)
+
+
+def _print_fit(fit_report) -> bool:
+    """Print the --fit report; return True when the bundle fitted."""
+    if not fit_report:
+        return True
+    steps = fit_report["steps"]
+    step_text = ", ".join(f"{k} x{n}" for k, n in steps.items()) if steps else "no downgrades needed"
+    print(f"Fit target: {fit_report['fit_tokens']:,} estimated tokens: "
+          f"{fit_report['before_tokens']:,} -> {fit_report['after_tokens']:,} "
+          f"({'fitted' if fit_report['fitted'] else 'COULD NOT FIT'})")
+    print(f"  downgrades: {step_text}")
+    if not fit_report["fitted"]:
+        print(f"WARNING: could not fit the bundle into {fit_report['fit_tokens']:,} estimated tokens "
+              f"(best achievable {fit_report['after_tokens']:,}); the bundle was still written.",
+              file=sys.stderr)
+    return fit_report["fitted"]
 
 
 def _print_scan(result, model=None, prices=None, recs=None, secrets=None, dups=None) -> None:
@@ -111,6 +129,8 @@ def main(argv: list[str] | None = None) -> int:
     p_task.add_argument("--task", default=None, help="task description words to score files by")
     p_task.add_argument("--diff", action="store_true", help="select git-changed files + direct dependencies")
     p_task.add_argument("--budget", type=int, default=None, help="max sliced tokens for keyword selection")
+    p_task.add_argument("--fit", type=int, default=None, metavar="N",
+                        help="auto-fit: downgrade slice modes until the bundle fits N estimated tokens")
     p_task.add_argument("-o", "--out", required=True)
     p_task.add_argument("--preset", choices=PRESETS, default=None)
     p_task.add_argument("--model", default="claude-sonnet")
@@ -124,6 +144,14 @@ def main(argv: list[str] | None = None) -> int:
     p_export.add_argument("--model", default="claude-sonnet")
     p_export.add_argument("--exclude-secrets", action="store_true",
                           help="force-exclude files flagged by the secret guard")
+    p_export.add_argument("--fit", type=int, default=None, metavar="N",
+                          help="auto-fit: downgrade slice modes until the bundle fits N estimated tokens "
+                               "(exit 1 if it cannot fit; the bundle is still written)")
+
+    p_diff = sub.add_parser("diff", help="diff two bundles: mode changes, token deltas, added/removed files")
+    p_diff.add_argument("bundle_a")
+    p_diff.add_argument("bundle_b")
+    p_diff.add_argument("--json", action="store_true")
 
     p_secrets = sub.add_parser("secrets", help="scan a project for likely secrets (exit 1 if findings; values redacted)")
     p_secrets.add_argument("path")
@@ -174,6 +202,32 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "mcp":
         from .mcp_server import run_stdio
         run_stdio()
+        return 0
+
+    if args.cmd == "diff":
+        from .bundlediff import diff_bundles
+        try:
+            d = diff_bundles(args.bundle_a, args.bundle_b)
+        except ValueError as exc:
+            print(f"diff: {exc}", file=sys.stderr)
+            return 1
+        if args.json:
+            print(json.dumps(d, indent=2))
+            return 0
+        t = d["totals"]
+        print(f"Bundle diff: {args.bundle_a} -> {args.bundle_b}")
+        print(f"Totals: original {t['original_from']:,} -> {t['original_to']:,} ({t['original_delta']:+,}); "
+              f"sliced {t['sliced_from']:,} -> {t['sliced_to']:,} ({t['sliced_delta']:+,}) estimated tokens")
+        for f in d["added"]:
+            print(f"  added    {f['path']}  ({f['mode']}, {f['sliced_tokens']:,} sliced)")
+        for f in d["removed"]:
+            print(f"  removed  {f['path']}  ({f['mode']}, {f['sliced_tokens']:,} sliced)")
+        for f in d["changed"]:
+            mode_note = f"{f['mode_from']}->{f['mode_to']}" if f["mode_from"] != f["mode_to"] else f["mode_from"]
+            print(f"  changed  {f['path']}  ({mode_note}; original {f['original_delta']:+,}, sliced {f['sliced_delta']:+,})")
+        if not (d["added"] or d["removed"] or d["changed"]):
+            print("  no changes")
+        print(f"Unchanged files: {d['unchanged_count']}")
         return 0
 
     # All remaining commands target a project path (or a bundle for check).
@@ -235,7 +289,7 @@ def main(argv: list[str] | None = None) -> int:
                     why = "default: test file -> strip-tests"
                 elif entry.is_lockfile:
                     why = "default: lockfile -> exclude"
-                elif entry.language in ("python", "typescript", "javascript", "go", "rust", "java", "csharp", "notebook"):
+                elif entry.language in SLICABLE:
                     why = f"default: {entry.language} code -> signatures"
                 else:
                     why = "default: non-code file stays full"
@@ -338,7 +392,7 @@ def main(argv: list[str] | None = None) -> int:
         before = after = 0
         for entry in result.files:
             text = Path(entry.abspath).read_text(encoding="utf-8", errors="replace")
-            mode = args.mode if entry.language in ("python", "typescript", "javascript", "go", "rust", "java", "csharp", "notebook", "markdown") else "full"
+            mode = args.mode if entry.language in SLICABLE or entry.language == "markdown" else "full"
             r = slice_text(entry.path, text, mode)
             before += r.original_tokens
             after += r.sliced_tokens
@@ -363,26 +417,29 @@ def main(argv: list[str] | None = None) -> int:
                 args.path, args.task, budget=args.budget, profile=profile)
             print(f"Selected {len(chosen)} files for task: {args.task!r}")
             for rel in chosen:
-                print(f"  score {scores.get(rel, 0):>4}  {rel}  ({selections[rel]})")
+                print(f"  score {scores.get(rel, 0):>8.2f}  {rel}  ({selections[rel]})")
             include = set(chosen)
         _warn_secrets([f for f in scan_scan_result(result) if f["path"] in include],
                       heading="WARNING: possible secrets in selected files")
         manifest = build_bundle(args.path, args.out, selections=selections,
-                                include=include, profile=profile, preset=args.preset)
+                                include=include, profile=profile, preset=args.preset,
+                                fit=args.fit, fit_protect_selections=False)
         model = get_model(prices, args.model)
         pf = preflight(manifest["total_original_tokens"], manifest["total_sliced_tokens"], model, prices)
         print(f"Bundle: {args.out} (preset: {manifest.get('preset')})")
         print(f"Estimated tokens (whole project -> selection): {pf['before_tokens']:,} -> {pf['after_tokens']:,}")
+        fitted = _print_fit(manifest.get("fit"))
         check = validate_bundle(args.out)
         print(f"Validation: {'OK' if check['ok'] else 'FAILED: ' + '; '.join(check['errors'])}")
-        return 0 if check["ok"] else 1
+        return 0 if check["ok"] and fitted else 1
 
     if args.cmd == "export":
         _export_scan = _scan_with_profile(args.path, profile)
         _warn_secrets(scan_scan_result(_export_scan))
         manifest = build_bundle(args.path, args.out, default_mode=args.mode,
                                 profile=profile, preset=args.preset,
-                                exclude_secrets=args.exclude_secrets)
+                                exclude_secrets=args.exclude_secrets,
+                                fit=args.fit)
         model = get_model(prices, args.model or profile.model or "claude-sonnet")
         pf = preflight(manifest["total_original_tokens"], manifest["total_sliced_tokens"], model, prices)
         print(f"Bundle: {args.out} (preset: {manifest.get('preset')})")
@@ -390,9 +447,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Estimated tokens: {pf['before_tokens']:,} -> {pf['after_tokens']:,} (saved {pf['saved_tokens']:,})")
         print(f"Pre-flight input cost at {pf['model_name']} (prices as of {pf['prices_as_of']}, local, not live): "
               f"~${pf['before_cost_usd']:.4f} -> ~${pf['after_cost_usd']:.4f}")
+        fitted = _print_fit(manifest.get("fit"))
         check = validate_bundle(args.out)
         print(f"Validation: {'OK' if check['ok'] else 'FAILED: ' + '; '.join(check['errors'])}")
-        return 0 if check["ok"] else 1
+        return 0 if check["ok"] and fitted else 1
 
     if args.cmd == "check-budget":
         budget = args.max_tokens if args.max_tokens is not None else profile.budget_tokens

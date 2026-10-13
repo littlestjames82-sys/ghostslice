@@ -3,6 +3,47 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [0.5.0] - 2026-10-13
+### Added
+- Auto-fit budget export: `ghostslice export --fit N` (and `task
+  --fit N`) progressively downgrades modes down the ladder
+  full -> signatures -> interfaces -> exclude until the bundle fits N
+  estimated tokens. Downgrade order is deterministic (lowest value
+  density: no-importer files first, then largest, then path). Entry
+  points are never auto-excluded; profile-moded and explicitly
+  selected files are never downgraded. The manifest records a `fit`
+  report. If the bundle cannot fit, it is still written, a warning is
+  printed, and the exit code is 1. `check-budget` semantics unchanged.
+- PHP, Ruby, Kotlin, and Swift slicers (parser-lite): `signatures`
+  and `interfaces` modes plus test stripping (PHP `test*` /
+  `/** @test */` / `#[Test]` methods, Ruby `def test_*` and
+  describe/it blocks, Kotlin `@Test` / `test*` functions, Swift
+  `test*` XCTest functions and `@Test`). Wired into the scanner
+  language map, export defaults, the `slice` CLI, and test-file
+  detection (`StoreTest.php`, `StoreTests.swift`, `*_test.rb`, ...;
+  `latest.php` is not a test file).
+- Bundle diff: `ghostslice diff <bundleA> <bundleB> [--json]` —
+  per-file mode changes, original/sliced token deltas, added/removed
+  files, totals. Exit 0 for any two valid bundles; exit 1 when either
+  bundle fails validation, naming which.
+- Export presets `cursor` (prompt.md + README.txt explaining
+  paste/attach usage in Cursor) and `copilot` (prompt.md shaped for
+  Copilot Chat with `## File:` sections and fenced code blocks).
+  Existing presets unchanged; MCP `export_bundle` preset enum follows
+  the profile PRESETS list.
+- Dashboard treemap view: a List/Treemap toggle (list stays default).
+  Squarified treemap grouped by top-level directory, rectangles sized
+  by estimated tokens, coloured with the existing heat palette, click
+  toggles include/exclude, tooltip shows path + tokens. Vanilla JS,
+  no external assets; the dashboard API is unchanged.
+### Changed
+- Task keyword selection is now TF-IDF (stdlib): term frequency
+  (capped at 20 per keyword per file) weighted by smoothed inverse
+  document frequency across the project's files; path hits keep their
+  5x boost weighted by the same idf. Content matching is whole-word
+  tokenisation (previously substring counts). Scores returned by
+  `select_for_task` and printed by the CLI are now floats.
+
 ## [0.4.0] - 2026-10-13
 ### Added
 - Secret guard: `secrets_scan` module flags likely secrets in files that

@@ -22,7 +22,7 @@ from . import __version__
 from .exporter import build_bundle, estimate_context_tokens
 from .graph import build_graph, recommendations
 from .pricing import estimate_cost, get_model, load_prices
-from .profile import load_profile
+from .profile import PRESETS, load_profile
 from .scanner import scan
 from .slicer import MODES, slice_text
 
@@ -80,7 +80,7 @@ TOOLS = [
             "properties": {
                 "path": {"type": "string"},
                 "out": {"type": "string"},
-                "preset": {"type": "string", "enum": ["claude-code", "aider", "generic"],
+                "preset": {"type": "string", "enum": list(PRESETS),
                            "default": "claude-code"},
             },
             "required": ["path", "out"],

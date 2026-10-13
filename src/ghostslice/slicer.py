@@ -26,6 +26,11 @@ TypeScript/JavaScript: "parser-lite".
   Exotic syntax (nested template literals with braces, decorators,
   generics spanning many lines) can slice imperfectly. The mode is
   labelled "lite" everywhere it surfaces for that reason.
+
+Go/Rust/Java/C# (v0.3), PHP/Kotlin/Swift (v0.5): the same line-scan +
+brace-matching approach, reusing the string/comment-aware brace
+matcher. Ruby (v0.5): no braces to match, so blocks are tracked by
+opener keywords and closing `end` lines (indent-conventional Ruby).
 """
 from __future__ import annotations
 
@@ -89,6 +94,10 @@ def slice_source(source: str, language: str, mode: str, path: str = "") -> str:
         return _slice_ts(source, mode)
     if language in ("go", "rust", "java", "csharp"):
         return _slice_brace_lite(source, mode, language, path)
+    if language == "ruby":
+        return _slice_ruby(source, mode, path)
+    if language in ("php", "kotlin", "swift"):
+        return _slice_brace_extra(source, mode, language, path)
     # Other languages: only full / exclude / strip-tests (test files) apply.
     return source
 
@@ -303,15 +312,16 @@ def _brace_end(lines: list[str], start_idx: int, start_col: int = 0,
     affect depth. State persists across lines. Remaining parser-lite
     limits: regex literals containing braces (e.g. /}/) and nested
     backticks inside ${...} expressions can still confuse the count.
-    For Go/Rust/Java/C# (lang set), single quotes use a char-literal
-    heuristic so Rust lifetimes do not open a phantom string.
+    For Go/Rust/Java/C#/Kotlin/Swift (lang set), single quotes use a
+    char-literal heuristic so Rust lifetimes do not open a phantom
+    string (and Swift apostrophes in code are not string delimiters).
     """
     depth = 0
     seen = False
     state: str | None = None  # "'", '"', '`', 'line', 'block'
     escaped = False
     interp: list[int] = []  # depths at which a template ${ opened
-    char_langs = lang in ("go", "rust", "java", "csharp")
+    char_langs = lang in ("go", "rust", "java", "csharp", "kotlin", "swift")
     for i in range(start_idx, len(lines)):
         line = lines[i]
         if i == start_idx and body_col is not None and body_col >= 0:
@@ -921,3 +931,315 @@ def _slice_markdown_headings(source: str) -> str:
     text = "\n".join(out).strip()
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text + ("\n" if text else "")
+
+
+# ---------------------------------------------------------------------------
+# PHP / Kotlin / Swift (parser-lite, v0.5) and Ruby (parser-lite, v0.5)
+#
+# Same honesty label as the other lite slicers: line scanning + the
+# string/comment-aware brace matcher (PHP/Kotlin/Swift) or indent +
+# keyword block matching (Ruby, which has no braces for defs).
+# Conventional formatting only: one declaration per line, opening
+# brace on the declaration line, Ruby blocks closed by `end` at the
+# opener's indent.
+#   PHP:   function/class/interface/trait/enum; strip-tests drops
+#          test-prefixed methods, /** @test */ docblock methods and
+#          #[Test] attribute methods.
+#   Ruby:  def/class/module, attr_*/include lines, constants;
+#          strip-tests drops `def test_*` and describe/context/it
+#          blocks.
+#   Kotlin: fun/class/interface/object; strip-tests drops @Test
+#          functions and test-prefixed functions.
+#   Swift: func/class/struct/protocol/enum/extension; strip-tests
+#          drops test-prefixed XCTest-style functions and @Test
+#          (swift-testing) functions.
+# `interfaces` keeps interface/protocol/trait declarations in full and
+# reduces classes to member signatures; `signatures` also keeps
+# top-level function signatures.
+# ---------------------------------------------------------------------------
+
+_EXTRA_CFG = {
+    "php": {
+        "import": re.compile(r"^\s*(<\?php|declare\s*\(|namespace\s|use\s)"),
+        "type": re.compile(r"^\s*(abstract\s+|final\s+|readonly\s+)?(class|interface|trait|enum)\s+\w+"),
+        "func": re.compile(r"^\s*(public\s+|private\s+|protected\s+|static\s+|abstract\s+|final\s+)*function\s+&?\w+\s*\("),
+        "func_name": re.compile(r"function\s+&?(\w+)\s*\("),
+        "prop": re.compile(r"^\s*(public\s+|private\s+|protected\s+|static\s+|readonly\s+|var\s+)[^()]*;\s*$"),
+        "const": re.compile(r"^\s*(public\s+|private\s+|protected\s+)?const\s+\w+[^()]*;\s*$"),
+        "full_kinds": {"interface", "trait"},
+    },
+    "kotlin": {
+        "import": re.compile(r"^\s*(package|import)\b"),
+        "type": re.compile(r"^\s*(public\s+|private\s+|protected\s+|internal\s+|open\s+|final\s+|abstract\s+|sealed\s+|data\s+|enum\s+|annotation\s+|inner\s+)*(class|interface|object)\s+[\w`]+"),
+        "func": re.compile(r"^\s*(public\s+|private\s+|protected\s+|internal\s+|open\s+|final\s+|abstract\s+|override\s+|suspend\s+|inline\s+|tailrec\s+|operator\s+|infix\s+)*fun\s+(<[^>]*>\s*)?[\w`]+\s*\("),
+        "func_name": re.compile(r"fun\s+(?:<[^>]*>\s*)?`?(\w+)`?\s*\("),
+        "prop": re.compile(r"^\s*(public\s+|private\s+|protected\s+|internal\s+|open\s+|final\s+|abstract\s+|override\s+|lateinit\s+|const\s+)*(val|var)\s+\w+"),
+        "const": None,
+        "full_kinds": {"interface"},
+    },
+    "swift": {
+        "import": re.compile(r"^\s*import\s+\w+"),
+        "type": re.compile(r"^\s*(public\s+|private\s+|fileprivate\s+|internal\s+|open\s+|final\s+)*(class|struct|protocol|enum|extension|actor)\s+\w+"),
+        "func": re.compile(r"^\s*(public\s+|private\s+|fileprivate\s+|internal\s+|open\s+|final\s+|static\s+|class\s+|override\s+|mutating\s+|nonmutating\s+|convenience\s+|required\s+)*func\s+\w+\s*[<(]"),
+        "func_name": re.compile(r"func\s+(\w+)\s*[<(]"),
+        "prop": re.compile(r"^\s*(public\s+|private\s+|fileprivate\s+|internal\s+|open\s+|final\s+|static\s+|class\s+|lazy\s+|weak\s+|unowned\s+)*(var|let)\s+\w+\s*[:=]"),
+        "const": None,
+        "full_kinds": {"protocol"},
+    },
+}
+
+
+def _extra_block_end(lines, start, lang):
+    return _brace_end(lines, start, body_col=lines[start].find("{"), lang=lang)
+
+
+def _extra_class_members(lines, start, lang, cfg):
+    """Member signatures of a class-like block starting at `start`."""
+    end = _extra_block_end(lines, start, lang)
+    header = _sig_before_body(lines[start]) + " {"
+    out = [header]
+    i = start + 1
+    while i < end:
+        line = lines[i]
+        stripped = line.strip()
+        tm = cfg["type"].match(line)
+        if stripped.startswith("@") or stripped.startswith("#["):
+            out.append(line.rstrip())
+            i += 1
+        elif cfg["func"].match(line):
+            if "{" in line:
+                out.append(_sig_before_body(line) + " { /* ... */ }")
+                i = _extra_block_end(lines, i, lang) + 1
+            else:  # body-less declaration (interface-style, abstract, `= expr`)
+                out.append(line.rstrip())
+                i += 1
+        elif tm:
+            kind = tm.group(2)
+            if "{" in line and kind in cfg["full_kinds"]:
+                bend = _extra_block_end(lines, i, lang)
+                out.extend(ln.rstrip() for ln in lines[i:bend + 1])
+                i = bend + 1
+            elif "{" in line:
+                sub, nxt = _extra_class_members(lines, i, lang, cfg)
+                out.extend(sub)
+                i = nxt
+            else:
+                out.append(line.rstrip())
+                i += 1
+        elif cfg["prop"].match(line) or (cfg["const"] and cfg["const"].match(line)):
+            if "{" in line:  # computed property / accessor block
+                out.append(_sig_before_body(line) + " { /* ... */ }")
+                i = _extra_block_end(lines, i, lang) + 1
+            else:
+                out.append(line.rstrip())
+                i += 1
+        elif lang == "php" and stripped.endswith(";") and "(" not in stripped:
+            out.append(line.rstrip())  # trait use / field inside a PHP class
+            i += 1
+        elif lang == "swift" and re.match(r"^\s*(public\s+|private\s+|required\s+|convenience\s+|override\s+)*init\s*[?(]", line):
+            if "{" in line:
+                out.append(_sig_before_body(line) + " { /* ... */ }")
+                i = _extra_block_end(lines, i, lang) + 1
+            else:
+                out.append(line.rstrip())
+                i += 1
+        else:
+            i += 1
+    out.append("}")
+    return out, end + 1
+
+
+def _extra_signatures(lines, lang, cfg, mode):
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        tm = cfg["type"].match(line)
+        if cfg["import"].match(line):
+            out.append(line.rstrip())
+            i += 1
+        elif tm and "{" in line:
+            kind = tm.group(2)
+            if kind in cfg["full_kinds"]:
+                end = _extra_block_end(lines, i, lang)
+                out.extend(ln.rstrip() for ln in lines[i:end + 1])
+                out.append("")
+                i = end + 1
+            else:
+                sub, nxt = _extra_class_members(lines, i, lang, cfg)
+                out.extend(sub)
+                out.append("")
+                i = nxt
+        elif cfg["func"].match(line):
+            if mode == "interfaces":
+                i = _extra_block_end(lines, i, lang) + 1 if "{" in line else i + 1
+            elif "{" in line:
+                out.append(_sig_before_body(line) + " { /* ... */ }")
+                i = _extra_block_end(lines, i, lang) + 1
+            else:
+                out.append(line.rstrip())
+                i += 1
+        elif mode == "signatures" and lang in ("kotlin", "swift") and cfg["prop"].match(line) and "{" not in line:
+            out.append(line.rstrip())  # top-level val/var/let
+            i += 1
+        else:
+            i += 1
+    return out
+
+
+def _extra_strip_tests(lines, lang, cfg, source):
+    drop: set[int] = set()
+    i = 0
+    pending: int | None = None  # start line of a test annotation/docblock
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+        is_annotation = False
+        if lang == "php" and ("@test" in line or stripped.startswith("#[Test")):
+            is_annotation = True
+            if pending is None:
+                pending = i
+                # A /** docblock above the @test line belongs to the method.
+                j = i - 1
+                while j >= 0 and (lines[j].strip().startswith("*") or lines[j].strip().startswith("/**")):
+                    pending = j
+                    if lines[j].strip().startswith("/**"):
+                        break
+                    j -= 1
+        elif lang in ("kotlin", "swift") and stripped.startswith("@Test"):
+            is_annotation = True
+            if pending is None:
+                pending = i
+        elif stripped.startswith("@") or stripped.startswith("#[") or stripped.startswith("*"):
+            is_annotation = True  # other annotations / docblock lines: keep pending
+        if is_annotation:
+            i += 1
+            continue
+        fm = cfg["func"].match(line)
+        if fm:
+            mname = cfg["func_name"].search(line)
+            name = mname.group(1) if mname else ""
+            if pending is not None or name.startswith("test"):
+                start = pending if pending is not None else i
+                end = _extra_block_end(lines, i, lang) if "{" in line else i
+                for ln in range(start, end + 1):
+                    drop.add(ln)
+                i = end + 1
+            else:
+                i += 1
+            pending = None
+            continue
+        if stripped and not stripped.startswith("//") and not stripped.startswith("/*"):
+            pending = None
+        i += 1
+    kept = [ln for idx, ln in enumerate(lines) if idx not in drop]
+    text = "\n".join(kept)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip("\n")
+    return text + ("\n" if text else "")
+
+
+def _slice_brace_extra(source: str, mode: str, lang: str, path: str = "") -> str:
+    cfg = _EXTRA_CFG[lang]
+    lines = source.splitlines()
+    if mode == "strip-tests":
+        return _extra_strip_tests(lines, lang, cfg, source)
+    if mode in ("signatures", "interfaces"):
+        out = _extra_signatures(lines, lang, cfg, mode)
+        text = "\n".join(out).strip()
+        return text + ("\n" if text else "")
+    return source
+
+
+# ---------------------------------------------------------------------------
+# Ruby (parser-lite, v0.5): blocks are keyword/`end`, tracked by the
+# opener keywords and trailing `do`, which is reliable for conventional
+# (indented, one-statement-per-line) Ruby.
+# ---------------------------------------------------------------------------
+
+_RB_REQUIRE_RE = re.compile(r"^\s*(require|require_relative)\b")
+_RB_TYPE_RE = re.compile(r"^\s*(module|class)\s+[\w:]+")
+_RB_DEF_RE = re.compile(r"^\s*def\s+[\w!?=<>+\-*\[\]]+")
+_RB_ATTR_RE = re.compile(r"^\s*(attr_reader|attr_writer|attr_accessor|include|extend|using)\b")
+_RB_CONST_RE = re.compile(r"^\s*[A-Z][\w:]*\s*=[^=]")
+_RB_OPENER_RE = re.compile(r"^(def|class|module|if|unless|case|while|until|begin|for)\b")
+_RB_DO_RE = re.compile(r"\bdo\s*(\|[^|]*\|)?\s*$")
+_RB_TEST_BLOCK_RE = re.compile(r"^\s*(describe|context|it|specify|feature|scenario)\b")
+_RB_TEST_DEF_RE = re.compile(r"^\s*def\s+test_\w*")
+
+
+def _rb_block_end(lines: list[str], start: int) -> int:
+    """Index of the `end` line closing the block opened at `start`."""
+    depth = 0
+    for i in range(start, len(lines)):
+        s = lines[i].strip()
+        if _RB_OPENER_RE.match(s) or _RB_DO_RE.search(s):
+            depth += 1
+        if s == "end" or s.startswith("end ") or s.startswith("end."):
+            depth -= 1
+            if depth == 0:
+                return i
+    return len(lines) - 1
+
+
+def _rb_type_block(lines, start, mode):
+    end = _rb_block_end(lines, start)
+    indent = lines[start][: len(lines[start]) - len(lines[start].lstrip())]
+    out = [lines[start].rstrip()]
+    i = start + 1
+    while i < end:
+        line = lines[i]
+        if _RB_DEF_RE.match(line):
+            out.append(line.rstrip())
+            i = _rb_block_end(lines, i) + 1
+        elif _RB_TYPE_RE.match(line):
+            sub, nxt = _rb_type_block(lines, i, mode)
+            out.extend(sub)
+            i = nxt
+        elif _RB_ATTR_RE.match(line) or _RB_CONST_RE.match(line) or _RB_REQUIRE_RE.match(line):
+            out.append(line.rstrip())
+            i += 1
+        else:
+            i += 1
+    out.append(indent + "end")
+    return out, end + 1
+
+
+def _slice_ruby(source: str, mode: str, path: str = "") -> str:
+    lines = source.splitlines()
+    if mode == "strip-tests":
+        drop: set[int] = set()
+        i = 0
+        while i < len(lines):
+            if _RB_TEST_DEF_RE.match(lines[i]) or \
+                    (_RB_TEST_BLOCK_RE.match(lines[i]) and _RB_DO_RE.search(lines[i].strip())):
+                end = _rb_block_end(lines, i)
+                for ln in range(i, end + 1):
+                    drop.add(ln)
+                i = end + 1
+            else:
+                i += 1
+        kept = [ln for idx, ln in enumerate(lines) if idx not in drop]
+        text = "\n".join(kept)
+        text = re.sub(r"\n{3,}", "\n\n", text).strip("\n")
+        return text + ("\n" if text else "")
+    if mode in ("signatures", "interfaces"):
+        out: list[str] = []
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            if _RB_REQUIRE_RE.match(line) or _RB_ATTR_RE.match(line) or _RB_CONST_RE.match(line):
+                out.append(line.rstrip())
+                i += 1
+            elif _RB_TYPE_RE.match(line):
+                block, i = _rb_type_block(lines, i, mode)
+                out.extend(block)
+                out.append("")
+            elif _RB_DEF_RE.match(line):
+                if mode == "signatures":
+                    out.append(line.rstrip())
+                i = _rb_block_end(lines, i) + 1
+            else:
+                i += 1
+        text = "\n".join(out).strip()
+        return text + ("\n" if text else "")
+    return source

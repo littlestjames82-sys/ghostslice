@@ -19,7 +19,8 @@ from .scanner import ScanResult, scan
 from .slicer import MODES, slice_text
 from .tokens import METHOD, estimate_tokens
 
-SLICABLE = {"python", "typescript", "javascript", "go", "rust", "java", "csharp", "notebook"}
+SLICABLE = {"python", "typescript", "javascript", "go", "rust", "java", "csharp",
+            "notebook", "php", "ruby", "kotlin", "swift"}
 
 
 def default_mode_for(entry) -> str:
@@ -39,12 +40,21 @@ def build_bundle(root: str | Path, out: str | Path,
                  include: set[str] | None = None,
                  preset: str | None = None,
                  record_history: bool = True,
-                 exclude_secrets: bool = False) -> dict:
+                 exclude_secrets: bool = False,
+                 fit: int | None = None,
+                 fit_protect_selections: bool = True) -> dict:
     """Slice `root` into bundle dir `out`. Returns the manifest dict.
 
     Mode precedence: explicit `selections` > profile modes (`.ghostslice.json`)
     > `default_mode` > built-in defaults. Files outside `include` (when given)
     are recorded in the manifest with mode `exclude`.
+
+    `fit` (v0.5): when set to a token budget and the resolved selection
+    slices to more than that, modes are progressively downgraded (see
+    fit.py for the ladder and the protection rules) and the manifest
+    gains a `fit` report. `fit_protect_selections` marks caller-supplied
+    `selections` as explicit/protected; the task CLI passes False
+    because its selections are machine-resolved, not user-explicit.
 
     Presets only change the bundle's convenience artifacts, not its core
     layout (manifest.json + PROMPT.md + files/), so `ghostslice check`
@@ -57,6 +67,14 @@ def build_bundle(root: str | Path, out: str | Path,
         own that we rely on; this is a documented plain file list.
       - generic: also writes prompt.md (lowercase) as a copy of PROMPT.md
         for tools that expect a single prompt file.
+      - cursor (v0.5): also writes prompt.md (a copy of PROMPT.md) and a
+        README.txt explaining how to use the bundle with Cursor (paste
+        prompt.md into chat / attach the files/ directory). Meant to be
+        kept as a `.cursor-context` directory next to the project.
+      - copilot (v0.5): also writes prompt.md shaped for GitHub Copilot
+        Chat: an instruction header plus one `## File:` section per
+        sliced file with the content in a fenced code block, ready to
+        paste into a Copilot Chat session.
     """
     selections = selections or {}
     preset = preset or (profile.preset if profile else None) or "claude-code"
@@ -70,11 +88,9 @@ def build_bundle(root: str | Path, out: str | Path,
     files_dir = out / "files"
     files_dir.mkdir(parents=True, exist_ok=True)
 
-    manifest_files = []
-    prompt_parts: list[str] = []
-    total_before = 0
-    total_after = 0
-
+    # Resolve every file's starting mode first, so --fit can downgrade
+    # from exactly the modes a plain export would have used.
+    resolved: dict[str, str] = {}
     for entry in result.files:
         if include is not None and entry.path not in include:
             mode = "exclude"
@@ -93,6 +109,22 @@ def build_bundle(root: str | Path, out: str | Path,
             mode = "exclude"  # --exclude-secrets forces exclusion (v0.4)
         if mode not in MODES:
             raise ValueError(f"unknown mode for {entry.path}: {mode}")
+        resolved[entry.path] = mode
+    fit_report = None
+    if fit is not None:
+        from .fit import fit_modes
+        protected = set(selections) if fit_protect_selections else set()
+        resolved, fit_report = fit_modes(result, resolved, fit,
+                                         profile=profile, protected=protected)
+
+    manifest_files = []
+    prompt_parts: list[str] = []
+    copilot_parts: list[str] = []
+    total_before = 0
+    total_after = 0
+
+    for entry in result.files:
+        mode = resolved[entry.path]
         source = Path(entry.abspath).read_text(encoding="utf-8", errors="replace")
         sliced = slice_text(entry.path, source, mode)
         total_before += sliced.original_tokens
@@ -112,6 +144,9 @@ def build_bundle(root: str | Path, out: str | Path,
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(sliced.text, encoding="utf-8")
         prompt_parts.append(f"\n\n---\n\n# File: {entry.path} (mode: {mode})\n\n{sliced.text.rstrip()}\n")
+        fence_lang = "" if entry.language in ("text", "notebook") else entry.language
+        copilot_parts.append(
+            f"\n\n## File: {entry.path} (mode: {mode})\n\n```{fence_lang}\n{sliced.text.rstrip()}\n```\n")
 
     manifest = {
         "tool": "ghostslice",
@@ -125,6 +160,8 @@ def build_bundle(root: str | Path, out: str | Path,
         "total_saved_tokens": total_before - total_after,
         "files": manifest_files,
     }
+    if fit_report is not None:
+        manifest["fit"] = fit_report
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     prompt = (
         "# Optimized agent context bundle (GhostSlice)\n\n"
@@ -135,6 +172,35 @@ def build_bundle(root: str | Path, out: str | Path,
     (out / "PROMPT.md").write_text(prompt, encoding="utf-8")
     if preset == "generic":
         (out / "prompt.md").write_text(prompt, encoding="utf-8")
+    elif preset == "cursor":
+        (out / "prompt.md").write_text(prompt, encoding="utf-8")
+        (out / "README.txt").write_text(
+            "GhostSlice bundle for Cursor (.cursor-context)\n"
+            "================================================\n\n"
+            "This bundle was sliced by GhostSlice: signatures instead of\n"
+            "full bodies where that is enough, tests stripped, lockfiles\n"
+            "excluded. Token counts in manifest.json are estimates.\n\n"
+            "How to use it with Cursor:\n"
+            "  1. Paste prompt.md into a Cursor chat (Composer or Chat) as\n"
+            "     the opening context, or\n"
+            "  2. attach the individual files under files/ with @-mentions\n"
+            "     for the pieces your question touches, or\n"
+            "  3. copy files/ into your project as reference material and\n"
+            "     @-reference them there.\n\n"
+            "PROMPT.md is the same content as prompt.md in the standard\n"
+            "bundle layout; manifest.json records each file's slice mode\n"
+            "and token estimate. Verify this bundle any time with:\n"
+            "  ghostslice check <this directory>\n",
+            encoding="utf-8")
+    elif preset == "copilot":
+        copilot_prompt = (
+            "# Copilot context (GhostSlice bundle)\n\n"
+            "Paste this whole file into a GitHub Copilot Chat session, or attach\n"
+            "it as context. It contains a sliced view of the project: signatures\n"
+            "instead of full bodies where that is enough, tests stripped,\n"
+            "lockfiles excluded. Token counts are estimates (see manifest.json).\n"
+            + "".join(copilot_parts))
+        (out / "prompt.md").write_text(copilot_prompt, encoding="utf-8")
     elif preset == "aider":
         written = [f["path"] for f in manifest_files
                    if f["mode"] != "exclude" and f["sliced_tokens"] > 0]

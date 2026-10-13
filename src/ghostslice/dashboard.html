@@ -31,6 +31,15 @@
   pre { background:#0d0b12; border:1px solid var(--line); border-radius:8px; padding:10px; overflow:auto; max-height:520px; font-size:12px; white-space:pre-wrap; word-break:break-word; }
   .muted { color:var(--muted); font-size:12px; }
   #status { margin-top:10px; font-size:13px; }
+  .viewtoggle { display:flex; gap:8px; margin:10px 0; }
+  .viewtoggle button.active { background:var(--violet); border-color:var(--violet); color:#fff; font-weight:600; }
+  #treemap { position:relative; height:440px; border:1px solid var(--line); border-radius:8px; overflow:hidden; background:#0d0b12; }
+  .tm-group { position:absolute; border:1px solid var(--line); background:rgba(103,22,243,.07); overflow:hidden; }
+  .tm-group-label { font-size:11px; color:var(--muted); padding:2px 5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tm-node { position:absolute; border:1px solid rgba(0,0,0,.45); overflow:hidden; cursor:pointer; font-size:11px; padding:3px 5px; color:#fff; }
+  .tm-node .tm-path { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11px; word-break:break-all; }
+  .tm-node .tm-tok { opacity:.85; font-size:10px; }
+  .tm-node.excluded { opacity:.32; }
 </style>
 </head>
 <body>
@@ -47,10 +56,16 @@
   <section class="card">
     <div class="totals" id="totals"></div>
     <p class="muted" id="priceNote"></p>
-    <table>
+    <div class="viewtoggle" role="group" aria-label="File view">
+      <button id="viewList" class="active">List</button>
+      <button id="viewTreemap">Treemap</button>
+    </div>
+    <table id="fileTable">
       <thead><tr><th></th><th>File (heatmap by token cost)</th><th>Mode</th><th style="text-align:right">Tokens</th></tr></thead>
       <tbody id="rows"></tbody>
     </table>
+    <div id="treemap" style="display:none"></div>
+    <p class="muted" id="treemapHint" style="display:none">Treemap: rectangles sized by estimated tokens, grouped by top-level directory, coloured by heat. Click a rectangle to include/exclude the file, just like the list.</p>
   </section>
   <section class="card">
     <h3 style="margin-top:0">Slice preview</h3>
@@ -64,7 +79,7 @@
   </section>
 </main>
 <script>
-let FILES = [], PRICES = null, MODEL = null;
+let FILES = [], PRICES = null, MODEL = null, VIEW = 'list';
 const $ = (id) => document.getElementById(id);
 
 function fmt(n){ return n.toLocaleString('en-US'); }
@@ -108,6 +123,102 @@ function render(){
     tr.addEventListener('click', (e)=>{ if(e.target.tagName!=='SELECT' && e.target.tagName!=='INPUT') preview(f); });
     tbody.appendChild(tr);
   });
+  if (VIEW === 'treemap') renderTreemap(max);
+}
+
+// --- Treemap view (v0.5): squarified, grouped by top-level directory ---
+function squarify(items, x, y, w, h){
+  const total = items.reduce((s,c)=>s+c.value,0);
+  if (!total || w <= 0 || h <= 0) return [];
+  const sorted = items.filter(c=>c.value>0).sort((a,b)=>b.value-a.value)
+    .map(c=>Object.assign({}, c, {area: c.value/total*w*h}));
+  const placed = [];
+  let row = [], rx = x, ry = y, rw = w, rh = h;
+  const worst = (r, side) => {
+    if (!r.length) return Infinity;
+    const s = r.reduce((a,c)=>a+c.area,0);
+    const mx = Math.max.apply(null, r.map(c=>c.area)), mn = Math.min.apply(null, r.map(c=>c.area));
+    return Math.max((side*side*mx)/(s*s), (s*s)/(side*side*mn));
+  };
+  const layoutRow = () => {
+    const s = row.reduce((a,c)=>a+c.area,0);
+    if (rw >= rh) {
+      const cw = s/rh; let cy = ry;
+      row.forEach(c=>{ const chh = c.area/cw; placed.push(Object.assign({}, c, {x:rx, y:cy, w:cw, h:chh})); cy += chh; });
+      rx += cw; rw -= cw;
+    } else {
+      const chh = s/rw; let cx = rx;
+      row.forEach(c=>{ const cw = c.area/chh; placed.push(Object.assign({}, c, {x:cx, y:ry, w:cw, h:chh})); cx += cw; });
+      ry += chh; rh -= chh;
+    }
+    row = [];
+  };
+  sorted.forEach(c=>{
+    const side = Math.min(rw, rh);
+    if (!row.length || worst(row.concat([c]), side) <= worst(row, side)) row.push(c);
+    else { layoutRow(); row.push(c); }
+  });
+  if (row.length) layoutRow();
+  return placed;
+}
+
+function toggleFile(f){
+  if (f.mode === 'exclude') { f.mode = f.prev_mode || f.default_mode; }
+  else { f.prev_mode = f.mode; f.mode = 'exclude'; }
+  render();
+}
+
+function renderTreemap(max){
+  const box = $('treemap');
+  box.innerHTML = '';
+  const W = box.clientWidth || 600, H = box.clientHeight || 440;
+  const groups = {};
+  FILES.forEach(f=>{
+    const seg = f.path.includes('/') ? f.path.split('/')[0] : '(root)';
+    (groups[seg] = groups[seg] || []).push(f);
+  });
+  const groupItems = Object.keys(groups).map(name=>({
+    name, value: groups[name].reduce((s,f)=>s+f.tokens,0), files: groups[name]
+  }));
+  squarify(groupItems, 0, 0, W, H).forEach(g=>{
+    const gd = document.createElement('div');
+    gd.className = 'tm-group';
+    gd.style.left = g.x+'px'; gd.style.top = g.y+'px';
+    gd.style.width = Math.max(0,g.w-1)+'px'; gd.style.height = Math.max(0,g.h-1)+'px';
+    const label = document.createElement('div');
+    label.className = 'tm-group-label';
+    label.textContent = g.name + ' · ' + fmt(g.value) + ' tokens';
+    gd.appendChild(label);
+    box.appendChild(gd);
+    const innerH = Math.max(0, g.h - 18);
+    const fileItems = g.files.map(f=>({name: f.path, value: f.tokens, file: f}));
+    squarify(fileItems, g.x, g.y + 16, g.w, innerH).forEach(r=>{
+      const h = heat(r.file.tokens, max);
+      const d = document.createElement('div');
+      d.className = 'tm-node' + (r.file.mode === 'exclude' ? ' excluded' : '');
+      d.style.left = r.x+'px'; d.style.top = r.y+'px';
+      d.style.width = Math.max(0,r.w-1)+'px'; d.style.height = Math.max(0,r.h-1)+'px';
+      d.style.background = h.color;
+      d.title = r.file.path + ' · ' + fmt(r.file.tokens) + ' estimated tokens · mode: ' + r.file.mode + ' · click to ' + (r.file.mode === 'exclude' ? 'include' : 'exclude');
+      if (r.w > 60 && r.h > 26) {
+        d.innerHTML = '<span class="tm-path"></span><br><span class="tm-tok"></span>';
+        d.querySelector('.tm-path').textContent = r.file.path.split('/').pop();
+        d.querySelector('.tm-tok').textContent = fmt(r.file.tokens) + ' tok';
+      }
+      d.addEventListener('click', ()=>{ toggleFile(r.file); preview(r.file); });
+      box.appendChild(d);
+    });
+  });
+}
+
+function setView(v){
+  VIEW = v;
+  $('fileTable').style.display = v === 'list' ? '' : 'none';
+  $('treemap').style.display = v === 'treemap' ? '' : 'none';
+  $('treemapHint').style.display = v === 'treemap' ? '' : 'none';
+  $('viewList').classList.toggle('active', v === 'list');
+  $('viewTreemap').classList.toggle('active', v === 'treemap');
+  render();
 }
 
 async function preview(f){
@@ -133,6 +244,9 @@ async function init(){
   PRICES.models.forEach(m => { const o=document.createElement('option'); o.value=m.id; o.textContent=m.name; sel.appendChild(o); });
   MODEL = PRICES.models[0];
   sel.addEventListener('change', ()=>{ MODEL = PRICES.models.find(m=>m.id===sel.value); render(); });
+  $('viewList').addEventListener('click', ()=>setView('list'));
+  $('viewTreemap').addEventListener('click', ()=>setView('treemap'));
+  window.addEventListener('resize', ()=>{ if (VIEW === 'treemap') render(); });
   $('exportBtn').addEventListener('click', async ()=>{
     const selections = {}; FILES.forEach(f=>selections[f.path]=f.mode);
     $('status').textContent = 'Exporting...';

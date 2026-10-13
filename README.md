@@ -57,7 +57,7 @@ lockfiles separately.
 ```bash
 # one file
 ghostslice slice src/app.py --mode signatures -o /tmp/sliced
-# a whole tree (mode applies to Python / TypeScript / JavaScript files)
+# a whole tree (mode applies to all slicable languages, see below)
 ghostslice slice ~/my-project --mode signatures -o /tmp/sliced-tree
 ```
 
@@ -102,6 +102,38 @@ A bundle contains:
 
 `ghostslice check` re-reads the bundle and verifies that every hash and
 token total in `manifest.json` matches what is actually on disk.
+
+### Auto-fit: force a bundle into a token budget (v0.5)
+
+```bash
+ghostslice export ~/my-project -o ~/my-project-context --fit 20000
+```
+
+With `--fit N`, if the default slicing is over N estimated tokens,
+GhostSlice progressively downgrades modes down the ladder
+`full -> signatures -> interfaces -> exclude` until the bundle fits.
+Downgrades are chosen by lowest value density first: files with no
+importers in the import graph go before files with importers, then
+largest files first, then path order (fully deterministic; the
+manifest records a `fit` report with every downgrade). Two protections:
+entry points are never auto-excluded (they can be downgraded to
+`interfaces` at most), and files whose mode is set by the project
+profile (`.ghostslice.json`) or an explicit selection are never
+downgraded. If the bundle still cannot fit, it is written anyway, a
+warning is printed, and the command exits 1. `ghostslice task` accepts
+`--fit` too (its machine-resolved selection modes are downgradable;
+profile modes stay protected). `check-budget` is unchanged: it only
+reports, it never downgrades.
+
+### Bundle diff (v0.5)
+
+```bash
+ghostslice diff ~/bundle-old ~/bundle-new [--json]
+```
+
+Per-file mode changes, original/sliced token deltas, added and removed
+files, and totals. Exit 0 for any two valid bundles; if either bundle
+fails validation, diff reports which one and exits 1.
 
 ### Secret guard (v0.4)
 
@@ -164,15 +196,20 @@ they are not.
 ### Task-focused context (v0.2)
 
 ```bash
-# keyword-scored file selection within a sliced-token budget
+# TF-IDF-scored file selection within a sliced-token budget
 ghostslice task ~/my-project --task "fix billing payments" --budget 20000 -o /tmp/task-bundle
 
 # git-changed files plus their direct dependencies
 ghostslice task ~/my-project --diff -o /tmp/diff-bundle
 ```
 
-Both export a validated bundle containing only the selection (everything
-else is recorded as `exclude` in the manifest).
+Scoring is TF-IDF (v0.5): term frequency per file (capped at 20 per
+keyword) weighted by inverse document frequency across the project, so
+a rare keyword in one file outweighs a common word repeated everywhere;
+path hits keep a 5x boost, weighted by the same idf. Content matching
+is whole-word. Scores are floats. Both forms export a validated bundle
+containing only the selection (everything else is recorded as
+`exclude` in the manifest), and both accept `--fit` (see Auto-fit).
 
 ### Profiles: `.ghostslice.json` (v0.2)
 
@@ -191,7 +228,11 @@ Drop this in a project root and every command picks it up automatically:
 
 Export presets: `claude-code` (the `.claude_context` bundle), `aider`
 (adds `aider-files.txt`, a plain list of the sliced files to pass to
-Aider with `--read`), and `generic` (adds a lowercase `prompt.md`).
+Aider with `--read`), `generic` (adds a lowercase `prompt.md`),
+`cursor` (v0.5: adds `prompt.md` plus a `README.txt` explaining how to
+paste/attach the bundle in Cursor; meant to live as a `.cursor-context`
+directory), and `copilot` (v0.5: adds a `prompt.md` shaped for GitHub
+Copilot Chat, one `## File:` section per file with fenced code blocks).
 Nested `.gitignore` files in subdirectories are honoured, scoped to
 their subtree.
 
@@ -219,13 +260,26 @@ Tools: `scan_project`, `slice_file`, `estimate_cost`, `export_bundle`,
 Same zero-dependency stdlib pattern as the Ghost Hands MCP server: any
 MCP client that can spawn a stdio process can drive GhostSlice.
 
-### More languages (v0.3)
+### More languages (v0.3, v0.5)
 
-Go, Rust, Java, and C# join Python and TypeScript/JavaScript, with
-parser-lite `signatures` and `interfaces` modes and test stripping
-(Go `TestXxx` functions, Rust `#[test]` / `mod tests`, Java `@Test`,
-C# `[Test]` / `[Fact]`). Parser-lite honesty applies: conventional
-formatting slices well, exotic syntax may not.
+Go, Rust, Java, and C# joined Python and TypeScript/JavaScript in
+v0.3, with parser-lite `signatures` and `interfaces` modes and test
+stripping (Go `TestXxx` functions, Rust `#[test]` / `mod tests`, Java
+`@Test`, C# `[Test]` / `[Fact]`).
+
+v0.5 adds PHP, Ruby, Kotlin, and Swift, same parser-lite label:
+
+| Language | signatures / interfaces keep | strip-tests drops |
+|---|---|---|
+| PHP | functions, classes, interfaces, traits, enums, properties | `test*` methods, `/** @test */` docblock methods, `#[Test]` methods |
+| Ruby | `def` signatures, `class`/`module` blocks, `attr_*`, constants | `def test_*`, `describe`/`context`/`it` blocks |
+| Kotlin | `fun`, `class`/`interface`/`object`, `val`/`var` | `@Test` functions, `test*` functions |
+| Swift | `func`, `class`/`struct`/`protocol`/`enum`/`extension`, `var`/`let` | `test*` XCTest-style functions, `@Test` functions |
+
+Ruby blocks are tracked by keyword/`end` matching (no braces); the
+others reuse the string/comment-aware brace matcher. Parser-lite
+honesty applies: conventional formatting slices well, exotic syntax
+may not.
 
 ### Dashboard: visual context tree
 
@@ -238,7 +292,11 @@ A single-page local UI (served by the Python process, bound to 127.0.0.1):
 files sorted by token cost with a heat bar, click a row to include/exclude
 it, a per-file mode selector, live before/after totals, a model selector
 with pre-flight dollar cost, a slice preview pane, and an Export button
-that writes a `.claude_context` bundle inside the served project.
+that writes a `.claude_context` bundle inside the served project. A
+Treemap toggle (v0.5) swaps the list for a squarified treemap: nested
+rectangles grouped by top-level directory, sized by estimated tokens
+and coloured by the same heat palette; clicking a rectangle toggles
+include/exclude just like the list. The list stays the default view.
 
 ## Honest labels
 
@@ -283,17 +341,19 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 src/ghostslice/
   tokens.py     token estimator (documented method)
   scanner.py    .gitignore-aware project scanner (nested .gitignore support)
-  slicer.py     Python ast slicer + TS/JS parser-lite slicer (+ Go/Rust/Java/C# lite in v0.3)
+  slicer.py     Python ast slicer + TS/JS parser-lite slicer (+ Go/Rust/Java/C# lite in v0.3, PHP/Ruby/Kotlin/Swift lite in v0.5)
   graph.py      import graph + prune recommendations + git changed-files
   secrets_scan.py  secret guard: provider token shapes, assignments, entropy (v0.4)
   duplicates.py exact (sha256) + near (line-shingle Jaccard) duplicates (v0.4)
   report.py     standalone self-contained HTML report (v0.4)
+  fit.py        auto-fit budget downgrades for export/task --fit (v0.5)
+  bundlediff.py bundle-vs-bundle diff by manifest (v0.5)
   profile.py    .ghostslice.json profile loader
-  selection.py  task keyword / git-diff context selection
+  selection.py  task TF-IDF keyword / git-diff context selection
   ledger.py     .ghostslice-history.jsonl savings ledger
   mcp_server.py stdio MCP server (v0.3)
   pricing.py    local prices.json loader + cost estimator
-  exporter.py   bundle builder + validator (presets: claude-code/aider/generic)
+  exporter.py   bundle builder + validator (presets: claude-code/aider/generic/cursor/copilot)
   server.py     stdlib http.server dashboard API
   dashboard.html  single-page dashboard UI (violet accent #6716f3)
   cli.py        ghostslice command line
