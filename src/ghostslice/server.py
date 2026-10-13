@@ -15,6 +15,7 @@ from .profile import load_profile
 from .scanner import scan
 from .secrets_scan import scan_scan_result
 from .slicer import MODES, slice_text
+from .tokens import METHOD as TOKEN_METHOD
 
 _DASHBOARD = Path(__file__).with_name("dashboard.html")
 
@@ -68,7 +69,7 @@ class _State:
             "root": str(self.root),
             "total_tokens": self.scan.total_tokens,
             "file_count": len(files),
-            "token_method": "estimates (see README); not exact tokenizer counts",
+            "token_method": TOKEN_METHOD,
             "files": files,
             "profile": self.profile.to_dict(),
             "recommendations": self.recommendations,

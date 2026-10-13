@@ -132,8 +132,8 @@ def slice_text(path: str, source: str, mode: str) -> SliceResult:
     sliced = slice_source(source, lang, mode, path=path)
     return SliceResult(
         path=path, mode=mode, language=lang,
-        original_tokens=estimate_tokens(source),
-        sliced_tokens=estimate_tokens(sliced),
+        original_tokens=estimate_tokens(source, lang),
+        sliced_tokens=estimate_tokens(sliced, lang),
         text=sliced,
     )
 

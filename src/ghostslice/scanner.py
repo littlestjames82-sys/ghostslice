@@ -292,13 +292,14 @@ def _add_file(result: ScanResult, abspath: Path, rel_posix: str) -> None:
         except UnicodeDecodeError:
             return
     text = data.decode("utf-8", errors="replace")
+    lang = language_for(rel_posix)
     result.files.append(FileEntry(
         path=rel_posix,
         abspath=str(abspath),
         size=len(data),
         lines=text.count("\n") + (1 if text and not text.endswith("\n") else 0),
-        tokens=estimate_tokens(text),
-        language=language_for(rel_posix),
+        tokens=estimate_tokens(text, lang),
+        language=lang,
         is_test=is_test_file(rel_posix),
         is_lockfile=is_lockfile(rel_posix),
     ))

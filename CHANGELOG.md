@@ -3,6 +3,37 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [0.10.0] - 2026-10-13
+### Added
+- Estimator calibration (method v2): the BPE-like raw split is now
+  multiplied by a per-language-family factor (tokens.py carries the
+  table with its evidence basis). Factors were derived by measuring
+  the raw split's implied characters-per-token on new golden corpora
+  (tests/fixtures/calibration/, one sample per family: Python,
+  TypeScript, Go, Rust, C, Markdown prose, JSON data, minified JS)
+  and scaling each family onto a published-anchor target rate
+  (OpenAI's published ~4 chars/token for English text anchors prose;
+  code/data targets are documented approximations set denser than
+  the anchor). New `ghostslice calibrate <project>` report shows
+  raw vs calibrated totals, implied chars/token, factor and target
+  per family, in text and --json.
+- Carried parent finding P0 (from G4): the config slicer's scanner
+  backstop now builds rewritten lines as original-indent + body by
+  construction (and keeps a leading `- ` sequence marker), pinned
+  by regression tests asserting nested backstop-only, value-rule
+  and key-rule placeholder lines keep their indentation.
+### Changed
+- Token totals shift DOWN versus v0.9 for calibrated families
+  (all factors are <= 1; the raw split over-counted). GhostBus
+  demo: 165,052 -> 129,555 original, 53,339 -> 45,770 sliced
+  estimated tokens on the unchanged tree. Manifests now record
+  the method as "estimates (BPE-like split v2, per-language
+  calibrated, not exact tokenizer counts)"; scan JSON, dashboard
+  and MCP report the same string from one source. Old bundles
+  remain valid. `check-budget` and profile budgets compare
+  against calibrated totals from this version on: re-check any
+  budget tuned under v0.9.
+
 ## [0.9.0] - 2026-10-13
 ### Added
 - `structure` mode for config/data files (new module

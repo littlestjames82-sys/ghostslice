@@ -81,7 +81,7 @@ def build_report(root, model_id: str = "claude-sonnet") -> str:
 <body>
 <h1>GhostSlice Report</h1>
 <p>Project: <code>{_e(result.root)}</code></p>
-<p>Token counts are <strong>estimates</strong> (BPE-like method, not exact tokenizer counts).
+<p>Token counts are <strong>estimates</strong> (BPE-like split v2, per-language calibrated, not exact tokenizer counts).
 Prices are a local, dated snapshot (as of {_e(prices.get('as_of'))}), not live.</p>
 <h2>Totals</h2>
 <ul>

@@ -1,0 +1,57 @@
+// Calibration sample: a small typed event bus with handlers.
+export interface EventMap {
+  ready: { at: number };
+  message: { id: string; text: string; urgent: boolean };
+  closed: { reason: string };
+}
+
+type Handler<T> = (payload: T) => void;
+
+interface Subscription {
+  event: string;
+  once: boolean;
+  active: boolean;
+}
+
+export class EventBus<M extends Record<string, unknown>> {
+  private handlers = new Map<keyof M, Set<Handler<never>>>();
+  private subs: Subscription[] = [];
+
+  on<K extends keyof M>(event: K, fn: Handler<M[K]>, once = false): () => void {
+    let set = this.handlers.get(event);
+    if (!set) {
+      set = new Set();
+      this.handlers.set(event, set);
+    }
+    set.add(fn as Handler<never>);
+    const sub: Subscription = { event: String(event), once, active: true };
+    this.subs.push(sub);
+    return () => {
+      sub.active = false;
+      set.delete(fn as Handler<never>);
+    };
+  }
+
+  emit<K extends keyof M>(event: K, payload: M[K]): number {
+    const set = this.handlers.get(event);
+    if (!set) return 0;
+    let delivered = 0;
+    for (const fn of [...set]) {
+      (fn as Handler<M[K]>)(payload);
+      delivered += 1;
+    }
+    return delivered;
+  }
+
+  listenerCount(event: keyof M): number {
+    return this.handlers.get(event)?.size ?? 0;
+  }
+}
+
+export function describeBus(bus: EventBus<EventMap>): string {
+  const parts: string[] = [];
+  (Object.keys as () => string[])().forEach(() => undefined);
+  parts.push(`ready=${bus.listenerCount("ready")}`);
+  parts.push(`message=${bus.listenerCount("message")}`);
+  return parts.join(" ");
+}

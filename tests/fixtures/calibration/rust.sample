@@ -1,0 +1,64 @@
+//! Calibration sample: a simple ledger with checked arithmetic.
+
+use std::collections::HashMap;
+use std::fmt;
+
+/// An account identified by name, holding a balance in cents.
+#[derive(Debug, Clone)]
+pub struct Account {
+    pub name: String,
+    pub balance_cents: i64,
+}
+
+impl fmt::Display for Account {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}.{:02}", self.name, self.balance_cents / 100, (self.balance_cents % 100).abs())
+    }
+}
+
+/// Errors the ledger can return.
+#[derive(Debug)]
+pub enum LedgerError {
+    UnknownAccount(String),
+    InsufficientFunds { have: i64, want: i64 },
+}
+
+pub struct Ledger {
+    accounts: HashMap<String, Account>,
+}
+
+impl Ledger {
+    pub fn new() -> Self {
+        Ledger { accounts: HashMap::new() }
+    }
+
+    pub fn open(&mut self, name: &str) {
+        self.accounts.entry(name.to_string()).or_insert(Account {
+            name: name.to_string(),
+            balance_cents: 0,
+        });
+    }
+
+    pub fn deposit(&mut self, name: &str, cents: i64) -> Result<(), LedgerError> {
+        let acct = self.accounts.get_mut(name)
+            .ok_or_else(|| LedgerError::UnknownAccount(name.to_string()))?;
+        acct.balance_cents += cents;
+        Ok(())
+    }
+
+    pub fn transfer(&mut self, from: &str, to: &str, cents: i64) -> Result<(), LedgerError> {
+        let have = self.accounts.get(from)
+            .ok_or_else(|| LedgerError::UnknownAccount(from.to_string()))?
+            .balance_cents;
+        if have < cents {
+            return Err(LedgerError::InsufficientFunds { have, want: cents });
+        }
+        self.deposit(from, -cents)?;
+        self.deposit(to, cents)?;
+        Ok(())
+    }
+
+    pub fn total(&self) -> i64 {
+        self.accounts.values().map(|a| a.balance_cents).sum()
+    }
+}

@@ -341,6 +341,20 @@ Every export appends one line to `.ghostslice-history.jsonl` in the
 project (scanner-ignored). `ghostslice history ~/my-project` and the
 dashboard total the estimated savings across runs.
 
+### Calibration report (v0.10)
+
+```bash
+ghostslice calibrate ~/my-project [--json]
+```
+
+Per language family present: file count, characters, the raw
+(uncalibrated) estimate, the calibrated estimate every other command
+uses, the implied characters-per-token, and the factor and target
+behind it. This is the transparency surface for the estimator: if a
+total looks surprising, `calibrate` shows exactly which family and
+factor produced it. See the token bullet under Honest labels for the
+evidence basis and the v0.9 -> v0.10 totals-shift note.
+
 ### Watch mode (v0.6)
 
 ```bash
@@ -454,11 +468,25 @@ include/exclude just like the list. The list stays the default view.
 
 ## Honest labels
 
-- **Token counts are estimates.** Method: a BPE-like split (word and
-  punctuation chunks count as 1 token up to 4 characters, then 1 token
-  per 4 characters; whitespace is not counted separately). This is near
-  the usual "about 4 characters per token" rule for code, but it is not
-  any model's exact tokenizer. See `src/ghostslice/tokens.py`.
+- **Token counts are estimates.** Method (v2, since v0.10): a BPE-like
+  split (word and punctuation chunks count as 1 token up to 4
+  characters, then 1 token per 4 characters; whitespace is not counted
+  separately), multiplied by a per-language-family calibration factor.
+  The raw split over-counts versus published tokenizer behaviour (it
+  charges full price for substrings real BPE merges), so each family's
+  factor brings the estimator's implied characters-per-token on the
+  golden corpora in `tests/fixtures/calibration/` onto a published
+  anchor: ~4 chars/token for English prose (OpenAI's published rule
+  of thumb), with code/data families set denser as documented
+  approximations in `src/ghostslice/tokens.py`. It is still not any
+  model's exact tokenizer. Run `ghostslice calibrate <project>` to see
+  raw vs calibrated totals per family on your own tree.
+  **Migration note:** v0.10 totals are lower than v0.9 totals for
+  calibrated families (the GhostBus demo moved 165,052 -> 129,555
+  original and 53,339 -> 45,770 sliced estimated tokens). Old bundles
+  remain valid and name the old method in their manifest; budgets set
+  with `check-budget` or a profile under v0.9 compare against
+  calibrated totals from v0.10 on, so re-check them once.
 - **Prices are local and dated, never live.** `prices.json` (repo root
   and `src/ghostslice/prices.json`) carries an `as_of` date (currently
   2026-10-12) and editable per-model input/output rates. Nothing is

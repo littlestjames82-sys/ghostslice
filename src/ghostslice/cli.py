@@ -37,6 +37,7 @@ from .secrets_scan import scan_scan_result, scan_text
 from .selection import select_for_diff, select_for_task, select_for_task_breakdown
 from .configslice import CONFIG_LANGUAGES
 from .slicer import MODES, slice_text
+from .tokens import METHOD as TOKEN_METHOD
 
 
 def _scan_with_profile(path, profile):
@@ -207,6 +208,10 @@ def main(argv: list[str] | None = None) -> int:
     p_hist.add_argument("path")
     p_hist.add_argument("--json", action="store_true")
 
+    p_cal = sub.add_parser("calibrate", help="per-language-family token calibration report (raw vs calibrated estimates)")
+    p_cal.add_argument("path")
+    p_cal.add_argument("--json", action="store_true")
+
     sub.add_parser("mcp", help="run the stdio MCP server (JSON-RPC)")
 
     p_serve = sub.add_parser("serve", help="serve the local dashboard")
@@ -275,6 +280,27 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print("No likely secrets found.")
         return 1 if findings else 0
+
+    if args.cmd == "calibrate":
+        from .calibration import calibrate_project
+        data = calibrate_project(args.path, profile)
+        if args.json:
+            print(json.dumps(data, indent=2))
+            return 0
+        print(f"Calibration for {data['root']} ({data['token_method']})")
+        print(f"{'family':<12} {'files':>5} {'chars':>10} {'raw est.':>10} "
+              f"{'calibrated':>11} {'chars/token':>11} {'factor':>6} {'target':>6}")
+        for r in data["families"]:
+            tgt = f"{r['target_chars_per_token']:.2f}" if r["target_chars_per_token"] else "-"
+            print(f"{r['family']:<12} {r['files']:>5} {r['chars']:>10,} {r['raw_tokens']:>10,} "
+                  f"{r['calibrated_tokens']:>11,} {r['implied_chars_per_token']:>11.2f} "
+                  f"{r['factor']:>6.2f} {tgt:>6}")
+        t = data["totals"]
+        print(f"{'TOTAL':<12} {t['files']:>5} {t['chars']:>10,} {t['raw_tokens']:>10,} "
+              f"{t['calibrated_tokens']:>11,} {t['implied_chars_per_token']:>11.2f}")
+        print("Factors and targets are documented in src/ghostslice/tokens.py; "
+              "implied chars/token = chars / calibrated estimate. All counts are estimates.")
+        return 0
 
     if args.cmd == "report":
         from .report import write_report
@@ -357,7 +383,7 @@ def main(argv: list[str] | None = None) -> int:
         dups = find_duplicates(result)
         if args.json:
             payload = result.to_dict()
-            payload["token_method"] = "estimates (BPE-like split, not exact tokenizer counts)"
+            payload["token_method"] = TOKEN_METHOD
             payload["recommendations"] = recs
             payload["secrets"] = findings
             payload["duplicates"] = dups

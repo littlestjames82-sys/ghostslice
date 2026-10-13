@@ -1,0 +1,79 @@
+{
+  "active": true,
+  "alerts": {
+    "channel": "email",
+    "quietHours": {
+      "end": 6,
+      "start": 22
+    },
+    "recipients": [
+      "grower@example.com",
+      "backup@example.com"
+    ],
+    "retry": {
+      "attempts": 3,
+      "backoffSeconds": 45
+    }
+  },
+  "logging": {
+    "fields": [
+      "timestamp",
+      "sensor",
+      "value",
+      "unit"
+    ],
+    "level": "info",
+    "retentionDays": 30
+  },
+  "notes": null,
+  "owner": "garden-team",
+  "project": "greenhouse-monitor",
+  "sensors": [
+    {
+      "enabled": true,
+      "id": "soil-north-01",
+      "intervalSeconds": 300,
+      "kind": "soil-moisture",
+      "thresholds": {
+        "high": 68.0,
+        "low": 22.5
+      }
+    },
+    {
+      "enabled": true,
+      "id": "air-canopy-01",
+      "intervalSeconds": 120,
+      "kind": "temperature",
+      "thresholds": {
+        "high": 31.5,
+        "low": 16.0
+      }
+    },
+    {
+      "enabled": false,
+      "id": "air-canopy-02",
+      "intervalSeconds": 120,
+      "kind": "humidity",
+      "thresholds": {
+        "high": 85.0,
+        "low": 40.0
+      }
+    },
+    {
+      "enabled": true,
+      "id": "tank-level-01",
+      "intervalSeconds": 600,
+      "kind": "water-level",
+      "thresholds": {
+        "high": 95.0,
+        "low": 15.0
+      }
+    }
+  ],
+  "units": {
+    "level": "percent",
+    "moisture": "percent",
+    "temperature": "celsius"
+  },
+  "version": "1.4.0"
+}

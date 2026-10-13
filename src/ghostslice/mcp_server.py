@@ -25,6 +25,7 @@ from .pricing import estimate_cost, get_model, load_prices
 from .profile import PRESETS, load_profile
 from .scanner import scan
 from .slicer import MODES, slice_text
+from .tokens import METHOD as TOKEN_METHOD
 
 PROTOCOL_VERSION = "2024-11-05"
 
@@ -98,7 +99,7 @@ def _scan_project(args: dict) -> dict:
         "root": result.root,
         "file_count": len(result.files),
         "total_tokens": result.total_tokens,
-        "token_method": "estimates (BPE-like split, not exact tokenizer counts)",
+        "token_method": TOKEN_METHOD,
         "files": [{k: v for k, v in f.to_dict().items() if k != "abspath"}
                   for f in result.files],
         "recommendations": recommendations(result, graph, profile),

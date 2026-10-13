@@ -15,7 +15,7 @@ from pathlib import Path
 
 from . import __version__
 from .ledger import append_record
-from .scanner import ScanResult, scan
+from .scanner import ScanResult, language_for, scan
 from .slicer import MODES, slice_text
 from .tokens import METHOD, estimate_tokens
 
@@ -288,7 +288,7 @@ def validate_bundle(bundle: str | Path) -> dict:
             # files written by build_bundle always match unless edited.
             if text:
                 errors.append(f"{entry['path']}: sha256 mismatch")
-        recomputed = estimate_tokens(text)
+        recomputed = estimate_tokens(text, language_for(entry["path"]))
         if recomputed != entry["sliced_tokens"]:
             errors.append(
                 f"{entry['path']}: sliced_tokens {entry['sliced_tokens']} != recomputed {recomputed}")

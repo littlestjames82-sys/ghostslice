@@ -199,7 +199,14 @@ _VALUE_LINE_RE = re.compile(
 def _leak_backstop(text: str, path: str) -> str:
     """Replace the value portion of any output line the secret
     scanner still flags. The scanner is run as if on a config file
-    (path suffix swapped) so bare values are checked too."""
+    (path suffix swapped) so bare values are checked too.
+
+    A rewritten line ALWAYS keeps the original line's leading
+    indentation (and a leading `- ` sequence marker): in YAML the
+    indent IS the structure, so a rewrite that dropped it would
+    silently promote a nested key to the top level. The replacement
+    is built as indent + body, never trusted to the regex prefix
+    (parent finding P0, G5)."""
     if not text.strip():
         return text
     fake = re.sub(r"\.[A-Za-z0-9]+$", ".env", path) if "." in path.rsplit("/", 1)[-1] else path + ".env"
@@ -214,13 +221,15 @@ def _leak_backstop(text: str, path: str) -> str:
     for ln in bad:
         if 1 <= ln <= len(lines):
             line = lines[ln - 1]
-            m = _VALUE_LINE_RE.match(line)
+            indent = line[:len(line) - len(line.lstrip())]
+            body = line[len(indent):]
+            m = _VALUE_LINE_RE.match(body)
             if m:
                 tail = "," if m.group(2).rstrip().endswith(",") else ""
-                lines[ln - 1] = m.group(1) + _STRING_PLACEHOLDER + tail
+                lines[ln - 1] = indent + m.group(1) + _STRING_PLACEHOLDER + tail
             else:
-                indent = line[:len(line) - len(line.lstrip())]
-                lines[ln - 1] = indent + _STRING_PLACEHOLDER
+                marker = "- " if body.startswith("- ") else ""
+                lines[ln - 1] = indent + marker + _STRING_PLACEHOLDER
     out = "\n".join(lines)
     return out + ("\n" if text.endswith("\n") else "")
 

@@ -20,7 +20,7 @@ Baseline: v0.5.0, 149 tests passed.
 | G2 | Task selection v2: symbol-name matching + import-graph boosting on top of TF-IDF | v0.7.0 | done |
 | G3 | C, C++, Scala parser-lite slicers (systems-language completion) | v0.8.0 | done |
 | G4 | Config slicing: shell/PowerShell + SQL + YAML/TOML structure mode (keys/structure, values optional) | v0.9.0 | done |
-| G5 | Token estimator calibration: per-language factors, golden corpora, `calibrate` report | v0.10.0 | pending |
+| G5 | Token estimator calibration: per-language factors, golden corpora, `calibrate` report | v0.10.0 | done |
 | G6 | Context lint: rule engine for context waste (oversize, generated, vendored, minified, giant lines) | v0.11.0 | pending |
 | G7 | Generated/minified/vendored detection wired into scan, graph, export (opt-in auto-modes) | v0.12.0 | pending |
 | G8 | Monorepo support: workspace detection (npm/Cargo/go/pyproject), per-package subtotals everywhere | v0.13.0 | pending |
@@ -119,3 +119,32 @@ the audit findings that drove the two improvement rounds.
   fixes — PowerShell here-string opener with a trailing comment
   no longer leaks its body into the rendering, and flow-style
   YAML list items render through the flow renderer.
+- G5 (v0.10.0) DONE Oct 13, 2026: estimator calibration shipped —
+  method v2 multiplies the raw BPE-like split by a per-language-
+  family factor (prose 0.85, python 0.86, ts-js 0.75, go 0.73,
+  rust 0.89, c-family 0.87, json-data 0.95, minified-js 0.65),
+  derived by measuring the raw split's implied chars/token on new
+  golden corpora (tests/fixtures/calibration/, one sample per
+  family) against published-anchor targets (OpenAI's ~4
+  chars/token English rule anchors prose; code/data targets are
+  documented denser approximations, tokens.py carries the table).
+  New `ghostslice calibrate` report (raw vs calibrated per family;
+  agrees with scan totals exactly, verified on GhostBus).
+  GhostBus demo shift on the unchanged tree: 165,052 -> 129,555
+  original, 53,339 -> 45,770 sliced estimated tokens; manifests
+  and all surfaces now name the v2 method from one constant;
+  budgets-migration note in README/CHANGELOG. Carried P0 fixed
+  first: the config backstop now builds rewritten lines as
+  original-indent + body by construction (probe battery could not
+  reproduce the reported column-0 loss in the v0.9 build — every
+  path already preserved indent — but the guarantee is now
+  structural, a real adjacent defect (dropped `- ` marker on
+  fallback rewrites) was fixed, and regression tests pin nested
+  backstop-only/value-rule/key-rule lines). Tests 276 -> 293
+  (17 new). Audit rounds (audits/G05_audit.md): round 1 headline
+  fixes — tokens.py docstring family map corrected (notebook ->
+  python), one-sample evidence limit stated, per-text minified
+  family flip documented and pinned by a bundle-validation test.
+  Round 2 headline fix — the docstring's measured v1 implied
+  rates are now pinned by a test so corpus edits cannot silently
+  invalidate the evidence table.

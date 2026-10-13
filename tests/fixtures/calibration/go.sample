@@ -1,0 +1,61 @@
+// Calibration sample: a tiny word-frequency counter.
+package wordcount
+
+import (
+	"bufio"
+	"fmt"
+	"io"
+	"sort"
+	"strings"
+)
+
+// Counter accumulates word frequencies from a stream.
+type Counter struct {
+	counts map[string]int
+	total  int
+}
+
+// NewCounter returns an empty Counter.
+func NewCounter() *Counter {
+	return &Counter{counts: make(map[string]int)}
+}
+
+// Add consumes r until EOF, counting whitespace-separated words.
+func (c *Counter) Add(r io.Reader) error {
+	sc := bufio.NewScanner(r)
+	sc.Split(bufio.ScanWords)
+	for sc.Scan() {
+		w := strings.ToLower(strings.Trim(sc.Text(), ".,;:!?\"'"))
+		if w == "" {
+			continue
+		}
+		c.counts[w]++
+		c.total++
+	}
+	return sc.Err()
+}
+
+// Total returns the number of words counted.
+func (c *Counter) Total() int { return c.total }
+
+// Top returns the n most frequent words, ties broken alphabetically.
+func (c *Counter) Top(n int) []string {
+	words := make([]string, 0, len(c.counts))
+	for w := range c.counts {
+		words = append(words, w)
+	}
+	sort.Slice(words, func(i, j int) bool {
+		if c.counts[words[i]] != c.counts[words[j]] {
+			return c.counts[words[i]] > c.counts[words[j]]
+		}
+		return words[i] < words[j]
+	})
+	if n < len(words) {
+		words = words[:n]
+	}
+	out := make([]string, len(words))
+	for i, w := range words {
+		out[i] = fmt.Sprintf("%s=%d", w, c.counts[w])
+	}
+	return out
+}

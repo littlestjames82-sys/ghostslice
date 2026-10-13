@@ -1,0 +1,59 @@
+/* Calibration sample: a fixed-capacity ring buffer of ints. */
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define RING_CAPACITY 128
+
+typedef struct {
+    int values[RING_CAPACITY];
+    size_t head;
+    size_t tail;
+    size_t count;
+} ring_t;
+
+ring_t *ring_create(void) {
+    ring_t *ring = (ring_t *)malloc(sizeof(ring_t));
+    if (ring == NULL) {
+        return NULL;
+    }
+    memset(ring, 0, sizeof(ring_t));
+    return ring;
+}
+
+void ring_destroy(ring_t *ring) {
+    free(ring);
+}
+
+bool ring_push(ring_t *ring, int value) {
+    if (ring == NULL || ring->count == RING_CAPACITY) {
+        return false;
+    }
+    ring->values[ring->tail] = value;
+    ring->tail = (ring->tail + 1) % RING_CAPACITY;
+    ring->count++;
+    return true;
+}
+
+bool ring_pop(ring_t *ring, int *out) {
+    if (ring == NULL || ring->count == 0) {
+        return false;
+    }
+    *out = ring->values[ring->head];
+    ring->head = (ring->head + 1) % RING_CAPACITY;
+    ring->count--;
+    return true;
+}
+
+size_t ring_size(const ring_t *ring) {
+    return ring == NULL ? 0 : ring->count;
+}
+
+int ring_peek(const ring_t *ring, int *out) {
+    if (ring == NULL || ring->count == 0) {
+        return -1;
+    }
+    *out = ring->values[ring->head];
+    return 0;
+}

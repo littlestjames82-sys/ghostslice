@@ -1,0 +1,50 @@
+# Keeping a Small Team's Notes Useful
+
+Notes only help when people can find things again. A shared notebook
+that nobody searches is just a slower way to lose information. The
+habits below are ordinary, but they compound: a clear title today
+saves an hour of digging next quarter.
+
+## Write the title you would search for
+
+Titles are retrieval cues, not decoration. "Meeting notes, Tuesday"
+tells a future reader almost nothing. "Vendor review: storage quotes
+and renewal dates" answers the only question that matters later,
+which is whether this note is the one being looked for.
+
+Short, specific titles also make lists scannable. When every entry
+begins with a date or a project name, the eye can skip whole blocks
+without reading them.
+
+## Keep one running page per project
+
+A project accumulates decisions, links, open questions, and small
+facts that are too minor for a document of their own. One running
+page per project gives all of that a single home. When the page
+grows past a few screens, split off the oldest section into an
+archive page and link to it from the top.
+
+The rule that makes this work is simple: if a fact belongs to a
+project, it goes on that project's page first. Sorting it out later
+is possible; finding it again is the hard part, and later sorting
+rarely happens.
+
+## End each week with five lines
+
+A weekly summary does not need to be thorough. Five lines are
+enough: what shipped, what is stuck, what changed, who is waiting
+on whom, and what happens next week. Written while the week is
+fresh, those five lines are worth more than a long report written
+a month afterwards from memory.
+
+## A short checklist
+
+- Title every note as a search query.
+- One running page per project, archived when it grows.
+- Five-line summary every Friday.
+- Link, do not copy, when a fact lives somewhere else.
+- Delete notes that turned out to be wrong, or mark them clearly.
+
+None of this needs special software. It needs agreement, a little
+discipline, and the willingness to write the boring line now so
+that nobody has to reconstruct it under pressure later.
