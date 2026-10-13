@@ -27,7 +27,7 @@ Baseline: v0.5.0, 149 tests passed.
 | G9 | History analytics: trends, per-model $ saved, ASCII chart, JSON export + savings-history chart embedded in the HTML report (Ryan's mockups, Oct 13) | v0.14.0 | done |
 | G10 | `init` wizard: analyze a project and generate a tuned .ghostslice.json (non-interactive --yes mode) | v0.15.0 | done |
 | G11 | New bundle formats: Anthropic-style XML bundle + JSON bundle presets | v0.16.0 | done |
-| G12 | Redact-in-place export: --redact-secrets replaces secret values with placeholders instead of excluding files | v0.17.0 | pending |
+| G12 | Redact-in-place export: --redact-secrets replaces secret values with placeholders instead of excluding files | v0.17.0 | done |
 | G13 | Symbol-level slicing: keep named symbols + their in-file dependencies (Python ast, TS lite) | v0.18.0 | pending |
 | G14 | Python call graph: function-level graph, entry-point reachability, dead-function candidates | v0.19.0 | pending |
 | G15 | Performance: scan caching (.ghostslice-cache), parallel scan, benchmark proof, identical totals | v0.20.0 | pending |
@@ -310,3 +310,29 @@ the audit findings that drove the two improvement rounds.
   artifacts in plain bundles — presence validation confirmed
   deliberate) with no new defects; its fixes were the documented
   choices and the PRESETS/profile/CLI/README consistency guard.
+- G12 (v0.17.0) DONE Oct 13, 2026: redact-in-place export shipped —
+  `export --redact` (task/--fit/watch/MCP inherit; profile
+  `"redact": true` + `--no-redact` override) replaces flagged
+  values in the final slice text with `[REDACTED:<kind>:<fp>]`,
+  fp = sha256[:8] for values >= 12 chars only (a short value's
+  fingerprint would be a brute-force oracle; short values get the
+  fingerprintless form). PEM findings replace the whole block.
+  Same kind set --exclude-secrets judges (REDACTED_KINDS = every
+  scanner kind; the scanner's gates are the severity filter);
+  precedence when both are on: exclusion wins, redaction covers
+  the rest, CLI prints it, unhandled kinds would surface as
+  left_in_place, never silent. Manifest totals/hashes are
+  post-redaction; per-file redactions/kinds + a top-level
+  redaction block; `check` re-scans claimed bundles and fails on
+  a surviving literal; ledger records gain "redactions".
+  Tests 488 -> 525 (37 new). Audit rounds (audits/G12_audit.md):
+  round 1 headline fix — a CRITICAL: comment-line secrets shipped
+  (the guard's reporting scan skips full-line comments; a
+  Markdown heading is `#`-prefixed content) — redaction and the
+  validator now scan with comments=True (one core, documented
+  knob; reporting surfaces unchanged), plus the fit block
+  records redacted_after_tokens so --fit + --redact print one
+  explained pair of totals. Round 2 headline fix — the goal's
+  own test file tripped `ghostslice secrets .` with contiguous
+  fake literals in its source; fixtures now assemble literals
+  from parts (runtime values unchanged), guard exits 0.

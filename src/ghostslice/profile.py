@@ -20,6 +20,12 @@ selections, per-glob "modes" below, and profile entry_points always
 win over auto-shrink. The export CLI's --auto-shrink sets the same
 thing for one run.
 
+An optional "redact" flag (v0.17, default false) makes exports
+replace flagged secret VALUES in place with `[REDACTED:<kind>:<fp>]`
+placeholders instead of shipping them (the file is kept; contrast
+--exclude-secrets, which drops flagged files entirely). The export
+CLI's --redact / --no-redact override it per run.
+
 An optional "lint" section (v0.11) tunes the context linter per rule:
 
   "lint": {
@@ -85,6 +91,8 @@ class Profile:
     # generated/vendored/minified resolve to exclude in exports
     # unless an explicit selection or profile mode says otherwise.
     auto_shrink: bool = False
+    # v0.17: opt-in redact-in-place for exports (see module docstring).
+    redact: bool = False
     path: str | None = None  # where it was loaded from, if any
     # v0.11: normalised lint config {rule_id: {"severity": str, option: number}}
     lint: dict = field(default_factory=dict)
@@ -105,7 +113,7 @@ class Profile:
             "ignore": self.ignore, "modes": self.modes, "model": self.model,
             "budget_tokens": self.budget_tokens,
             "entry_points": self.entry_points, "preset": self.preset,
-            "auto_shrink": self.auto_shrink,
+            "auto_shrink": self.auto_shrink, "redact": self.redact,
             "path": self.path, "lint": self.lint,
         }
 
@@ -172,6 +180,9 @@ def load_profile(root: str | Path) -> Profile:
     auto_shrink = data.get("auto_shrink", False)
     if not isinstance(auto_shrink, bool):
         raise ValueError(f"{candidate}: 'auto_shrink' must be true or false, got {auto_shrink!r}")
+    redact = data.get("redact", False)
+    if not isinstance(redact, bool):
+        raise ValueError(f"{candidate}: 'redact' must be true or false, got {redact!r}")
     budget = data.get("budget_tokens")
     return Profile(
         ignore=list(data.get("ignore") or []),
@@ -181,6 +192,7 @@ def load_profile(root: str | Path) -> Profile:
         entry_points=list(data.get("entry_points") or []),
         preset=preset,
         auto_shrink=auto_shrink,
+        redact=redact,
         path=str(candidate),
         lint=_parse_lint_section(data.get("lint"), candidate),
     )

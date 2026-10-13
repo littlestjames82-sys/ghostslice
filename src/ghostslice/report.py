@@ -183,6 +183,11 @@ def build_report(root, model_id: str = "claude-sonnet") -> str:
         sec_html = f"<div class='warn'><strong>{len(secrets)} possible secret(s) found (redacted):</strong><ul>{sec_items}</ul></div>"
     else:
         sec_html = "<div class='ok'>No likely secrets found in scanned files.</div>"
+    if profile.redact:
+        sec_html += ("<p>Profile note: <code>\"redact\": true</code> is set, so exports "
+                     "replace flagged secret values in place with "
+                     "<code>[REDACTED:&hellip;]</code> placeholders and keep the files "
+                     "(<code>export --exclude-secrets</code> drops flagged files instead).</p>")
 
     return f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">

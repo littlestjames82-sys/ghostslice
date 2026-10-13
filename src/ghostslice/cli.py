@@ -5,8 +5,8 @@ Commands:
   ghostslice graph        <path> [--json]
   ghostslice slice        <path> --mode MODE -o <dir>
   ghostslice task         <path> (--task "words" | --diff) [--budget N] [--fit N] -o <bundle> [--preset P]
-  ghostslice export       <path> -o <bundle> [--mode MODE] [--model ID] [--preset P] [--fit N] [--exclude-secrets] [--auto-shrink]
-  ghostslice watch        <path> [--export] [-o <bundle>] [--interval S] [--debounce S] [--once] [--max-events N] [--fit N] [--auto-shrink]
+  ghostslice export       <path> -o <bundle> [--mode MODE] [--model ID] [--preset P] [--fit N] [--exclude-secrets] [--redact] [--auto-shrink]
+  ghostslice watch        <path> [--export] [-o <bundle>] [--interval S] [--debounce S] [--once] [--max-events N] [--fit N] [--redact] [--auto-shrink]
   ghostslice check-budget <path> [--max-tokens N]
   ghostslice lint         <path> [--json] [--strict]
   ghostslice init         <path> [--yes] [--force] [--dry-run] [--budget N] [--model ID]
@@ -36,7 +36,7 @@ from .ledger import summary as ledger_summary
 from .pricing import estimate_cost, get_model, load_prices, models, preflight
 from .profile import PRESETS, load_profile
 from .scanner import scan
-from .secrets_scan import scan_scan_result, scan_text
+from .secrets_scan import RedactionError, scan_scan_result, scan_text
 from .selection import select_for_diff, select_for_task, select_for_task_breakdown
 from .configslice import CONFIG_LANGUAGES
 from .slicer import MODES, slice_text
@@ -111,6 +111,24 @@ def _print_wrapper(manifest) -> None:
               "the sliced totals above; manifest totals count the file slices only.")
 
 
+def _print_redaction(manifest, exclude_secrets_on: bool = False) -> None:
+    """Print the v0.17 redaction summary from the manifest block:
+    what was replaced, and — loudly — anything left in place."""
+    block = manifest.get("redaction")
+    if not block:
+        return
+    print(f"Redacted {block['values_redacted']} secret value(s) across "
+          f"{block['files_affected']} file(s) (values replaced in place; files kept).")
+    if block["left_in_place"]:
+        print(f"WARNING: {block['left_in_place']} finding(s) of kind(s) "
+              f"{', '.join(block['leftover_kinds'])} were left in place "
+              "(kinds the redactor does not replace); review before sharing.")
+    if exclude_secrets_on:
+        print("Note: --exclude-secrets is also on: files flagged by the secret "
+              "guard were excluded entirely (exclusion wins); redaction covered "
+              "the remaining files.")
+
+
 def _scan_with_profile(path, profile):
     matcher = profile.is_ignored if profile.path else None
     return scan(path, ignore_matcher=matcher)
@@ -123,7 +141,8 @@ def _warn_secrets(findings, heading="WARNING: possible secrets detected") -> Non
     for f in findings:
         print(f"  {f['path']}:{f['line']}  {f['type']}  ({f['redacted']})", file=sys.stderr)
     print("  Review these files before sharing the bundle. "
-          "Use --exclude-secrets (export) to force-exclude flagged files.", file=sys.stderr)
+          "Use --exclude-secrets (export) to force-exclude flagged files, "
+          "or --redact to replace the values in place.", file=sys.stderr)
 
 
 def _print_fit(fit_report) -> bool:
@@ -135,6 +154,10 @@ def _print_fit(fit_report) -> bool:
     print(f"Fit target: {fit_report['fit_tokens']:,} estimated tokens: "
           f"{fit_report['before_tokens']:,} -> {fit_report['after_tokens']:,} "
           f"({'fitted' if fit_report['fitted'] else 'COULD NOT FIT'})")
+    if "redacted_after_tokens" in fit_report:
+        print(f"  after redaction: {fit_report['redacted_after_tokens']:,} estimated "
+              "tokens (the ladder judged pre-redaction slices; manifest totals "
+              "are post-redaction)")
     print(f"  downgrades: {step_text}")
     if not fit_report["fitted"]:
         print(f"WARNING: could not fit the bundle into {fit_report['fit_tokens']:,} estimated tokens "
@@ -245,6 +268,12 @@ def main(argv: list[str] | None = None) -> int:
     p_task.add_argument("-o", "--out", required=True)
     p_task.add_argument("--preset", choices=PRESETS, default=None)
     p_task.add_argument("--model", default="claude-sonnet")
+    p_task.add_argument("--redact", action=argparse.BooleanOptionalAction,
+                        default=None,
+                        help="replace flagged secret values in slices with "
+                             "[REDACTED:...] placeholders instead of shipping them "
+                             "(--no-redact overrides a profile's \"redact\": true; "
+                             "default: the profile setting)")
 
     p_export = sub.add_parser("export", help="write an agent context bundle")
     p_export.add_argument("path")
@@ -255,6 +284,14 @@ def main(argv: list[str] | None = None) -> int:
     p_export.add_argument("--model", default="claude-sonnet")
     p_export.add_argument("--exclude-secrets", action="store_true",
                           help="force-exclude files flagged by the secret guard")
+    p_export.add_argument("--redact", action=argparse.BooleanOptionalAction,
+                          default=None,
+                          help="replace flagged secret values in slices with "
+                               "[REDACTED:...] placeholders instead of shipping them "
+                               "(--no-redact overrides a profile's \"redact\": true; "
+                               "default: the profile setting). With --exclude-secrets, "
+                               "exclusion wins for flagged files and redaction covers "
+                               "the rest")
     p_export.add_argument("--auto-shrink", action="store_true",
                           help="exclude files detected as generated/vendored/minified "
                                "(explicit modes and profile modes still win; "
@@ -303,6 +340,10 @@ def main(argv: list[str] | None = None) -> int:
     p_watch.add_argument("--preset", choices=PRESETS, default=None)
     p_watch.add_argument("--exclude-secrets", action="store_true",
                          help="with --export: force-exclude files flagged by the secret guard")
+    p_watch.add_argument("--redact", action=argparse.BooleanOptionalAction,
+                         default=None,
+                         help="with --export: redact flagged secret values in place, "
+                              "as in export --redact (default: the profile setting)")
     p_watch.add_argument("--auto-shrink", action="store_true",
                          help="with --export: exclude detected generated/vendored/minified "
                               "files, as in export --auto-shrink")
@@ -680,15 +721,21 @@ def main(argv: list[str] | None = None) -> int:
             task_scores = {rel: breakdown[rel] for rel in chosen if rel in breakdown}
         _warn_secrets([f for f in scan_scan_result(result) if f["path"] in include],
                       heading="WARNING: possible secrets in selected files")
-        manifest = build_bundle(args.path, args.out, selections=selections,
-                                include=include, profile=profile, preset=args.preset,
-                                fit=args.fit, fit_protect_selections=False,
-                                task_scores=task_scores, model=args.model)
+        try:
+            manifest = build_bundle(args.path, args.out, selections=selections,
+                                    include=include, profile=profile, preset=args.preset,
+                                    fit=args.fit, fit_protect_selections=False,
+                                    redact=args.redact,
+                                    task_scores=task_scores, model=args.model)
+        except RedactionError as exc:
+            print(f"task: {exc}", file=sys.stderr)
+            return 1
         model = get_model(prices, args.model)
         pf = preflight(manifest["total_original_tokens"], manifest["total_sliced_tokens"], model, prices)
         print(f"Bundle: {args.out} (preset: {manifest.get('preset')})")
         print(f"Estimated tokens (whole project -> selection): {pf['before_tokens']:,} -> {pf['after_tokens']:,}")
         _print_wrapper(manifest)
+        _print_redaction(manifest)
         fitted = _print_fit(manifest.get("fit"))
         check = validate_bundle(args.out)
         print(f"Validation: {'OK' if check['ok'] else 'FAILED: ' + '; '.join(check['errors'])}")
@@ -698,11 +745,16 @@ def main(argv: list[str] | None = None) -> int:
         _export_scan = _scan_with_profile(args.path, profile)
         _warn_secrets(scan_scan_result(_export_scan))
         model_id = args.model or profile.model or "claude-sonnet"
-        manifest = build_bundle(args.path, args.out, default_mode=args.mode,
-                                profile=profile, preset=args.preset,
-                                exclude_secrets=args.exclude_secrets,
-                                auto_shrink=True if args.auto_shrink else None,
-                                fit=args.fit, model=model_id)
+        try:
+            manifest = build_bundle(args.path, args.out, default_mode=args.mode,
+                                    profile=profile, preset=args.preset,
+                                    exclude_secrets=args.exclude_secrets,
+                                    redact=args.redact,
+                                    auto_shrink=True if args.auto_shrink else None,
+                                    fit=args.fit, model=model_id)
+        except RedactionError as exc:
+            print(f"export: {exc}", file=sys.stderr)
+            return 1
         model = get_model(prices, model_id)
         pf = preflight(manifest["total_original_tokens"], manifest["total_sliced_tokens"], model, prices)
         print(f"Bundle: {args.out} (preset: {manifest.get('preset')})")
@@ -714,6 +766,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  {f['path']}  ({f['mode_reason']})")
         print(f"Estimated tokens: {pf['before_tokens']:,} -> {pf['after_tokens']:,} (saved {pf['saved_tokens']:,})")
         _print_wrapper(manifest)
+        _print_redaction(manifest, exclude_secrets_on=args.exclude_secrets)
         print(f"Pre-flight input cost at {pf['model_name']} (prices as of {pf['prices_as_of']}, local, not live): "
               f"~${pf['before_cost_usd']:.4f} -> ~${pf['after_cost_usd']:.4f}")
         fitted = _print_fit(manifest.get("fit"))
@@ -743,6 +796,7 @@ def main(argv: list[str] | None = None) -> int:
                       fit=args.fit, preset=args.preset,
                       default_mode=args.mode,
                       exclude_secrets=args.exclude_secrets,
+                      redact=args.redact,
                       auto_shrink=args.auto_shrink,
                       profile=profile)
         except FileNotFoundError:

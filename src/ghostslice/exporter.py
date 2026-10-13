@@ -17,6 +17,7 @@ from pathlib import Path
 from . import __version__
 from .ledger import append_record
 from .scanner import ScanResult, language_for, scan
+from .secrets_scan import REDACTED_KINDS, redact_text, scan_text
 from .slicer import MODES, slice_text
 from .tokens import METHOD, estimate_tokens
 from .workspaces import summarize_packages
@@ -248,6 +249,7 @@ def build_bundle(root: str | Path, out: str | Path,
                  preset: str | None = None,
                  record_history: bool = True,
                  exclude_secrets: bool = False,
+                 redact: bool | None = None,
                  auto_shrink: bool | None = None,
                  fit: int | None = None,
                  fit_protect_selections: bool = True,
@@ -322,9 +324,30 @@ def build_bundle(root: str | Path, out: str | Path,
     and the manifest gains a top-level `packages` summary; both are
     additive — validate_bundle ignores them, so pre-v0.13 bundles
     validate exactly as before.
+
+    `redact` (v0.17): when True — or None and the profile sets
+    `"redact": true` — every included file's SLICED text is scanned
+    by the secret guard and each flagged value is replaced in place
+    with a `[REDACTED:<kind>:<fp>]` placeholder (see
+    secrets_scan.redact_text), so the file ships without its secrets.
+    The scan runs on the final slice text, not on pre-slice findings:
+    slicing can split or merge lines, so reported line numbers are
+    slice-relative. It runs in the scanner's redaction context
+    (comment lines judged as content; the reporting commands keep
+    skipping them — see secrets_scan._scan_rich). Manifest `sliced_tokens`/sha256 then describe the
+    REDACTED text (totals are post-redaction), entries gain
+    `redactions`/`redaction_kinds`, and the manifest gains a
+    top-level `redaction` block (validate_bundle re-scans bundles
+    that carry one). Precedence with `exclude_secrets`: exclusion
+    wins — a flagged file is dropped whole at mode resolution, and
+    redaction covers the files that remain. Findings of a kind the
+    redactor does not handle are counted in the block as
+    `left_in_place`, never silently shipped.
     """
     selections = selections or {}
     preset = preset or (profile.preset if profile else None) or "claude-code"
+    if redact is None:
+        redact = bool(profile.redact) if profile is not None else False
     ignore_matcher = profile.is_ignored if (profile and profile.path) else None
     result: ScanResult = scan(root, ignore_matcher=ignore_matcher)
     secret_files: set[str] = set()
@@ -356,23 +379,53 @@ def build_bundle(root: str | Path, out: str | Path,
     excluded_records: list[dict] = []
     total_before = 0
     total_after = 0
+    redact_values = 0
+    redact_files = 0
+    redact_kind_counts: dict[str, int] = {}
+    leftover_total = 0
+    leftover_kinds: set[str] = set()
 
     for entry in result.files:
         mode = resolved[entry.path]
         source = Path(entry.abspath).read_text(encoding="utf-8", errors="replace")
         sliced = slice_text(entry.path, source, mode)
         total_before += sliced.original_tokens
-        total_after += sliced.sliced_tokens
-        digest = hashlib.sha256(sliced.text.encode("utf-8")).hexdigest()
+        # v0.17: redaction rewrites the slice before anything derives
+        # from it (hash, token count, files/, PROMPT.md, wrappers), so
+        # every artifact carries the redacted text and the manifest
+        # describes what actually ships. Excluded files never ship;
+        # their text is not redacted (or counted).
+        final_text = sliced.text
+        final_tokens = sliced.sliced_tokens
+        file_redactions: list[dict] = []
+        if redact and mode != "exclude" and final_text:
+            final_text, file_redactions, file_leftovers = redact_text(
+                entry.path, final_text)
+            if file_redactions:
+                final_tokens = estimate_tokens(final_text,
+                                               language_for(entry.path))
+                redact_values += len(file_redactions)
+                redact_files += 1
+                for a in file_redactions:
+                    redact_kind_counts[a["type"]] = \
+                        redact_kind_counts.get(a["type"], 0) + 1
+            leftover_total += len(file_leftovers)
+            leftover_kinds.update(f["type"] for f in file_leftovers)
+        total_after += final_tokens
+        digest = hashlib.sha256(final_text.encode("utf-8")).hexdigest()
         manifest_entry = {
             "path": entry.path,
             "mode": mode,
             "language": entry.language,
             "package": entry.package,
             "original_tokens": sliced.original_tokens,
-            "sliced_tokens": sliced.sliced_tokens,
+            "sliced_tokens": final_tokens,
             "sha256": digest,
         }
+        if file_redactions:
+            manifest_entry["redactions"] = len(file_redactions)
+            manifest_entry["redaction_kinds"] = sorted(
+                {a["type"] for a in file_redactions})
         if entry.path in auto_reasons:
             manifest_entry["mode_reason"] = auto_reasons[entry.path]
         if task_scores and entry.path in task_scores:
@@ -387,19 +440,19 @@ def build_bundle(root: str | Path, out: str | Path,
                 "path": entry.path, "mode": mode,
                 "reason": manifest_entry.get("mode_reason") or "excluded (mode: exclude)"})
             continue
-        if not sliced.text:
+        if not final_text:
             excluded_records.append({
                 "path": entry.path, "mode": mode,
                 "reason": f"empty slice (mode: {mode})"})
             continue
-        included.append({**manifest_entry, "content": sliced.text})
+        included.append({**manifest_entry, "content": final_text})
         dest = files_dir / entry.path
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(sliced.text, encoding="utf-8")
-        prompt_parts.append(f"\n\n---\n\n# File: {entry.path} (mode: {mode})\n\n{sliced.text.rstrip()}\n")
+        dest.write_text(final_text, encoding="utf-8")
+        prompt_parts.append(f"\n\n---\n\n# File: {entry.path} (mode: {mode})\n\n{final_text.rstrip()}\n")
         fence_lang = "" if entry.language in ("text", "notebook") else entry.language
         copilot_parts.append(
-            f"\n\n## File: {entry.path} (mode: {mode})\n\n```{fence_lang}\n{sliced.text.rstrip()}\n```\n")
+            f"\n\n## File: {entry.path} (mode: {mode})\n\n```{fence_lang}\n{final_text.rstrip()}\n```\n")
 
     manifest = {
         "tool": "ghostslice",
@@ -419,7 +472,24 @@ def build_bundle(root: str | Path, out: str | Path,
             sliced_tokens={f["path"]: f["sliced_tokens"] for f in manifest_files}),
     }
     if fit_report is not None:
+        if redact and total_after != fit_report["after_tokens"]:
+            # The ladder judged pre-redaction slices (it must —
+            # redaction depends on the slice it picks); record the
+            # post-redaction total alongside rather than letting the
+            # two "after" numbers disagree unexplained (audit G12 F2).
+            fit_report = {**fit_report, "redacted_after_tokens": total_after}
         manifest["fit"] = fit_report
+    if redact:
+        # v0.17: additive; validate_bundle re-scans any bundle whose
+        # manifest carries this block with "enabled" true.
+        manifest["redaction"] = {
+            "enabled": True,
+            "values_redacted": redact_values,
+            "files_affected": redact_files,
+            "kinds": redact_kind_counts,
+            "left_in_place": leftover_total,
+            "leftover_kinds": sorted(leftover_kinds),
+        }
     prompt = (
         "# Optimized agent context bundle (GhostSlice)\n\n"
         f"Estimated tokens: {total_after} (was {total_before}, saved {total_before - total_after}). "
@@ -494,7 +564,9 @@ def build_bundle(root: str | Path, out: str | Path,
             + listing + ("\n" if listing else ""), encoding="utf-8")
     if record_history:
         try:
-            append_record(root, "export", total_before, total_after, bundle=str(out))
+            append_record(root, "export", total_before, total_after, bundle=str(out),
+                          extra={"redactions": redact_values}
+                          if redact and redact_values else None)
         except OSError:
             pass
     return manifest
@@ -701,6 +773,25 @@ def validate_bundle(bundle: str | Path) -> dict:
             f"total_sliced_tokens {manifest['total_sliced_tokens']} != recomputed {total_sliced}")
     artifacts = _validate_wrapper_artifacts(bundle, manifest, disk_texts,
                                             on_disk, errors)
+    # v0.17: a bundle whose manifest claims redaction must not contain
+    # a reportable secret literal in any shipped file. The scan uses
+    # each file's own path (code/config semantics differ), exactly as
+    # the export that produced the bundle judged it.
+    redaction_checked = False
+    redaction_block = manifest.get("redaction")
+    if isinstance(redaction_block, dict) and redaction_block.get("enabled"):
+        redaction_checked = True
+        for entry in manifest["files"]:
+            if entry["mode"] == "exclude":
+                continue
+            for f in scan_text(entry["path"],
+                               disk_texts.get(entry["path"], ""),
+                               comments=True):
+                if f["type"] in REDACTED_KINDS:
+                    errors.append(
+                        f"{entry['path']}: manifest claims redaction but a "
+                        f"{f['type']} secret literal remains "
+                        f"(slice line {f['line']})")
     return {
         "ok": not errors,
         "errors": errors,
@@ -708,4 +799,5 @@ def validate_bundle(bundle: str | Path) -> dict:
         "total_sliced_tokens": total_sliced,
         "total_original_tokens": manifest["total_original_tokens"],
         "artifacts_checked": artifacts,
+        "redaction_checked": redaction_checked,
     }

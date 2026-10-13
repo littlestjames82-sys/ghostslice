@@ -297,6 +297,62 @@ dashboard `/api/secrets` endpoint and the MCP `check_secrets` tool.
 This is a heuristic guard, not a guarantee: review findings, and do
 not treat a clean scan as proof a tree is secret-free.
 
+### Redact in place (v0.17)
+
+```bash
+ghostslice export ~/my-project -o bundle --redact   # keep the files, replace the values
+```
+
+`--exclude-secrets` drops a flagged file entirely. `--redact` is the
+other remedy: the final sliced text of every included file is scanned
+and each flagged value is replaced where it sits with a typed
+placeholder, so the file still ships:
+
+```
+API_KEY = "[REDACTED:aws-access-key:74355467]"
+DB = "postgres://u:[REDACTED:password-in-url:7a078322]@h/db"
+password = "[REDACTED:sensitive-assignment]"
+```
+
+- The suffix is a fingerprint - the first 8 hex of the value's
+  sha256 - so the same secret maps to the same token in every file
+  and run, and cross-references stay visible without the value. It
+  is only added for values of 12+ characters: an 8-hex fingerprint
+  of a short password would be a brute-force oracle, so short values
+  get the fingerprintless form.
+- A private-key finding replaces the whole PEM block (BEGIN through
+  END, or the trailing base64 body when a slice cuts the END line).
+- Redaction judges the same kinds the guard reports, in one stricter
+  context: comment lines count as content (a Markdown heading is
+  `#`-prefixed content, and a real key in a comment must not ship),
+  while the reporting commands keep skipping comment lines as
+  documentation. Placeholder-shaped examples in comments stay
+  untouched, and the placeholder itself never trips the scanner.
+- The scan runs on the sliced text, never on pre-slice findings
+  (slicing can split or merge lines), so manifest line references
+  are slice-relative. Manifest `sliced_tokens`/sha256 describe the
+  redacted text - totals are post-redaction - each affected entry
+  gains `redactions`/`redaction_kinds`, and the manifest gains a
+  `redaction` summary block. `ghostslice check` re-scans any bundle
+  whose manifest claims redaction and fails if a reportable literal
+  remains. After redaction the text is re-scanned before anything
+  is written; a leftover reportable finding fails the export loudly
+  instead of shipping.
+- With `--exclude-secrets` also on, exclusion wins: flagged files
+  are dropped whole and redaction covers the remaining files (the
+  CLI prints this). A finding of a kind the redactor does not handle
+  would be counted as `left_in_place` in the summary, never shipped
+  silently. Set it per project with `"redact": true` in
+  `.ghostslice.json`; `--no-redact` overrides the profile for one
+  run. `task`, `--fit`, `watch --export`, and the MCP `export_bundle`
+  tool accept the same switch. With `--fit`, the ladder judges
+  pre-redaction slices; the manifest's fit block then also records
+  `redacted_after_tokens`.
+- Boundaries, honestly: a secret split across two lines (string
+  concatenation) is not one flagged value - the guard has the same
+  limit - and the standalone `slice` command and dashboard export do
+  not apply redaction.
+
 ### Context lint (v0.11)
 
 ```bash
@@ -517,9 +573,10 @@ machine-consumable JSON object of the slices). See
 "XML and JSON bundles" below for both schemas.
 Nested `.gitignore` files in subdirectories are honoured, scoped to
 their subtree. An optional `"lint"` section tunes the context linter
-per rule (see Context lint above), and `"auto_shrink": true` makes
+per rule (see Context lint above), `"auto_shrink": true` makes
 exports exclude detected generated/vendored/minified files (see
-Detection + auto-shrink above).
+Detection + auto-shrink above), and `"redact": true` makes exports
+replace flagged secret values in place (see Redact in place above).
 
 ### Init: generate a tuned profile (v0.15)
 

@@ -35,7 +35,8 @@ def ledger_path(root: str | Path) -> Path:
 
 
 def append_record(root: str | Path, kind: str, before: int, after: int,
-                  bundle: str | None = None) -> Path | None:
+                  bundle: str | None = None,
+                  extra: dict | None = None) -> Path | None:
     root_p = Path(root)
     if not root_p.is_dir():
         return None
@@ -48,6 +49,10 @@ def append_record(root: str | Path, kind: str, before: int, after: int,
         "saved_tokens": int(before) - int(after),
         "estimator": f"v{METHOD_VERSION}",
     }
+    if extra:
+        # Additive annotations (e.g. {"redactions": n} from a v0.17
+        # redacted export). Readers ignore keys they do not know.
+        rec.update(extra)
     path = ledger_path(root_p)
     with path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(rec) + "\n")

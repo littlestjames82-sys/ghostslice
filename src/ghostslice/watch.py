@@ -20,7 +20,8 @@ is printed in that case.
 
 With `export=True` a bundle is written once at startup and again after
 every settled change, reusing exporter.build_bundle (profile, preset,
---fit and --exclude-secrets behave exactly as in `ghostslice export`).
+--fit, --exclude-secrets and --redact behave exactly as in
+`ghostslice export`).
 Each settled export appends at most one savings-ledger record, because
 build_bundle appends exactly one record per call; the initial export
 also appends one. A failed fit or an invalid bundle is reported but
@@ -116,6 +117,7 @@ def run_watch(root: str | Path,
               preset: str | None = None,
               default_mode: str | None = None,
               exclude_secrets: bool = False,
+              redact: bool | None = None,
               auto_shrink: bool = False,
               profile=None,
               scan_fn=None,
@@ -189,6 +191,7 @@ def run_watch(root: str | Path,
             manifest = build_bundle(root, out, profile=export_profile, preset=preset,
                                     default_mode=default_mode,
                                     exclude_secrets=exclude_secrets,
+                                    redact=redact,
                                     auto_shrink=True if auto_shrink else None,
                                     fit=fit)
         except (OSError, ValueError) as exc:
@@ -205,8 +208,12 @@ def run_watch(root: str | Path,
         if manifest.get("fit") is not None:
             fit_note = (f", fit target {manifest['fit']['fit_tokens']:,}: "
                         f"{'fitted' if manifest['fit']['fitted'] else 'COULD NOT FIT'}")
+        redact_note = ""
+        if manifest.get("redaction"):
+            redact_note = (f", redacted "
+                           f"{manifest['redaction']['values_redacted']} secret value(s)")
         say(f"[watch] bundle rewritten: {out} "
-            f"({manifest['total_sliced_tokens']:,} estimated sliced tokens, {valid_note}{fit_note})")
+            f"({manifest['total_sliced_tokens']:,} estimated sliced tokens, {valid_note}{fit_note}{redact_note})")
 
     start = clock()
     events = 0

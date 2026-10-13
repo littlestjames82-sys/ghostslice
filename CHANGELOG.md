@@ -3,6 +3,42 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [0.17.0] - 2026-10-13
+### Added
+- Redact-in-place export (G12): `export --redact` (also `task`,
+  `--fit`, `watch --export`, MCP `export_bundle`, and the profile
+  option `"redact": true` with a `--no-redact` per-run override).
+  The final sliced text of every included file is scanned and each
+  flagged secret value is replaced where it sits with
+  `[REDACTED:<kind>:<fp>]` — fp is the first 8 hex of the value's
+  sha256, so identical secrets map to identical tokens across files
+  and runs. Values under 12 characters get a fingerprintless token
+  (an 8-hex fingerprint of a short password is a brute-force
+  oracle). A private-key finding replaces the whole PEM block.
+  New shared API: `secrets_scan.redact_text` (plus REDACTED_KINDS,
+  the same kind set --exclude-secrets judges), built on the
+  scanner's span-carrying core, with a re-scan gate that fails the
+  export loudly if a reportable finding survives.
+- The redaction scan judges comment lines as content (Markdown
+  headings, block-comment bodies, commented-out config): audit G12
+  F1 caught real keys shipping there behind a "redacted" claim.
+  Reporting surfaces (`secrets`, lint L005, watch warnings, the
+  config backstop) keep the documented comment-skip heuristic;
+  redaction is a strict superset of the guard, never weaker.
+- Manifest: per-file `redactions`/`redaction_kinds` and a top-level
+  `redaction` block (values/files/kinds, plus `left_in_place` for
+  any kind the redactor does not handle — surfaced in the CLI
+  summary, never silent). Totals and hashes are post-redaction.
+  `ghostslice check` re-scans bundles whose manifest claims
+  redaction (comment-inclusive) and fails on any surviving
+  reportable literal; the result gains `redaction_checked`.
+  Ledger records from redacted exports gain a `redactions` count.
+- Precedence, explicit in CLI output: with `--exclude-secrets` also
+  on, exclusion wins for flagged files and redaction covers the
+  rest. With `--fit`, the ladder judges pre-redaction slices and
+  the manifest fit block records `redacted_after_tokens` when the
+  two totals differ (audit G12 F2).
+
 ## [0.16.0] - 2026-10-13
 ### Added
 - Two export presets (G11), both rendered from the same in-memory

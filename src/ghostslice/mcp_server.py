@@ -96,6 +96,10 @@ TOOLS = [
                 "out": {"type": "string"},
                 "preset": {"type": "string", "enum": list(PRESETS),
                            "default": "claude-code"},
+                "redact": {"type": "boolean",
+                           "description": "replace flagged secret values in slices "
+                                          "with [REDACTED:...] placeholders "
+                                          "(default: the profile setting)"},
             },
             "required": ["path", "out"],
         },
@@ -149,8 +153,9 @@ def _estimate_cost(args: dict) -> dict:
 def _export_bundle(args: dict) -> dict:
     profile = load_profile(args["path"])
     manifest = build_bundle(args["path"], args["out"], profile=profile,
-                            preset=args.get("preset", "claude-code"))
-    return {
+                            preset=args.get("preset", "claude-code"),
+                            redact=args.get("redact"))
+    out = {
         "bundle": str(Path(args["out"]).resolve()),
         "preset": manifest.get("preset"),
         "files": len(manifest["files"]),
@@ -158,6 +163,9 @@ def _export_bundle(args: dict) -> dict:
         "total_sliced_tokens": manifest["total_sliced_tokens"],
         "total_saved_tokens": manifest["total_saved_tokens"],
     }
+    if manifest.get("redaction"):
+        out["redaction"] = manifest["redaction"]
+    return out
 
 
 def _check_secrets(args: dict) -> dict:
