@@ -3,6 +3,34 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [0.7.0] - 2026-10-13
+### Added
+- Task selection v2 for `ghostslice task --task`: symbol-name
+  matching and one-hop import-graph boosting layered on the v0.5
+  TF-IDF score. A keyword equal to a whole symbol name defined in a
+  file earns 15.0; a keyword equal to one camelCase/snake_case part
+  of a symbol earns 10.0; the per-file symbol component is capped
+  at 25.0. Symbols: Python via `ast` (defs/classes/methods plus
+  module- and class-level assignment targets; the slicer's fallback
+  def lines for unparseable files), other slicable languages via
+  the slicer's own signatures output.
+- Graph boosting: a file one import hop from a selected seed earns
+  25% of the strongest adjacent seed's base score, capped at 6.0 —
+  a max, not a sum, so a popular hub is not dragged in by its
+  importer count. Boosted files use only the budget that remains
+  and never displace a seed or exceed the budget.
+- Score breakdown exposed: the `task` CLI prints per-file
+  tfidf/symbol/graph components, and task bundle manifests carry
+  additive `score` and `score_components` fields on selected
+  files. `select_for_task` keeps its legacy return shape.
+### Notes
+- Symbol extraction is gated: when no keyword part appears in a
+  file's text, its symbol component is provably 0 and extraction
+  is skipped (no behaviour change, faster scans).
+- Audit: audits/G02_audit.md (build adopted from a recovered
+  session; two improvement rounds: constants as symbols + the
+  extraction gate, then gate-parts precomputation).
+
 ## [0.6.0] - 2026-10-13
 ### Added
 - Watch mode: `ghostslice watch <project>` — stdlib polling watcher

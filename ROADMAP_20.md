@@ -17,7 +17,7 @@ Baseline: v0.5.0, 149 tests passed.
 | # | Goal | Version | Status |
 |---|------|---------|--------|
 | G1 | Watch mode: polling watcher, auto rescan/re-export on change, debounced, ledger-aware | v0.6.0 | done |
-| G2 | Task selection v2: symbol-name matching + import-graph boosting on top of TF-IDF | v0.7.0 | pending |
+| G2 | Task selection v2: symbol-name matching + import-graph boosting on top of TF-IDF | v0.7.0 | done |
 | G3 | C, C++, Scala parser-lite slicers (systems-language completion) | v0.8.0 | pending |
 | G4 | Config slicing: shell/PowerShell + SQL + YAML/TOML structure mode (keys/structure, values optional) | v0.9.0 | pending |
 | G5 | Token estimator calibration: per-language factors, golden corpora, `calibrate` report | v0.10.0 | pending |
@@ -57,3 +57,22 @@ the audit findings that drove the two improvement rounds.
   Round 2 headline fixes — watching a nonexistent path now exits 2
   (mid-watch deletion stays soft), revert-before-settle mtime
   semantics pinned by a fake-clock test.
+- G2 (v0.7.0) DONE Oct 13, 2026: task selection v2 shipped — symbol
+  matching (exact name 15.0, camel/snake part 10.0, per-file cap
+  25.0; Python ast + module/class assignment targets, other
+  languages via the slicer's signatures output) and one-hop graph
+  boosting (25% of the strongest adjacent SELECTED seed, capped
+  6.0, max-not-sum so hubs are not dragged in by popularity),
+  with the tfidf/symbol/graph breakdown on the CLI and as additive
+  manifest fields. Tests 173 -> 196 (23 new). Recovery note: the
+  first G2 agent died in a daemon restart mid-goal; its uncommitted
+  build was adopted and reviewed file by file, not rebuilt.
+  Audit rounds (audits/G02_audit.md): round 1 headline fixes —
+  Python constants/class attributes were not symbols at all (now
+  collected; function-locals deliberately excluded), and symbol
+  extraction ran the slicer on every file even when no keyword
+  could match (now gated by a keyword-part substring prefilter
+  with a no-false-negative argument). Round 2 headline fix — the
+  gate recomputed keyword parts per file (now computed once per
+  selection); scope edges of the constants fix (nested classes,
+  bare annotations, walrus) reviewed and pinned.

@@ -211,6 +211,37 @@ is whole-word. Scores are floats. Both forms export a validated bundle
 containing only the selection (everything else is recorded as
 `exclude` in the manifest), and both accept `--fit` (see Auto-fit).
 
+#### Task selection v2: symbols + graph (v0.7)
+
+Two more signals layer on top of TF-IDF for `--task`:
+
+- **Symbol matching.** A keyword that names a symbol *defined* in a
+  file earns a bonus, because a definition is stronger evidence than
+  a body mention (and the body counter never sees it: `render_invoice`
+  tokenises as one word, not as "invoice"). An exact symbol-name match
+  earns 15.0; a keyword equal to one camelCase/snake_case part of a
+  symbol (or whose parts all appear in the symbol) earns 10.0. Each
+  keyword scores once per file at its best tier, and the symbol
+  component is capped at 25.0 per file. Symbols come from the file
+  itself: Python via `ast` (functions, classes, methods, and
+  module/class-level assignment targets — constants count as
+  definitions; function-local variables do not), other slicable
+  languages via the slicer's own signatures output (no second parser).
+- **Graph boosting.** After the budget has picked the seed files, a
+  file one import hop from a seed (it imports a seed, or a seed
+  imports it) earns 25% of the strongest adjacent seed's score,
+  capped at 6.0. It is a max, not a sum: a hub imported by everything
+  earns no more than a file imported by one seed, so popularity alone
+  never drags a file in. Boosts flow only from files actually
+  selected, boosted files are taken with whatever budget remains,
+  they never displace a seed, and a boost never exceeds the budget
+  (the single-best-file guarantee belongs to the seed stage only).
+
+The CLI prints each chosen file's score with its components
+(`tfidf / symbol / graph`), and bundle manifests from `task` carry
+matching `score` and `score_components` fields per selected file
+(additive; other bundles are unchanged).
+
 ### Profiles: `.ghostslice.json` (v0.2)
 
 Drop this in a project root and every command picks it up automatically:
@@ -384,7 +415,7 @@ src/ghostslice/
   fit.py        auto-fit budget downgrades for export/task --fit (v0.5)
   bundlediff.py bundle-vs-bundle diff by manifest (v0.5)
   profile.py    .ghostslice.json profile loader
-  selection.py  task TF-IDF keyword / git-diff context selection
+  selection.py  task TF-IDF + symbol + graph keyword / git-diff context selection
   ledger.py     .ghostslice-history.jsonl savings ledger
   mcp_server.py stdio MCP server (v0.3)
   pricing.py    local prices.json loader + cost estimator

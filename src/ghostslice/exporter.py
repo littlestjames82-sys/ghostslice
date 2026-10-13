@@ -42,7 +42,8 @@ def build_bundle(root: str | Path, out: str | Path,
                  record_history: bool = True,
                  exclude_secrets: bool = False,
                  fit: int | None = None,
-                 fit_protect_selections: bool = True) -> dict:
+                 fit_protect_selections: bool = True,
+                 task_scores: dict | None = None) -> dict:
     """Slice `root` into bundle dir `out`. Returns the manifest dict.
 
     Mode precedence: explicit `selections` > profile modes (`.ghostslice.json`)
@@ -75,6 +76,11 @@ def build_bundle(root: str | Path, out: str | Path,
         Chat: an instruction header plus one `## File:` section per
         sliced file with the content in a fenced code block, ready to
         paste into a Copilot Chat session.
+
+    `task_scores` (v0.7): optional {path: {"tfidf", "symbol", "graph",
+    "total"}} breakdown from selection.select_for_task_breakdown. When
+    given, manifest entries for those paths gain additive `score` and
+    `score_components` fields; without it the manifest is unchanged.
     """
     selections = selections or {}
     preset = preset or (profile.preset if profile else None) or "claude-code"
@@ -130,14 +136,21 @@ def build_bundle(root: str | Path, out: str | Path,
         total_before += sliced.original_tokens
         total_after += sliced.sliced_tokens
         digest = hashlib.sha256(sliced.text.encode("utf-8")).hexdigest()
-        manifest_files.append({
+        manifest_entry = {
             "path": entry.path,
             "mode": mode,
             "language": entry.language,
             "original_tokens": sliced.original_tokens,
             "sliced_tokens": sliced.sliced_tokens,
             "sha256": digest,
-        })
+        }
+        if task_scores and entry.path in task_scores:
+            bd = task_scores[entry.path]
+            manifest_entry["score"] = bd["total"]
+            manifest_entry["score_components"] = {
+                "tfidf": bd["tfidf"], "symbol": bd["symbol"], "graph": bd["graph"],
+            }
+        manifest_files.append(manifest_entry)
         if mode == "exclude" or not sliced.text:
             continue
         dest = files_dir / entry.path

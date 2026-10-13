@@ -34,7 +34,7 @@ from .pricing import estimate_cost, get_model, load_prices, models, preflight
 from .profile import PRESETS, load_profile
 from .scanner import scan
 from .secrets_scan import scan_scan_result, scan_text
-from .selection import select_for_diff, select_for_task
+from .selection import select_for_diff, select_for_task, select_for_task_breakdown
 from .slicer import MODES, slice_text
 
 
@@ -433,22 +433,28 @@ def main(argv: list[str] | None = None) -> int:
         if bool(args.task) == bool(args.diff):
             print("task: give exactly one of --task or --diff", file=sys.stderr)
             return 2
+        task_scores = None
         if args.diff:
             result, selections, chosen, changed = select_for_diff(args.path, profile)
             print(f"Changed files: {len(changed)}; with direct dependencies: {len(chosen)}")
             include = set(chosen)
         else:
-            result, selections, chosen, scores = select_for_task(
+            result, selections, chosen, breakdown = select_for_task_breakdown(
                 args.path, args.task, budget=args.budget, profile=profile)
             print(f"Selected {len(chosen)} files for task: {args.task!r}")
             for rel in chosen:
-                print(f"  score {scores.get(rel, 0):>8.2f}  {rel}  ({selections[rel]})")
+                bd = breakdown.get(rel, {})
+                print(f"  score {bd.get('total', 0):>8.2f}  "
+                      f"(tfidf {bd.get('tfidf', 0):.2f}, symbol {bd.get('symbol', 0):.2f}, "
+                      f"graph {bd.get('graph', 0):.2f})  {rel}  ({selections[rel]})")
             include = set(chosen)
+            task_scores = {rel: breakdown[rel] for rel in chosen if rel in breakdown}
         _warn_secrets([f for f in scan_scan_result(result) if f["path"] in include],
                       heading="WARNING: possible secrets in selected files")
         manifest = build_bundle(args.path, args.out, selections=selections,
                                 include=include, profile=profile, preset=args.preset,
-                                fit=args.fit, fit_protect_selections=False)
+                                fit=args.fit, fit_protect_selections=False,
+                                task_scores=task_scores)
         model = get_model(prices, args.model)
         pf = preflight(manifest["total_original_tokens"], manifest["total_sliced_tokens"], model, prices)
         print(f"Bundle: {args.out} (preset: {manifest.get('preset')})")
