@@ -6,6 +6,7 @@ Commands:
   ghostslice slice        <path> --mode MODE -o <dir>
   ghostslice task         <path> (--task "words" | --diff) [--budget N] [--fit N] -o <bundle> [--preset P]
   ghostslice export       <path> -o <bundle> [--mode MODE] [--model ID] [--preset P] [--fit N]
+  ghostslice watch        <path> [--export] [-o <bundle>] [--interval S] [--debounce S] [--once] [--max-events N] [--fit N]
   ghostslice check-budget <path> [--max-tokens N]
   ghostslice check        <bundle>
   ghostslice diff         <bundleA> <bundleB> [--json]
@@ -21,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -167,6 +169,29 @@ def main(argv: list[str] | None = None) -> int:
     p_explain.add_argument("file", help="file path relative to the project root")
     p_explain.add_argument("--mode", choices=MODES, default=None,
                            help="explicit mode override to explain (as export --mode would apply)")
+
+    p_watch = sub.add_parser("watch", help="watch a project: rescan on change, print estimated-token deltas, optionally re-export the bundle")
+    p_watch.add_argument("path")
+    p_watch.add_argument("-o", "--out", default=None,
+                         help="bundle directory to rewrite on change (implies --export; default with --export: <project>/.claude_context)")
+    p_watch.add_argument("--export", action="store_true",
+                         help="write the bundle at startup and after every settled change")
+    p_watch.add_argument("--interval", type=float, default=1.0,
+                         help="poll interval in seconds (default 1.0)")
+    p_watch.add_argument("--debounce", type=float, default=None,
+                         help="quiet window in seconds before a change settles "
+                              "(default: max(1.0, 2 x interval)); 0 settles on the first differing poll")
+    p_watch.add_argument("--once", action="store_true",
+                         help="take an initial snapshot, poll once after one interval, report any change, and exit")
+    p_watch.add_argument("--max-events", type=int, default=None,
+                         help="exit after N settled change events (scripting/tests)")
+    p_watch.add_argument("--mode", choices=MODES, default=None,
+                         help="with --export: apply this mode to slicable files, as in export")
+    p_watch.add_argument("--preset", choices=PRESETS, default=None)
+    p_watch.add_argument("--exclude-secrets", action="store_true",
+                         help="with --export: force-exclude files flagged by the secret guard")
+    p_watch.add_argument("--fit", type=int, default=None, metavar="N",
+                         help="with --export: auto-fit the bundle to N estimated tokens, as in export --fit")
 
     p_budget = sub.add_parser("check-budget", help="exit non-zero if the selected context exceeds a token budget (CI gate)")
     p_budget.add_argument("path")
@@ -451,6 +476,39 @@ def main(argv: list[str] | None = None) -> int:
         check = validate_bundle(args.out)
         print(f"Validation: {'OK' if check['ok'] else 'FAILED: ' + '; '.join(check['errors'])}")
         return 0 if check["ok"] and fitted else 1
+
+    if args.cmd == "watch":
+        if not math.isfinite(args.interval) or args.interval <= 0:
+            print("watch: --interval must be a finite number > 0", file=sys.stderr)
+            return 2
+        if args.debounce is not None and (not math.isfinite(args.debounce) or args.debounce < 0):
+            print("watch: --debounce must be a finite number >= 0", file=sys.stderr)
+            return 2
+        if args.max_events is not None and args.max_events < 1:
+            print("watch: --max-events must be >= 1", file=sys.stderr)
+            return 2
+        if args.fit is not None and args.fit <= 0:
+            print("watch: --fit must be > 0", file=sys.stderr)
+            return 2
+        from .watch import run_watch
+        try:
+            run_watch(args.path, out=args.out,
+                      export=args.export or args.out is not None,
+                      interval=args.interval, debounce=args.debounce,
+                      once=args.once, max_events=args.max_events,
+                      fit=args.fit, preset=args.preset,
+                      default_mode=args.mode,
+                      exclude_secrets=args.exclude_secrets,
+                      profile=profile)
+        except FileNotFoundError:
+            print(f"watch: no such project: {args.path}", file=sys.stderr)
+            return 2
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        except KeyboardInterrupt:
+            pass  # run_watch normally handles this; belt and braces for a clean exit 0
+        return 0
 
     if args.cmd == "check-budget":
         budget = args.max_tokens if args.max_tokens is not None else profile.budget_tokens

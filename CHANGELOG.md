@@ -3,6 +3,31 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [0.6.0] - 2026-10-13
+### Added
+- Watch mode: `ghostslice watch <project>` — stdlib polling watcher
+  (no new dependencies). Snapshots scanned files (mtime/size/estimated
+  tokens) every `--interval` seconds (default 1) and, after a debounce
+  quiet window (default the larger of 1s and 2 poll cycles;
+  `--debounce 0` settles immediately), prints a compact delta:
+  added/removed/changed files and estimated-token totals before ->
+  after. Editor/build bursts coalesce into one settled event.
+- `--export` / `-o <bundle>` (implies export): bundle written at
+  startup and after every settled change via the same build_bundle
+  path as `export` (profile, `--preset`, `--mode`, `--fit`,
+  `--exclude-secrets` honoured; exactly one savings-ledger record per
+  settled export; an unfittable/invalid bundle is reported and the
+  watcher keeps running).
+- Loop-proofing: the bundle directory inside the project is excluded
+  from the watcher's own change detection, and the ledger file is
+  scanner-ignored, so watch writes never trigger events. The bundle
+  output directory may not be the project root itself (exit 2).
+- Scripting exits: `--once` (one snapshot-compare poll, then exit)
+  and `--max-events N`. Ctrl-C exits 0 with a session summary
+  (duration, polls, change events, exports written). Watching a path
+  that does not exist exits 2; a project deleted mid-watch is
+  reported per-poll and the session keeps its last snapshot.
+
 ## [0.5.0] - 2026-10-13
 ### Added
 - Auto-fit budget export: `ghostslice export --fit N` (and `task

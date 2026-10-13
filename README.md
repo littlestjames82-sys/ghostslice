@@ -249,6 +249,41 @@ Every export appends one line to `.ghostslice-history.jsonl` in the
 project (scanner-ignored). `ghostslice history ~/my-project` and the
 dashboard total the estimated savings across runs.
 
+### Watch mode (v0.6)
+
+```bash
+ghostslice watch ~/my-project                                  # report changes + estimated-token deltas
+ghostslice watch ~/my-project --export                         # also rewrite .claude_context on every settled change
+ghostslice watch ~/my-project -o /tmp/ctx --interval 2 --fit 20000 --exclude-secrets
+ghostslice watch ~/my-project --once                           # snapshot, poll once, report, exit (scripting)
+```
+
+Polling watcher (stdlib only, no watchdog dependency). It snapshots
+the scanned files every `--interval` seconds (default 1) and reports
+a compact delta (files added/removed/changed, estimated tokens
+before -> after) once the tree has stayed quiet for the debounce
+window (default: the larger of 1s and 2 poll cycles; `--debounce 0`
+settles on the first differing poll), so editor/build bursts coalesce
+into one event. With `--export` (or `-o`, which implies it) the
+bundle is written at startup and after every settled change, exactly
+like `ghostslice export`: profile, `--preset`, `--mode`, `--fit`, and
+`--exclude-secrets` all apply, each settled export appends at most
+one ledger record (one per settled export in normal operation), and
+an unfittable or invalid bundle is reported without stopping the
+watcher. Watch-written bundles also exclude the bundle directory
+itself from their contents when it lives inside the project.
+
+The watcher is loop-proof: the bundle directory (when inside the
+project) is excluded from its own change detection and the ledger is
+scanner-ignored, so its own writes never trigger events. The bundle
+output may not be the project root itself (rejected with exit 2).
+With a custom bundle name inside the project, plain scans can still
+see a previous bundle's files; prefer the default `.claude_context`
+name (scanner-ignored) or a path outside the project. The profile is
+loaded once at startup; edit `.ghostslice.json` and restart the watch
+to apply it. `--max-events N` exits after N settled events. Ctrl-C
+exits 0 with a session summary (duration, polls, events, exports).
+
 ### MCP server (v0.3)
 
 ```bash
@@ -354,6 +389,7 @@ src/ghostslice/
   mcp_server.py stdio MCP server (v0.3)
   pricing.py    local prices.json loader + cost estimator
   exporter.py   bundle builder + validator (presets: claude-code/aider/generic/cursor/copilot)
+  watch.py      polling watch mode: debounced rescan + auto re-export (v0.6)
   server.py     stdlib http.server dashboard API
   dashboard.html  single-page dashboard UI (violet accent #6716f3)
   cli.py        ghostslice command line
