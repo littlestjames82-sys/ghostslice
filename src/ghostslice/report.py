@@ -12,7 +12,7 @@ from pathlib import Path
 from .duplicates import find_duplicates
 from .exporter import estimate_context_tokens
 from .graph import build_graph, recommendations
-from .ledger import summary as ledger_summary
+from .ledger import analytics as ledger_analytics
 from .pricing import estimate_cost, get_model, load_prices
 from .profile import load_profile
 from .scanner import scan
@@ -34,6 +34,71 @@ def _e(x) -> str:
     return html.escape(str(x), quote=True)
 
 
+def _history_svg(runs: list[dict]) -> str:
+    """Inline SVG chart of ledger runs: violet bars = saved tokens
+    per run (zero line drawn when a run saved negative), dark polyline
+    = after tokens on its own min/max scale (labelled as such). Pure
+    SVG: no JS, no external assets. Only numbers and ledger timestamps
+    are rendered, and the timestamps are escaped."""
+    width, height = 880, 200
+    top, bottom_pad, side = 20, 24, 8
+    plot_w = width - 2 * side
+    plot_h = height - top - bottom_pad
+    base_y = top + plot_h
+    saved = [r["saved_tokens"] for r in runs]
+    after = [r["after_tokens"] for r in runs]
+    smax = max(saved + [0])
+    smin = min(saved + [0])
+    srange = (smax - smin) or 1
+    zero_y = top + plot_h * (smax / srange)
+    slot = plot_w / len(runs)
+    bar_w = max(1.0, slot * 0.62)
+    parts = [
+        f"<svg width='{width}' height='{height}' viewBox='0 0 {width} {height}' "
+        f"role='img' aria-label='Savings history chart' "
+        f"style='max-width:100%;background:#faf9ff;border:1px solid #ddd;border-radius:6px'>",
+        f"<line x1='{side}' y1='{zero_y:.1f}' x2='{width - side}' y2='{zero_y:.1f}' "
+        "stroke='#bbb' stroke-width='1'/>",
+    ]
+    for i, v in enumerate(saved):
+        cx = side + slot * i + slot / 2
+        h = abs(v) / srange * plot_h
+        y = zero_y - h if v >= 0 else zero_y
+        parts.append(
+            f"<rect x='{cx - bar_w / 2:.1f}' y='{y:.1f}' width='{bar_w:.1f}' "
+            f"height='{h:.1f}' fill='#6716f3' opacity='0.85'>"
+            f"<title>run {i + 1}: saved {v:,} estimated tokens</title></rect>")
+    amin, amax = min(after), max(after)
+    arange = (amax - amin) or 1
+    pts = []
+    for i, v in enumerate(after):
+        cx = side + slot * i + slot / 2
+        cy = top + plot_h * (1 - (v - amin) / arange)
+        pts.append(f"{cx:.1f},{cy:.1f}")
+    parts.append(
+        f"<polyline points='{' '.join(pts)}' fill='none' stroke='#1c1b22' "
+        "stroke-width='2'/>")
+    for p in pts:
+        x, y = p.split(",")
+        parts.append(f"<circle cx='{x}' cy='{y}' r='2.5' fill='#1c1b22'/>")
+    first_at = _e((runs[0].get("at") or "?")[:10])
+    last_at = _e((runs[-1].get("at") or "?")[:10])
+    parts.append(
+        f"<text x='{side}' y='13' font-size='11' fill='#555'>saved per run: "
+        f"max {smax:,}</text>")
+    parts.append(
+        f"<text x='{width - side}' y='13' font-size='11' fill='#555' "
+        f"text-anchor='end'>after tokens (own scale): {amin:,}–{amax:,}</text>")
+    parts.append(
+        f"<text x='{side}' y='{height - 6}' font-size='11' fill='#555'>"
+        f"{first_at}</text>")
+    parts.append(
+        f"<text x='{width - side}' y='{height - 6}' font-size='11' fill='#555' "
+        f"text-anchor='end'>{last_at}</text>")
+    parts.append("</svg>")
+    return "".join(parts)
+
+
 def build_report(root, model_id: str = "claude-sonnet") -> str:
     profile = load_profile(root)
     matcher = profile.is_ignored if profile.path else None
@@ -49,7 +114,31 @@ def build_report(root, model_id: str = "claude-sonnet") -> str:
         model = get_model(prices, "claude-sonnet")
     before, after = estimate_context_tokens(root, profile=profile)
     cost_after = estimate_cost(after, model)
-    hist = ledger_summary(root)
+    hist = ledger_analytics(root, model=model, prices=prices)
+    if hist["runs"]:
+        hist_warn = ""
+        if hist["estimator"]["warning"]:
+            hist_warn = (f"<div class='warn'>{_e(hist['estimator']['warning'])}</div>")
+        if hist["corrupt_lines"]:
+            hist_warn += (f"<p>Skipped {hist['corrupt_lines']} corrupt ledger "
+                          "line(s); they are not counted below.</p>")
+        agg = hist["aggregates"]
+        history_html = (
+            "<h2>Savings history</h2>\n"
+            f"<p>{hist['runs']} recorded run(s); total saved "
+            f"{hist['total_saved_tokens']:,} estimated tokens "
+            f"({hist['total_before_tokens']:,} &rarr; "
+            f"{hist['total_after_tokens']:,}).</p>\n"
+            f"{hist_warn}"
+            f"{_history_svg(hist['runs_detail'])}\n"
+            f"<p>Bars: saved estimated tokens per run. Line: after tokens "
+            f"per run (own scale). Total estimated $ saved at "
+            f"{_e(model.get('name', model['id']))}: "
+            f"~${agg.get('total_saved_cost_usd', 0.0):.4f} "
+            f"(prices as of {_e(prices.get('as_of'))}, local snapshot, "
+            "not live; input rates).</p>")
+    else:
+        history_html = ""
     # v0.13: per-package subtotals, shown only for real monorepos.
     packages = summarize_packages(result)
     if len(packages) > 1:
@@ -120,9 +209,7 @@ Prices are a local, dated snapshot (as of {_e(prices.get('as_of'))}), not live.<
 <h2>Prune recommendations</h2>
 <table><tr><th>File</th><th>Tokens</th><th>Reason</th></tr>{rec_rows}</table>
 <p>Recommendations to review, not instructions: dynamic imports and framework wiring can hide real use.</p>
-<h2>Savings history</h2>
-<p>{hist['runs']} recorded run(s); total saved {hist['total_saved_tokens']:,} estimated tokens
-({hist['total_before_tokens']:,} &rarr; {hist['total_after_tokens']:,}).</p>
+{history_html}
 </body></html>
 """
 

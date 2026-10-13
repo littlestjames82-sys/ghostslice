@@ -82,6 +82,13 @@ METHOD = (
     "not exact tokenizer counts)"
 )
 
+# Short stamp for surfaces that record which estimator produced a
+# total (savings-ledger records from v0.14 on, bundle manifests carry
+# the full METHOD string). v1 = the raw split (pre-v0.10), v2 = the
+# calibrated method above. Totals across versions are NOT directly
+# comparable; the history analytics warn instead of trending silently.
+METHOD_VERSION = 2
+
 # family -> (factor, target chars/token on the golden corpus)
 FAMILY_CALIBRATION: dict[str, tuple[float, float]] = {
     "prose": (0.85, 4.00),

@@ -11,7 +11,7 @@ Commands:
   ghostslice lint         <path> [--json] [--strict]
   ghostslice check        <bundle>
   ghostslice diff         <bundleA> <bundleB> [--json]
-  ghostslice history      <path> [--json]
+  ghostslice history      <path> [--json] [--trend] [--model ID]
   ghostslice mcp                              (stdio MCP server, see mcp_server.py)
   ghostslice serve        <path> --port 8765
   ghostslice prices
@@ -30,6 +30,7 @@ from pathlib import Path
 from . import __version__
 from .exporter import SLICABLE, build_bundle, estimate_context_tokens, validate_bundle
 from .graph import build_graph, importers_of, recommendations
+from .ledger import analytics as ledger_analytics
 from .ledger import summary as ledger_summary
 from .pricing import estimate_cost, get_model, load_prices, models, preflight
 from .profile import PRESETS, load_profile
@@ -39,6 +40,62 @@ from .selection import select_for_diff, select_for_task, select_for_task_breakdo
 from .configslice import CONFIG_LANGUAGES
 from .slicer import MODES, slice_text
 from .tokens import METHOD as TOKEN_METHOD
+
+
+def _print_history_trend(data) -> None:
+    """--trend block for `ghostslice history`: per-run table with
+    deltas, aggregates, ASCII charts. $ figures use the payload's
+    model block (input rates; prices labelled as of their snapshot)."""
+    runs = data["runs_detail"]
+    if not runs:
+        print("\nNo recorded runs yet — nothing to trend.")
+        return
+    model = data.get("model") or {}
+    print(f"\nTrend ({len(runs)} run(s), oldest first; $ at "
+          f"{model.get('name', model.get('id'))}, {model.get('prices_note', '')}):")
+    header = (f"{'#':>3}  {'at (UTC)':<19}  {'kind':<7}  {'before':>9} -> "
+              f"{'after':>9}  {'saved':>9}  {'saved%':>6}  {'Δafter':>8}  "
+              f"{'$ saved':>8}  {'$ cum.':>8}")
+    print(header)
+    for r in runs:
+        at = (r["at"] or "?")[:19].replace("T", " ")
+        delta = "—" if r["delta_after_tokens"] is None else f"{r['delta_after_tokens']:+,}"
+        print(f"{r['index'] + 1:>3}  {at:<19}  {(r['kind'] or '?'):<7}  "
+              f"{r['before_tokens']:>9,} -> {r['after_tokens']:>9,}  "
+              f"{r['saved_tokens']:>9,}  {r['saved_pct']:>5.1f}%  {delta:>8}  "
+              f"{r.get('saved_cost_usd', 0.0):>8.4f}  "
+              f"{r.get('cumulative_saved_cost_usd', 0.0):>8.4f}")
+    agg = data["aggregates"]
+    print(f"\nSaved % per run: mean {agg['mean_saved_pct']:.2f}%, "
+          f"median {agg['median_saved_pct']:.2f}%")
+    if agg["best_run"] and agg["worst_run"]:
+        b, w = agg["best_run"], agg["worst_run"]
+        print(f"Best run: #{b['index'] + 1} saved {b['saved_tokens']:,} "
+              f"({b['saved_pct']:.1f}%); worst run: #{w['index'] + 1} saved "
+              f"{w['saved_tokens']:,} ({w['saved_pct']:.1f}%)")
+    if agg["after_change_tokens"] is not None:
+        pct = agg["after_change_pct"]
+        pct_txt = f", {pct:+.1f}%" if pct is not None else ""
+        print(f"Context size (after tokens), first -> last run: "
+              f"{agg['first_after_tokens']:,} -> {agg['last_after_tokens']:,} "
+              f"({agg['after_change_tokens']:+,} tokens{pct_txt})")
+    if agg["span_days"] is not None:
+        if agg["span_days"] < 1:
+            print(f"Span: {agg['span_days'] * 24:.1f} hour(s)")
+        elif agg["runs_per_week"] is not None:
+            print(f"Span: {agg['span_days']:.1f} day(s), "
+                  f"~{agg['runs_per_week']:.1f} run(s)/week")
+        else:
+            print(f"Span: {agg['span_days']:.1f} day(s)")
+    if agg.get("total_saved_cost_usd") is not None:
+        print(f"Total estimated $ saved: ~${agg['total_saved_cost_usd']:.4f}")
+    charts = data["charts"]
+    saved_vals = [r["saved_tokens"] for r in runs]
+    after_vals = [r["after_tokens"] for r in runs]
+    print(f"\nSaved tokens per run:  {charts['saved_tokens_sparkline']}  "
+          f"(min {min(saved_vals):,}, max {max(saved_vals):,})")
+    print(f"After tokens per run:  {charts['after_tokens_sparkline']}  "
+          f"(min {min(after_vals):,}, max {max(after_vals):,})")
 
 
 def _scan_with_profile(path, profile):
@@ -257,6 +314,11 @@ def main(argv: list[str] | None = None) -> int:
     p_hist = sub.add_parser("history", help="savings ledger summary for a project")
     p_hist.add_argument("path")
     p_hist.add_argument("--json", action="store_true")
+    p_hist.add_argument("--trend", action="store_true",
+                        help="per-run trend table with deltas, aggregates, and ASCII charts")
+    p_hist.add_argument("--model", default=None,
+                        help="model id from prices.json for estimated $ saved "
+                             "(default: profile model or claude-sonnet)")
 
     p_cal = sub.add_parser("calibrate", help="per-language-family token calibration report (raw vs calibrated estimates)")
     p_cal.add_argument("path")
@@ -650,13 +712,32 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if check["ok"] else 1
 
     if args.cmd == "history":
-        summ = ledger_summary(args.path)
+        try:
+            model = get_model(prices, args.model or profile.model or "claude-sonnet")
+        except KeyError as exc:
+            print(f"history: {exc}", file=sys.stderr)
+            return 2
+        data = ledger_analytics(args.path, model=model, prices=prices)
         if args.json:
-            print(json.dumps(summ, indent=2))
+            print(json.dumps(data, indent=2))
             return 0
-        print(f"Savings ledger for {args.path}: {summ['runs']} recorded run(s)")
-        print(f"  Total before: {summ['total_before_tokens']:,}  after: {summ['total_after_tokens']:,}  "
-              f"saved: {summ['total_saved_tokens']:,} estimated tokens")
+        # Default block: the plain summary, unchanged in shape.
+        print(f"Savings ledger for {args.path}: {data['runs']} recorded run(s)")
+        print(f"  Total before: {data['total_before_tokens']:,}  after: {data['total_after_tokens']:,}  "
+              f"saved: {data['total_saved_tokens']:,} estimated tokens")
+        if data["corrupt_lines"]:
+            print(f"  Warning: skipped {data['corrupt_lines']} corrupt ledger line(s) "
+                  "in .ghostslice-history.jsonl (not counted).")
+        if data["estimator"]["warning"]:
+            print(f"  Warning: {data['estimator']['warning']}")
+        if args.model:
+            agg = data["aggregates"]
+            if agg.get("total_saved_cost_usd") is not None:
+                print(f"  Total estimated $ saved at {model.get('name', model['id'])}: "
+                      f"~${agg['total_saved_cost_usd']:.4f} "
+                      f"({data['model']['prices_note']})")
+        if args.trend:
+            _print_history_trend(data)
         return 0
 
     if args.cmd == "serve":

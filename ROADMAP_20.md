@@ -24,7 +24,7 @@ Baseline: v0.5.0, 149 tests passed.
 | G6 | Context lint: rule engine for context waste (oversize, generated, vendored, minified, giant lines) | v0.11.0 | done |
 | G7 | Generated/minified/vendored detection wired into scan, graph, export (opt-in auto-modes) | v0.12.0 | done |
 | G8 | Monorepo support: workspace detection (npm/Cargo/go/pyproject), per-package subtotals everywhere | v0.13.0 | done |
-| G9 | History analytics: trends, per-model $ saved, ASCII chart, JSON export + savings-history chart embedded in the HTML report (Ryan's mockups, Oct 13) | v0.14.0 | pending |
+| G9 | History analytics: trends, per-model $ saved, ASCII chart, JSON export + savings-history chart embedded in the HTML report (Ryan's mockups, Oct 13) | v0.14.0 | done |
 | G10 | `init` wizard: analyze a project and generate a tuned .ghostslice.json (non-interactive --yes mode) | v0.15.0 | pending |
 | G11 | New bundle formats: Anthropic-style XML bundle + JSON bundle presets | v0.16.0 | pending |
 | G12 | Redact-in-place export: --redact-secrets replaces secret values with placeholders instead of excluding files | v0.17.0 | pending |
@@ -224,3 +224,30 @@ the audit findings that drove the two improvement rounds.
   and single-line flow-style `packages: [...]` is parsed;
   remaining TOML-lite limits and the all-or-nothing fallback
   reviewed and accepted.
+- G9 (v0.14.0) DONE Oct 13, 2026: history analytics shipped —
+  `history --trend` (per-run table with Δafter, $ saved per run and
+  cumulative at the model's INPUT rate with the dated-snapshot
+  label, mean/median saved %, best/worst, first→last context
+  change, ASCII sparklines downsampled to 60 buckets), `--json`
+  analytics payload (summary keys kept; runs_detail / aggregates /
+  charts / corrupt_lines / estimator / model added), same payload
+  on /api/history and the scan payload, and the HTML report embeds
+  an inline-SVG savings chart (saved bars on a shared zero line,
+  after-token line on its own labelled scale), the section absent
+  when no ledger exists. Ledger records are now stamped
+  `"estimator": "v2"` (tokens.METHOD_VERSION); any history that is
+  not uniformly one stamped version gets an "Estimator mix"
+  warning (pre-v0.14 unstamped records cannot be split v1 vs v2)
+  on CLI, JSON, and report. Corrupt/non-object/non-numeric ledger
+  lines are counted and skipped (the old reader crashed on a
+  non-object line). Tests 398 -> 427 (29 new). Audit rounds
+  (audits/G09_audit.md): round 1 headline fixes — cumulative $
+  summed display-rounded per-run values and disagreed with the
+  token-total $ (0.7620 vs 0.7619 on this repo's own ledger; now
+  raw accumulation, equal by construction, pinned), runs/week
+  extrapolated from sub-day spans was noise (now gated to spans
+  >= 1 day; sub-day spans print as hours), after-change line
+  formatting, and a tautological no-model test tightened.
+  Round 2 verified the $ invariant on the real ledger and pinned
+  best/worst tie -> earliest run and empty-ledger CLI --json;
+  _input_cost docstring corrected.

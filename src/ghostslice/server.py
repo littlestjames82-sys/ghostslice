@@ -9,8 +9,8 @@ from urllib.parse import parse_qs, urlparse
 
 from .exporter import SLICABLE, build_bundle
 from .graph import build_graph, recommendations
-from .ledger import summary as ledger_summary
-from .pricing import load_prices
+from .ledger import analytics as ledger_analytics
+from .pricing import get_model, load_prices
 from .profile import load_profile
 from .scanner import scan
 from .secrets_scan import scan_scan_result
@@ -19,6 +19,19 @@ from .tokens import METHOD as TOKEN_METHOD
 from .workspaces import summarize_packages
 
 _DASHBOARD = Path(__file__).with_name("dashboard.html")
+
+
+def history_payload(root, profile=None) -> dict:
+    """v0.14: the full ledger analytics payload (summary keys plus
+    trend/aggregates/charts), priced at the profile's model (default
+    claude-sonnet) from the local dated prices snapshot."""
+    prices = load_prices()
+    try:
+        model = get_model(prices, (profile.model if profile else None)
+                          or "claude-sonnet")
+    except KeyError:
+        model = None
+    return ledger_analytics(root, model=model, prices=prices)
 
 
 def _default_mode(entry) -> str:
@@ -82,7 +95,7 @@ class _State:
             "packages": summarize_packages(self.scan),
             "profile": self.profile.to_dict(),
             "recommendations": self.recommendations,
-            "history": ledger_summary(self.root),
+            "history": history_payload(self.root, self.profile),
         }
 
 
@@ -126,7 +139,7 @@ def make_server(root: str, port: int = 8765, host: str = "127.0.0.1"):
             elif parsed.path == "/api/lint":
                 self._json(200, state.lint)
             elif parsed.path == "/api/history":
-                self._json(200, ledger_summary(state.root))
+                self._json(200, history_payload(state.root, state.profile))
             elif parsed.path == "/api/preview":
                 rel = (qs.get("path") or [""])[0]
                 mode = (qs.get("mode") or ["signatures"])[0]

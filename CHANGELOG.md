@@ -3,6 +3,45 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [0.14.0] - 2026-10-13
+### Added
+- History analytics (`ledger.analytics`): `ghostslice history
+  --trend` prints a per-run table (before → after, saved, saved %,
+  Δ after-tokens vs the previous run, estimated $ saved per run and
+  cumulative at the model's INPUT rate, labelled "prices as of …,
+  local snapshot, not live"), aggregates (mean/median saved %, best
+  and worst run, first→last context-size change, span; runs/week
+  only for spans of a day or more), and width-bounded ASCII
+  sparklines of saved and after tokens. `--model ID` picks the
+  pricing model (default: profile model or claude-sonnet);
+  `--json` returns the full analytics payload — summary keys
+  unchanged, plus `runs_detail`, `aggregates`, `charts`,
+  `corrupt_lines`, `estimator`, and `model` blocks. The dashboard
+  `/api/history` (and the scan payload's `history`) return the same
+  payload.
+- HTML report: the savings-history section now embeds an inline
+  SVG chart (saved-token bars on a shared zero line, after-token
+  line on its own labelled scale) plus the total estimated $
+  saved, whenever the project has a ledger; with no ledger the
+  section is absent.
+- Ledger records are stamped with the estimator version that
+  produced their totals (`"estimator": "v2"`; `tokens.METHOD_VERSION`).
+### Changed
+- Estimator honesty: a history that is not uniformly one stamped
+  version (any pre-v0.14 unstamped records, or several stamped
+  versions) is flagged with an "Estimator mix" warning on the CLI,
+  in the JSON payload, and in the HTML report — pre-v0.10 (v1) and
+  v0.10–v0.13 (v2) unstamped totals cannot be told apart, so trends
+  across them are labelled approximate instead of silently trended.
+- Ledger reading counts corrupt lines (bad JSON, non-object JSON,
+  non-numeric token fields) and skips them; `summary()` reports
+  them as `corrupt_lines`. (The old reader would have crashed on a
+  non-object line.)
+### Fixed
+- Trend $ consistency: per-run/cumulative dollars accumulate raw
+  values and round only for display, so the final cumulative always
+  equals the aggregate total (audit G09 F1).
+
 ## [0.13.0] - 2026-10-13
 ### Added
 - Monorepo / workspace support (`workspaces.py`): package

@@ -452,6 +452,45 @@ Every export appends one line to `.ghostslice-history.jsonl` in the
 project (scanner-ignored). `ghostslice history ~/my-project` and the
 dashboard total the estimated savings across runs.
 
+### History analytics (v0.14)
+
+```bash
+ghostslice history ~/my-project                 # plain totals (unchanged)
+ghostslice history ~/my-project --trend         # per-run table + charts
+ghostslice history ~/my-project --trend --model claude-opus
+ghostslice history ~/my-project --json          # full analytics payload
+```
+
+`--trend` prints each run oldest first (before → after, saved,
+saved %, the change in after-tokens versus the previous run, and
+estimated $ saved per run and cumulative), then aggregates: mean /
+median saved %, best and worst runs, the first→last change in
+context size, the span (weekly run rate only when the history spans
+at least a day), and ASCII sparklines of saved and after tokens
+across runs. Dollar figures use the model's **input** rate from the
+local prices snapshot (context is input tokens) and are labelled
+with its date: "prices as of …, local snapshot, not live".
+
+The JSON payload keeps the summary keys (`runs`,
+`total_before_tokens`, `total_after_tokens`, `total_saved_tokens`,
+`records`) and adds `runs_detail` (per-run saved %, deltas,
+cumulative tokens and $), `aggregates`, `charts` (the sparklines),
+`corrupt_lines`, an `estimator` block, and a `model` block when
+priced. The dashboard's `/api/history` returns the same payload.
+The HTML report embeds a savings-history chart (inline SVG bars for
+saved tokens, a line for after tokens) whenever the project has a
+ledger, and omits the section when it has none.
+
+**Estimator versions, honestly:** records written from v0.14 on are
+stamped with the estimator version that produced their totals
+(`"estimator": "v2"`, the calibrated method). Older records carry
+no stamp, and pre-v0.10 (v1) totals cannot be told apart from
+v0.10–v0.13 (v2) totals — so any history that is not uniformly one
+stamped version is flagged with an "Estimator mix" warning instead
+of being trended as if its totals were directly comparable.
+Corrupt ledger lines (bad JSON, non-object, non-numeric token
+fields) are skipped and counted, never fatal.
+
 ### Calibration report (v0.10)
 
 ```bash
