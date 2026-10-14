@@ -372,15 +372,18 @@ class TestBigTreeSpeedup:
         # measurement during the G15 build, taken under load:
         # cold-off ~2.26s CPU vs warm ~0.45s CPU (~5x); the 2x
         # threshold keeps a wide margin on the resource actually
-        # being saved. Warm side is the min of 2 runs.
+        # being saved. Both sides are the min of 2 runs.
         import shutil
         out = tmp_path / "bundle"
         clear_cache(big_tree)
-        c0 = time.process_time()
-        _export(big_tree, out, use_cache=False)
-        cold = time.process_time() - c0
-        cold_tree = _norm(_tree(out))
-        shutil.rmtree(out)
+        cold_runs = []
+        for _ in range(2):
+            c0 = time.process_time()
+            _export(big_tree, out, use_cache=False)
+            cold_runs.append(time.process_time() - c0)
+            cold_tree = _norm(_tree(out))
+            shutil.rmtree(out)
+        cold = min(cold_runs)
         _export(big_tree, out)  # fills the cache
         warm_runs = []
         for _ in range(2):
