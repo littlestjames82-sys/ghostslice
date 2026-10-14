@@ -404,9 +404,13 @@ class SizeGuardTests(unittest.TestCase):
         deep_py = "x = " + "(" * 3000 + "1" + ")" * 3000 + "\n"
         for mode in MODES:
             slice_text("x.py", deep_py, mode)  # must not raise
-        deep_json = '{"a": ' * 1200 + "1" + "}" * 1200
+        deep_json = '{"a": ' * 300 + "1" + "}" * 300
         r = slice_text("x.json", deep_json, "structure")
         json.loads(r.text)  # shaped with the depth-cap placeholder
+        self.assertNotEqual(r.text, deep_json)
+        # Past the interpreter's own parse limit (<3.12) json.loads
+        # fails and the slicer falls back to full; it must not raise.
+        slice_text("x.json", '{"a": ' * 1200 + "1" + "}" * 1200, "structure")
         huge_json = '{"a": ' * 20000 + "1" + "}" * 20000
         r = slice_text("x.json", huge_json, "structure")
         self.assertEqual(r.text, huge_json)  # loads fails -> full fallback

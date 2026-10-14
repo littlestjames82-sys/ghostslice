@@ -23,4 +23,9 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-ghostslice = ["dashboard.html", "prices.json"]
+ghostslice = ["dashboard.html", "prices.json", "py.typed"]
+
+[project.urls]
+Homepage = "https://github.com/littlestjames82-sys/ghostslice"
+Issues = "https://github.com/littlestjames82-sys/ghostslice/issues"
+Changelog = "https://github.com/littlestjames82-sys/ghostslice/blob/main/CHANGELOG.md"
