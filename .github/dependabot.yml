@@ -1,0 +1,25 @@
+# Dependabot configuration for GhostSlice.
+#
+# GhostSlice has zero runtime dependencies by design (pyproject.toml:
+# dependencies = []), so there is nothing for Dependabot to bump in
+# the Python package itself. What it does watch:
+#   - github-actions: the actions used by .github/workflows
+#     (checkout, setup-python, upload-artifact) — security and
+#     maintenance updates arrive as pull requests.
+#   - pip: a guard rail. If a dependency is ever introduced, update
+#     PRs start flowing automatically instead of landing silently.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "ci"
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    commit-message:
+      prefix: "deps"
