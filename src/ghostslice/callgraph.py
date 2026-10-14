@@ -49,7 +49,13 @@ set and have no attribute-name call/reference anywhere:
          named `main` is rooted — app.py is half the world's
          Flask apps and most of its functions are not entry
          points), [project.scripts] targets from pyproject.toml,
-         names exported via a module's `__all__`, functions in
+         names exported via a module's `__all__` (plus the direct
+         methods of classes so exported: a public class's methods
+         are the API surface its consumers call), the contract
+         entry points of a plugin module (a top-level `register`,
+         or the attribute style — LANGUAGE/EXTENSIONS assignments
+         plus a `slice_text` def; the plugin loader invokes them,
+         so the loader is their caller), functions in
          test files and conftest.py, functions carrying a
          framework-style decorator (an attribute/call decorator,
          or one imported into the module — route handlers, pytest
@@ -136,6 +142,7 @@ class _File:
     all_names: set = field(default_factory=set)        # __all__ contents
     framework_roots: set = field(default_factory=set)  # qualified names
     lambda_names: set = field(default_factory=set)     # qualified names
+    plugin_roots: set = field(default_factory=set)     # qualified names
 
 
 def _dotted(node) -> str | None:
@@ -207,7 +214,37 @@ def _collect_file_facts(fi: _File) -> None:
             for elt in value.elts:
                 if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
                     fi.all_names.add(elt.value)
+    _collect_plugin_roots(fi, tree.body)
     _collect_classes(fi, tree.body, "")
+
+
+# The plugin contract's entry points (plugins.py): a plugin module
+# is invoked by the loader, never by project code, so its contract
+# functions are roots — the loader is their caller. Detection is
+# the contract itself, exactly what the loader accepts: a top-level
+# `register` function, or the attribute style (module-level LANGUAGE
+# and EXTENSIONS assignments plus a top-level `slice_text` def).
+# Only the contract names are rooted; everything they call or
+# reference becomes reachable through them as usual, and a helper
+# they never touch still flags — presenting the contract makes a
+# module loadable as a plugin, it does not bless its dead code.
+_PLUGIN_ENTRY_POINTS = ("register", "slice_text", "outline")
+
+
+def _collect_plugin_roots(fi: _File, body) -> None:
+    assigned: set = set()
+    defs: set = set()
+    for node in body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    assigned.add(target.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            defs.add(node.name)
+    if "register" in defs or (
+            {"LANGUAGE", "EXTENSIONS"} <= assigned
+            and "slice_text" in defs):
+        fi.plugin_roots = defs & set(_PLUGIN_ENTRY_POINTS)
 
 
 def _collect_classes(fi: _File, body, prefix: str) -> None:
@@ -980,11 +1017,26 @@ class CallGraph:
             entry = by_path.get(fi.path)
             is_test = bool(entry and entry.is_test) or \
                 PurePosixPath(fi.path).name == "conftest.py"
+            exported_classes = {
+                sym.qualified for sym in fi.symbols.values()
+                if sym.kind == "class" and sym.name in fi.all_names
+                and "." not in sym.qualified}
             for sym in fi.symbols.values():
                 if sym.qualified in fi.framework_roots:
                     roots.add(sym.id)
+                if sym.qualified in fi.plugin_roots:
+                    roots.add(sym.id)
                 if sym.name in fi.all_names and "." not in sym.qualified:
                     roots.add(sym.id)
+                if sym.kind == "method" and "." in sym.qualified:
+                    # A class named in __all__ is public API: its
+                    # direct methods are the surface consumers call
+                    # (the PluginAPI a plugin's register() receives
+                    # is the canonical case), so they are roots,
+                    # not dead code.
+                    parent = sym.qualified.rsplit(".", 1)[0]
+                    if parent in exported_classes:
+                        roots.add(sym.id)
                 if is_test and sym.kind in ("function", "method"):
                     roots.add(sym.id)
             # A class extending a base outside the project (an

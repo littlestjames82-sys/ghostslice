@@ -576,3 +576,16 @@ the audit findings that drove the two improvement rounds.
   COMPLETE: 20 goals, v0.6.0 -> v1.0.0, 149 -> 784 tests,
   every goal audited twice and improved twice, no PyPI
   publish, no announcements — those gates were never opened.
+- Post-marathon polish (v1.0.1) DONE Oct 13, 2026: self-lint 7 -> 5
+  warnings (the duplicated-prices pair fixed for real: root copy
+  removed, the packaged copy is the single price table,
+  pretty-printed; the remaining five warnings, including a new
+  L001 on the README this round's notes enlarged, are explained
+  in README "Known warnings on this repo"), call graph learned plugin-contract roots and
+  __all__ class surfaces (`calls --dead` on this repo: 10 false
+  positives -> 0), dashboard file table + recommendations now
+  render paths via textContent only (no innerHTML anywhere in the
+  page), consistency sweep over all 80 help strings. Tests
+  784 -> 795 (11 new; one existing pin updated, the release
+  version pin 1.0.0 -> 1.0.1). Audit:
+  audits/POLISH_101_audit.md.

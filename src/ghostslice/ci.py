@@ -52,8 +52,8 @@ from .tokens import METHOD as TOKEN_METHOD
 
 # Exact-duplicate groups below this many recoverable estimated
 # tokens are noise for a CI gate (small shared fixtures, tiny
-# config twins); at or above it the group warns. The repo's own
-# prices.json pair (379 tokens) sits deliberately under it.
+# config twins — this repo's own test fixtures live under it);
+# at or above it the group warns.
 DUP_FLOOR_TOKENS = 500
 
 CHECK_IDS = ("budget", "lint", "secrets", "fit", "duplicates")

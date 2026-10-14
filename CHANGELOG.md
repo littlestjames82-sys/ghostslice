@@ -3,6 +3,53 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [1.0.1] - 2026-10-13
+Polish release: no new features — the tool run on itself, and
+its own findings fixed. Audit: `audits/POLISH_101_audit.md`.
+
+### Fixed
+- **One price table.** `prices.json` existed twice (repo root and
+  inside the package), byte-identical and both exported (lint
+  L004). The repo-root copy is removed: `src/ghostslice/prices.json`
+  is the single source of truth (it is the copy shipped as package
+  data), the loader's checkout-root candidate is gone, and the
+  table is pretty-printed for hand-editing, which also removes
+  its giant-lines (L006) shape. A `prices.json` in the current
+  directory still overrides for that run, as before. Self-lint on
+  this repo: 7 warnings -> 5 (the two price-table warnings are
+  fixed; one new L001 appeared because this round's notes pushed
+  README.md just over the oversize threshold), the rest
+  explained in README "Known warnings on this repo".
+- **Call graph: plugin modules and public classes are roots.**
+  `calls --dead` flagged 10 false positives on this repo: the
+  example Lua plugin's functions (invoked by the plugin loader,
+  invisible to import reachability), the `PluginAPI` methods (the
+  surface a plugin's `register()` receives), and textio's public
+  `read_text_with_encoding`. The analyzer now roots the plugin
+  contract's entry points in any module presenting the contract
+  (a top-level `register`, or LANGUAGE/EXTENSIONS plus
+  `slice_text`) and the direct methods of classes named in a
+  module's `__all__`. Only the contract/public surface is rooted:
+  a genuinely dead helper inside a plugin file still flags.
+  textio also gained an explicit `__all__`. This repo now reports
+  0 dead candidates.
+- **Dashboard: no innerHTML anywhere.** The pre-existing file
+  table and prune recommendations rendered file paths through
+  `innerHTML` (the G17 preview/what-if surfaces already used
+  textContent). Rows, totals, recommendations, and treemap
+  labels are now built with createElement + textContent; a file
+  named with HTML metacharacters displays inertly. No visual
+  change.
+
+### Checked, no change
+- Consistency sweep: all 80 CLI help strings verified (verb
+  phrases, no trailing periods — the one capital start is the
+  acronym "CI"), README's feature map re-verified against
+  `--help` (25 commands, one line each), and probed error
+  messages (unknown model, missing project, bad budget, missing
+  cache) all exit 2 naming the problem and, where one exists,
+  the remedy.
+
 ## [1.0.0] - 2026-10-13
 The marathon release: GhostSlice 1.0 is the tool the twenty-goal
 run set out to build — a zero-dependency context optimizer that

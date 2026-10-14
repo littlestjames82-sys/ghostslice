@@ -1011,7 +1011,10 @@ the exit code is 0 unless a check fails. Doctor never writes.
 `completions` generates its scripts from the live argument
 parser, so the command and flag lists cannot drift from the CLI;
 the shipped copies live in `examples/completions/` and are
-pinned byte-equal to fresh output by the test suite.
+pinned byte-equal to fresh output by the test suite. They are
+generated files shipped as copyable examples, which is why
+GhostSlice's own lint flags them as generated content (see
+"Known warnings on this repo" under Troubleshooting).
 
 ### MCP server (v0.3)
 
@@ -1220,10 +1223,12 @@ parser-lite Lua signatures slicer with an outline), with notes in
   remain valid and name the old method in their manifest; budgets set
   with `check-budget` or a profile under v0.9 compare against
   calibrated totals from v0.10 on, so re-check them once.
-- **Prices are local and dated, never live.** `prices.json` (repo root
-  and `src/ghostslice/prices.json`) carries an `as_of` date (currently
-  2026-10-12) and editable per-model input/output rates. Nothing is
-  fetched. Verify rates with the provider before relying on a figure.
+- **Prices are local and dated, never live.** There is one price
+  table: `src/ghostslice/prices.json`, inside the package (shipped
+  as package data), carrying an `as_of` date (currently 2026-10-12)
+  and editable per-model input/output rates. A `prices.json` in the
+  current directory overrides it for that run. Nothing is fetched.
+  Verify rates with the provider before relying on a figure.
   Pre-flight cost counts context (input) tokens only.
 - **TypeScript/JavaScript slicing is parser-lite.** Python uses the real
   `ast` parser. TS/JS uses line scanning, regexes, and brace matching;
@@ -1323,6 +1328,33 @@ failure modes below and prints the remedy next to each finding.
   and limits"); the manifest records `source_encoding` for
   anything that was not UTF-8.
 
+### Known warnings on this repo
+
+`ghostslice lint .` on the GhostSlice repo itself reports zero
+errors and five warnings, each true and each explained:
+
+- **L001, `README.md`** — this file is 20,198 estimated tokens
+  at full mode, just over the 20,000 oversize threshold. It is
+  the product's whole manual (25 commands) in one file; slicing
+  it with GhostSlice itself is the intended way to read it into
+  an agent context.
+- **L003, `examples/plugins/lua_slicer.py`** — flagged as a prune
+  candidate because no project code imports it. It is the example
+  plugin: it is *loaded* by the plugin system, not imported, and
+  reachability cannot see the loader. It stays.
+- **L007, `examples/completions/ghostslice.bash` / `.zsh`** —
+  generated files included at full mode. They are the generated
+  completion scripts, shipped as the copyable examples of the
+  `completions` command; their whole content is the example.
+- **L006, `tests/fixtures/calibration/minified.sample`** — giant
+  lines. That is the fixture's job: it is the calibration corpus's
+  minified-shape sample, and the warning correctly describes it.
+
+Until v1.0.1 the lint also flagged a duplicated `prices.json`
+(repo root + package copy, L004) and its giant lines; the root
+copy was removed and the single remaining table pretty-printed,
+so those warnings are fixed, not explained.
+
 ## Tests
 
 ```bash
@@ -1358,6 +1390,7 @@ src/ghostslice/
   ledger.py     .ghostslice-history.jsonl savings ledger
   mcp_server.py stdio MCP server (v0.3)
   pricing.py    local prices.json loader + cost estimator
+  prices.json   the price table itself: local, dated, hand-editable (the only copy; pre-v1.0.1 a duplicate also sat at the repo root)
   exporter.py   bundle builder + validator (presets: claude-code/aider/generic/cursor/copilot/anthropic-xml/json)
   watch.py      polling watch mode: debounced rescan + auto re-export (v0.6)
   plugins.py    user slicer plugins: contract, opt-in loading, containment, failure discipline (v0.23)
@@ -1366,7 +1399,6 @@ src/ghostslice/
   server.py     stdlib http.server dashboard API
   dashboard.html  single-page dashboard UI (violet accent #6716f3)
   cli.py        ghostslice command line
-prices.json     editable local price table (dated)
 examples/plugins/  example user plugins: a parser-lite Lua slicer with outline (v0.23)
 examples/completions/  generated bash/zsh completion scripts (regenerate with `ghostslice completions`)
 ```

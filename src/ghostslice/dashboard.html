@@ -124,33 +124,98 @@ function heat(tokens, max){
 }
 function currentTokens(f){ return f.mode_tokens[f.mode] ?? f.tokens; }
 
+function statDiv(label, value, sub, accent){
+  // Numbers and labels only, built with textContent like everything
+  // else in this page: no innerHTML interpolation anywhere.
+  const d = document.createElement('div');
+  d.appendChild(document.createTextNode(label));
+  const b = document.createElement('b');
+  if (accent) b.className = 'accent';
+  b.textContent = value;
+  d.appendChild(b);
+  if (sub !== null) {
+    const s = document.createElement('span');
+    s.className = 'muted';
+    s.textContent = sub;
+    d.appendChild(s);
+  }
+  return d;
+}
+
 function render(){
   const max = Math.max(1, ...FILES.map(f => f.tokens));
   const before = FILES.reduce((s,f)=>s+f.tokens,0);
   const after  = FILES.reduce((s,f)=>s+currentTokens(f),0);
-  $('totals').innerHTML =
-    `<div>Before<b>${fmt(before)} tokens</b><span class="muted">~$${cost(before).toFixed(4)}</span></div>` +
-    `<div>After pruning<b class="accent">${fmt(after)} tokens</b><span class="muted">~$${cost(after).toFixed(4)}</span></div>` +
-    `<div>Saved<b>${fmt(before-after)} tokens</b><span class="muted">~$${(cost(before)-cost(after)).toFixed(4)}</span></div>` +
-    `<div>Files<b>${FILES.length}</b></div>`;
+  const totals = $('totals');
+  totals.replaceChildren(
+    statDiv('Before', fmt(before) + ' tokens', '~$' + cost(before).toFixed(4), false),
+    statDiv('After pruning', fmt(after) + ' tokens', '~$' + cost(after).toFixed(4), true),
+    statDiv('Saved', fmt(before-after) + ' tokens', '~$' + (cost(before)-cost(after)).toFixed(4), false),
+    statDiv('Files', String(FILES.length), null, false));
   if (PRICES) $('priceNote').textContent = 'Prices from local prices.json dated ' + PRICES.as_of + ' (not live). Pre-flight cost is input/context cost only.';
-  const tbody = $('rows'); tbody.innerHTML = '';
+  const tbody = $('rows'); tbody.replaceChildren();
   FILES.forEach((f, idx) => {
     const h = heat(f.tokens, max);
     const tr = document.createElement('tr');
     if (f.mode === 'exclude') tr.className = 'excluded';
-    tr.innerHTML =
-      `<td><input type="checkbox" ${f.mode==='exclude'?'':'checked'} data-act="toggle"></td>` +
-      `<td><div class="bar" style="width:${h.width};background:${h.color}"></div>` +
-      `<span class="path">${f.path}</span>${f.is_test?'<span class="tag">test</span>':''}${f.is_lockfile?'<span class="tag">lockfile</span>':''}` +
-      `<div class="muted">${f.language} · ${f.lines} lines</div></td>` +
-      `<td><select data-act="mode">${['full','signatures','interfaces','structure','headings','strip-tests','exclude'].map(m=>`<option ${m===f.mode?'selected':''}>${m}</option>`).join('')}</select></td>` +
-      `<td class="tokens">${fmt(currentTokens(f))}<div class="muted">of ${fmt(f.tokens)}</div></td>`;
-    tr.querySelector('[data-act="toggle"]').addEventListener('change', (e)=>{
+    // File paths and names are untrusted text: every cell is built
+    // with createElement + textContent, never innerHTML.
+    const tdToggle = document.createElement('td');
+    const toggle = document.createElement('input');
+    toggle.type = 'checkbox';
+    toggle.checked = f.mode !== 'exclude';
+    toggle.dataset.act = 'toggle';
+    tdToggle.appendChild(toggle);
+    tr.appendChild(tdToggle);
+    const tdMain = document.createElement('td');
+    const bar = document.createElement('div');
+    bar.className = 'bar';
+    bar.style.width = h.width;
+    bar.style.background = h.color;
+    tdMain.appendChild(bar);
+    const pathSpan = document.createElement('span');
+    pathSpan.className = 'path';
+    pathSpan.textContent = f.path;
+    tdMain.appendChild(pathSpan);
+    if (f.is_test) {
+      const tag = document.createElement('span');
+      tag.className = 'tag'; tag.textContent = 'test';
+      tdMain.appendChild(tag);
+    }
+    if (f.is_lockfile) {
+      const tag = document.createElement('span');
+      tag.className = 'tag'; tag.textContent = 'lockfile';
+      tdMain.appendChild(tag);
+    }
+    const meta = document.createElement('div');
+    meta.className = 'muted';
+    meta.textContent = f.language + ' · ' + f.lines + ' lines';
+    tdMain.appendChild(meta);
+    tr.appendChild(tdMain);
+    const tdMode = document.createElement('td');
+    const sel = document.createElement('select');
+    sel.dataset.act = 'mode';
+    ['full','signatures','interfaces','structure','headings','strip-tests','exclude'].forEach(m=>{
+      const o = document.createElement('option');
+      o.value = m; o.textContent = m;
+      sel.appendChild(o);
+    });
+    sel.value = f.mode;
+    tdMode.appendChild(sel);
+    tr.appendChild(tdMode);
+    const tdTokens = document.createElement('td');
+    tdTokens.className = 'tokens';
+    tdTokens.appendChild(document.createTextNode(fmt(currentTokens(f))));
+    const ofDiv = document.createElement('div');
+    ofDiv.className = 'muted';
+    ofDiv.textContent = 'of ' + fmt(f.tokens);
+    tdTokens.appendChild(ofDiv);
+    tr.appendChild(tdTokens);
+    toggle.addEventListener('change', (e)=>{
       f.mode = e.target.checked ? f.prev_mode || f.default_mode : 'exclude';
       if (e.target.checked) f.prev_mode = f.mode; render();
     });
-    tr.querySelector('[data-act="mode"]').addEventListener('change', (e)=>{ f.mode = e.target.value; render(); preview(f); });
+    sel.addEventListener('change', (e)=>{ f.mode = e.target.value; render(); preview(f); });
     tr.addEventListener('click', (e)=>{ if(e.target.tagName!=='SELECT' && e.target.tagName!=='INPUT') preview(f); });
     tbody.appendChild(tr);
   });
@@ -201,7 +266,7 @@ function toggleFile(f){
 
 function renderTreemap(max){
   const box = $('treemap');
-  box.innerHTML = '';
+  box.replaceChildren();
   const W = box.clientWidth || 600, H = box.clientHeight || 440;
   const groups = {};
   FILES.forEach(f=>{
@@ -232,9 +297,15 @@ function renderTreemap(max){
       d.style.background = h.color;
       d.title = r.file.path + ' · ' + fmt(r.file.tokens) + ' estimated tokens · mode: ' + r.file.mode + ' · click to ' + (r.file.mode === 'exclude' ? 'include' : 'exclude');
       if (r.w > 60 && r.h > 26) {
-        d.innerHTML = '<span class="tm-path"></span><br><span class="tm-tok"></span>';
-        d.querySelector('.tm-path').textContent = r.file.path.split('/').pop();
-        d.querySelector('.tm-tok').textContent = fmt(r.file.tokens) + ' tok';
+        const pathSpan = document.createElement('span');
+        pathSpan.className = 'tm-path';
+        pathSpan.textContent = r.file.path.split('/').pop();
+        const tokSpan = document.createElement('span');
+        tokSpan.className = 'tm-tok';
+        tokSpan.textContent = fmt(r.file.tokens) + ' tok';
+        d.appendChild(pathSpan);
+        d.appendChild(document.createElement('br'));
+        d.appendChild(tokSpan);
       }
       d.addEventListener('click', ()=>{ toggleFile(r.file); preview(r.file); });
       box.appendChild(d);
@@ -310,9 +381,27 @@ async function init(){
   const scan = await scanR.json(); PRICES = await pricesR.json();
   FILES = scan.files;
   const recs = scan.recommendations || [];
-  $('recs').innerHTML = recs.length ? recs.slice(0,10).map(r =>
-    `<div><span class="path">${r.path}</span> <span class="tag">${fmt(r.tokens)} tokens</span><br>${r.reason}</div>`).join('')
-    : 'No prune candidates found.';
+  // Recommendation paths and reasons are untrusted text too:
+  // textContent, never innerHTML (same rule as the file table).
+  const recsEl = $('recs');
+  recsEl.replaceChildren();
+  if (recs.length) {
+    recs.slice(0,10).forEach(r => {
+      const d = document.createElement('div');
+      const p = document.createElement('span');
+      p.className = 'path'; p.textContent = r.path;
+      d.appendChild(p);
+      d.appendChild(document.createTextNode(' '));
+      const t = document.createElement('span');
+      t.className = 'tag'; t.textContent = fmt(r.tokens) + ' tokens';
+      d.appendChild(t);
+      d.appendChild(document.createElement('br'));
+      d.appendChild(document.createTextNode(r.reason));
+      recsEl.appendChild(d);
+    });
+  } else {
+    recsEl.textContent = 'No prune candidates found.';
+  }
   const hist = scan.history || {runs:0,total_saved_tokens:0};
   $('history').textContent = hist.runs ? `${hist.runs} recorded export(s), ${fmt(hist.total_saved_tokens)} estimated tokens saved in total.`
     : 'No exports recorded for this project yet.';
