@@ -20,7 +20,7 @@
 # Install note: GhostSlice is NOT on PyPI. It installs straight
 # from its GitHub repo (zero dependencies, Python stdlib only,
 # Python 3.10+). Pin the ref after @ to a release tag (for example
-# @v0.24.0) if you want reproducible installs instead of main.
+# @v1.0.0) if you want reproducible installs instead of main.
 #
 # Artifact note: the report files below land in the workspace
 # root. Fresh CI checkouts are unaffected, but if you also run

@@ -3,6 +3,56 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [1.0.0] - 2026-10-13
+The marathon release: GhostSlice 1.0 is the tool the twenty-goal
+run set out to build — a zero-dependency context optimizer that
+scans, slices, prices, lints, redacts, and bundles project
+context for AI agents, with a dashboard, an MCP server, a plugin
+system, and a CI gate. New in this release:
+
+### Added
+- `ghostslice doctor`: one-screen environment + project health
+  (Python floor, version agreement between the package and
+  pyproject.toml, estimator stamp, price table, profile, cache,
+  ledger, plugins, git hygiene, workspaces) — every warning or
+  failure carries a one-line remedy; exit 1 on any fail; never
+  writes. Doctor runs even when the price table is broken (the
+  one state the rest of the CLI exits early on), because
+  reporting that state is its job.
+- `ghostslice completions bash|zsh`: completion scripts
+  generated from the live argument parser (single source of
+  truth); shipped copies in `examples/completions/` are pinned
+  byte-equal to fresh output by the test suite.
+- README: a stranger-runnable Quickstart, a "What's in 1.0"
+  feature map covering every command, and a Troubleshooting
+  section fed by doctor's remedies.
+
+### Changed
+- `scan` text output (v1.0 layout, Ryan's mockups): the file
+  table is now top-N (`--top`, default 15) with a heat bar
+  scaled to the largest file and each file's % of total; the
+  remaining files collapse into one summary line, and the
+  output closes with a summary box (files, total estimated
+  tokens, largest file, estimated input cost). The separate
+  Pre-flight cost block folded into the box. `scan --json` is
+  unchanged.
+- `--fit` report is a table (before/after/result plus a
+  downgrade-step table); content identical, layout only.
+- pyproject.toml version aligned with the package (it had
+  drifted at 0.16.0 — the readiness audit's doctor caught it;
+  a test and a doctor check now pin the agreement).
+
+### The road here (per-version entries below)
+- 0.6-0.9: watch mode, task selection v2, C/C++/Scala slicers,
+  config structure slicing.
+- 0.10-0.14: estimator calibration, context lint, generated/
+  vendored detection, monorepo support, history analytics.
+- 0.15-0.19: init wizard, XML/JSON bundles, redact-in-place,
+  symbol-level slicing, Python call graph + dead functions.
+- 0.20-0.24: content cache + performance, fuzz/encoding
+  robustness, dashboard v2 (slice preview + what-if), the
+  plugin system, and the CI pack.
+
 ## [0.24.0] - 2026-10-13
 ### Added
 - CI pack (G19): `ghostslice ci <project>` runs five named checks

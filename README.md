@@ -38,6 +38,56 @@ ghostslice --help
 
 Requires Python 3.10 or newer.
 
+## Quickstart
+
+From the root of this checkout, no install step (the export also
+starts the savings ledger, `.ghostslice-history.jsonl`, in the
+scanned project):
+
+```bash
+PYTHONPATH=src python3 -m ghostslice scan .
+PYTHONPATH=src python3 -m ghostslice doctor .
+PYTHONPATH=src python3 -m ghostslice export . -o /tmp/ghostslice-context --fit 60000
+PYTHONPATH=src python3 -m ghostslice check /tmp/ghostslice-context
+PYTHONPATH=src python3 -m ghostslice history . --trend
+```
+
+Installed instead? Drop the `PYTHONPATH=src python3 -m` prefix and
+run the same commands as `ghostslice ...` against any project.
+
+## What's in 1.0
+
+Every command, one line each (details in the Usage sections
+below; `ghostslice <command> --help` is the full reference):
+
+| Command | What it does |
+|---|---|
+| `ghostslice scan` | Rank a project's files by estimated token cost (top-N table, heat bars, % of total, summary box) |
+| `ghostslice graph` | Import graph between project files, plus prune recommendations |
+| `ghostslice slice` | Slice one file or a whole tree to a mode (signatures, interfaces, ...) |
+| `ghostslice export` | Write an agent context bundle (.claude_context: PROMPT.md, files/, manifest) |
+| `ghostslice task` | Task-focused bundle: keyword- or git-diff-selected files only |
+| `ghostslice symbols` | List a project's symbols for symbol-level slicing |
+| `ghostslice calls` | Python call graph: who calls what, most-called symbols, dead-function candidates |
+| `ghostslice diff` | Diff two bundles by manifest: mode changes, token deltas, added/removed files |
+| `ghostslice secrets` | Scan a project for likely secrets (values always redacted in output) |
+| `ghostslice report` | Write a standalone HTML report for a project |
+| `ghostslice explain` | Explain why one file is included/excluded and how it is sliced |
+| `ghostslice watch` | Watch a project; rescan on change, optionally re-export the bundle |
+| `ghostslice init` | Analyze a project and generate a tuned .ghostslice.json profile |
+| `ghostslice lint` | Lint the default export selection for context waste (rules L001-L010) |
+| `ghostslice check-budget` | CI gate: exit non-zero if the selected context exceeds a token budget |
+| `ghostslice ci` | CI pack: budget + lint + secrets + fit + duplicates in one read-only run |
+| `ghostslice check` | Validate a bundle against its manifest |
+| `ghostslice history` | Savings-ledger summary and trend analytics for a project |
+| `ghostslice calibrate` | Per-language-family token calibration report (raw vs calibrated estimates) |
+| `ghostslice cache` | Inspect or clear the per-project content cache (.ghostslice-cache) |
+| `ghostslice doctor` | One-screen health check: versions, prices, profile, cache, ledger, plugins, git, workspaces |
+| `ghostslice completions` | Print a bash/zsh completion script generated from the live argument parser |
+| `ghostslice mcp` | Run the stdio MCP server (JSON-RPC) for agent clients |
+| `ghostslice serve` | Serve the local dashboard (scan, slice preview, what-if panel) |
+| `ghostslice prices` | Show the local, dated model price table |
+
 ## Usage
 
 ### Scan: rank files by estimated token cost
@@ -47,6 +97,14 @@ ghostslice scan ~/my-project
 ghostslice scan ~/my-project --model claude-sonnet
 ghostslice scan ~/my-project --json
 ```
+
+The text table (v1.0) shows the top 15 files by estimated tokens
+(`--top N` to change it) with a heat bar scaled to the largest
+file and each file's share of the total; the remaining files
+collapse into one summary line, and the output closes with a
+summary box (file count, total estimated tokens, largest file,
+and the estimated input cost when a model is known). `--json`
+output is unchanged.
 
 The scanner respects `.gitignore`, skips built-in junk (`node_modules`,
 `.git`, `dist`, build/cache dirs, binary files), and flags test files and
@@ -932,6 +990,29 @@ regenerable. Estimator changes must bump the estimator version
 stamp (`tokens.METHOD_VERSION`) so old entries miss, which is
 the same discipline the savings ledger already uses.
 
+### Doctor + shell completions (v1.0)
+
+```bash
+ghostslice doctor ~/my-project          # text; --json for machines
+ghostslice completions bash >> ~/.bashrc   # or: zsh > ~/.zsh/_ghostslice
+```
+
+`doctor` runs ten read-only checks in one screen — Python runtime
+vs the supported floor, GhostSlice version (in a source checkout
+it also verifies pyproject.toml agrees), the estimator stamp, the
+price table (present, parseable, dated), the project profile,
+the content cache, the savings ledger (corrupt lines, estimator
+mix), the plugins the profile names (loaded to verify, exactly
+as any command loads them), git hygiene (.gitignore coverage of
+`.claude_context/` and `.ghostslice-cache/`), and workspace
+detection. Every warning or failure carries a one-line remedy;
+the exit code is 0 unless a check fails. Doctor never writes.
+
+`completions` generates its scripts from the live argument
+parser, so the command and flag lists cannot drift from the CLI;
+the shipped copies live in `examples/completions/` and are
+pinned byte-equal to fresh output by the test suite.
+
 ### MCP server (v0.3)
 
 ```bash
@@ -1211,13 +1292,46 @@ to the scanner, the slicers, and the exporter:
   degrade, never a crash: if you find one that tracebacks, that is
   a bug — the fuzz corpus is the regression net.
 
+## Troubleshooting
+
+Run `ghostslice doctor <project>` first: it checks most of the
+failure modes below and prints the remedy next to each finding.
+
+- **A command exits 2 with "invalid profile"** — `.ghostslice.json`
+  has a field of the wrong shape; the message names the field.
+  Fix it, or regenerate the profile with `ghostslice init --force`.
+- **"unknown model id"** — the id (from `--model` or the profile)
+  is not in the local price table. `ghostslice prices` lists the
+  known ids; add yours to `prices.json` if you need another.
+- **"cannot load the price table"** — `prices.json` is missing or
+  not valid JSON. `ghostslice doctor` still runs in this state
+  and reports the exact file; restore or fix it there.
+- **A named plugin fails to load and every command refuses** —
+  that is deliberate (a half-loaded plugin set never runs). The
+  error names the plugin and the reason; fix the file, or remove
+  it from the profile's `plugins` list.
+- **Bundles or caches show up in `git status`** — add
+  `.claude_context/` and `.ghostslice-cache/` to `.gitignore`
+  (doctor's git check flags exactly this).
+- **History warns about an "estimator mix"** — the ledger holds
+  records from before estimator stamping (or from two estimator
+  versions). Nothing is broken; totals across versions are not
+  directly comparable, and new records are stamped.
+- **Numbers look off for one file** — check its encoding:
+  UTF-16/UTF-32 files are decoded via their BOM and non-UTF-8
+  bytes fall back to Latin-1 (see "Encodings, malformed input,
+  and limits"); the manifest records `source_encoding` for
+  anything that was not UTF-8.
+
 ## Tests
 
 ```bash
-PYTHONPATH=src python3 -m pytest tests -q
-# or, anywhere:
-PYTHONPATH=src python3 -m unittest discover -s tests
+PYTHONPATH=src python3 -m pytest tests -q   # the full suite
 ```
+
+(`python -m unittest discover -s tests` also runs and passes,
+but it only collects the unittest-style tests; the
+pytest-fixture files need pytest.)
 
 ## Layout
 
@@ -1247,9 +1361,12 @@ src/ghostslice/
   exporter.py   bundle builder + validator (presets: claude-code/aider/generic/cursor/copilot/anthropic-xml/json)
   watch.py      polling watch mode: debounced rescan + auto re-export (v0.6)
   plugins.py    user slicer plugins: contract, opt-in loading, containment, failure discipline (v0.23)
+  doctor.py     `ghostslice doctor`: environment + project health checks with remedies (v1.0)
+  completions.py  bash/zsh completion scripts generated from the live parser (v1.0)
   server.py     stdlib http.server dashboard API
   dashboard.html  single-page dashboard UI (violet accent #6716f3)
   cli.py        ghostslice command line
 prices.json     editable local price table (dated)
 examples/plugins/  example user plugins: a parser-lite Lua slicer with outline (v0.23)
+examples/completions/  generated bash/zsh completion scripts (regenerate with `ghostslice completions`)
 ```

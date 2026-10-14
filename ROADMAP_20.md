@@ -35,7 +35,7 @@ Baseline: v0.5.0, 149 tests passed.
 | G17 | Dashboard v2: side-by-side slice preview (original vs slice, per Ryan's mockups, Oct 13) with diff highlighting + budget slider with live auto-fit preview | v0.22.0 | done |
 | G18 | Plugin system: user slicers via a documented contract (profile "plugins" + --plugin, no auto-discovery), example Lua plugin | v0.23.0 | done |
 | G19 | CI pack: `ghostslice ci` one-shot (budget + secrets + lint) with PR markdown summary + sample GitHub Action | v0.24.0 | done |
-| G20 | v1.0.0: `doctor` self-check, shell completions, docs restructure, full release-readiness audit + mockup polish (Ryan approved Oct 13): scan CLI top-N with heat bars + % of total + token/cost summary box, export --fit report table in the mockup style | v1.0.0 | pending |
+| G20 | v1.0.0: `doctor` self-check, shell completions, docs restructure, full release-readiness audit + mockup polish (Ryan approved Oct 13): scan CLI top-N with heat bars + % of total + token/cost summary box, export --fit report table in the mockup style | v1.0.0 | done |
 
 Progress log is appended here as each goal closes, with test counts and
 the audit findings that drove the two improvement rounds.
@@ -547,3 +547,32 @@ the audit findings that drove the two improvement rounds.
   Standing limitation: no sandbox (documented trust
   model: plugins are user code with full privileges), and
   registrations are per-process (each CLI run reloads).
+- G20 (v1.0.0) DONE Oct 13, 2026: the finale shipped —
+  `ghostslice doctor` (ten read-only checks: python floor,
+  version agreement, estimator, prices, profile, cache,
+  ledger, plugins, git hygiene, workspaces; one-line remedy
+  per warn/fail; exit 1 on any fail; runs even when the price
+  table is broken), `ghostslice completions bash|zsh`
+  generated from the live argparse parser (shipped copies in
+  examples/completions/ pinned byte-equal), the mockup CLI
+  polish (scan top-N table with heat bars + % of total +
+  closing summary box, --top flag; --fit report as a table;
+  all JSON untouched), and the docs completion pass
+  (Quickstart, "What's in 1.0" feature map covering all 25
+  commands, Troubleshooting fed by doctor's remedies).
+  Readiness audit (audits/G20_audit.md): the baseline recon
+  found pyproject.toml still at 0.16.0 against the package's
+  0.24.0 — fixed to 1.0.0 everywhere and pinned by a doctor
+  check + test. The full command matrix (24 commands x
+  GhostSlice + GhostBus, plus cross commands) exits 0
+  everywhere, twice; the README Quickstart runs verbatim;
+  `pip install .` into a fresh venv works and the installed
+  binary verifies; MCP lists all 6 tools at serverInfo
+  1.0.0; the dashboard boots and serves; the dogfood CI
+  passes at 83% of its 180,000 budget. Improve rounds fixed
+  two LOW doc items (unittest wording, stale dogfood
+  comment); Audit #2 found no new defects. Tests 760 -> 784
+  (24 new), zero existing tests modified. MARATHON
+  COMPLETE: 20 goals, v0.6.0 -> v1.0.0, 149 -> 784 tests,
+  every goal audited twice and improved twice, no PyPI
+  publish, no announcements — those gates were never opened.

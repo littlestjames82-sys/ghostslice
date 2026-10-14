@@ -31,7 +31,7 @@ Install note: GhostSlice is not published on PyPI. The sample
 installs it from its GitHub repository
 (`pip install git+https://github.com/littlestjames82-sys/ghostslice`);
 it has zero dependencies and needs Python 3.10+. Pin the ref to a
-release tag (for example `@v0.24.0`) for reproducible installs.
+release tag (for example `@v1.0.0`) for reproducible installs.
 
 This repository dogfoods the same command in
 `.github/workflows/ghostslice-ci.yml`; that variant runs the

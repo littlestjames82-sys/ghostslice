@@ -9,6 +9,8 @@
 # command's behaviour repo-wide. 180,000 estimated tokens is the
 # v0.24.0 local sliced total (136,395) plus ~30% headroom; the fit
 # check proves the ladder can always get back under it.
+# (v1.0.0 re-measurement, G20 readiness audit: sliced total
+# 150,024 = 83% of the budget; headroom still sane, no bump.)
 name: GhostSlice CI (dogfood)
 
 on:

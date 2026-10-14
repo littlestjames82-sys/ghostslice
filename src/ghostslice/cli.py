@@ -1,7 +1,7 @@
 """GhostSlice command line.
 
 Commands:
-  ghostslice scan         <path> [--json] [--model ID] [--timing] [--no-cache]
+  ghostslice scan         <path> [--json] [--top N] [--model ID] [--timing] [--no-cache]
   ghostslice graph        <path> [--json]
   ghostslice slice        <path> --mode MODE -o <dir> [--no-cache]
   ghostslice task         <path> (--task "words" | --diff) [--budget N] [--fit N] -o <bundle> [--preset P]
@@ -17,6 +17,8 @@ Commands:
   ghostslice check        <bundle>
   ghostslice diff         <bundleA> <bundleB> [--json]
   ghostslice history      <path> [--json] [--trend] [--model ID]
+  ghostslice doctor       <path> [--json]
+  ghostslice completions  bash|zsh
   ghostslice mcp                              (stdio MCP server, see mcp_server.py)
   ghostslice serve        <path> --port 8765
   ghostslice prices
@@ -244,19 +246,31 @@ def _warn_secrets(findings, heading="WARNING: possible secrets detected") -> Non
 
 
 def _print_fit(fit_report) -> bool:
-    """Print the --fit report; return True when the bundle fitted."""
+    """Print the --fit report (v1.0: mockup table layout; same
+    content the report has always carried); return True when the
+    bundle fitted."""
     if not fit_report:
         return True
     steps = fit_report["steps"]
-    step_text = ", ".join(f"{k} x{n}" for k, n in steps.items()) if steps else "no downgrades needed"
-    print(f"Fit target: {fit_report['fit_tokens']:,} estimated tokens: "
-          f"{fit_report['before_tokens']:,} -> {fit_report['after_tokens']:,} "
-          f"({'fitted' if fit_report['fitted'] else 'COULD NOT FIT'})")
+    verdict = "fitted" if fit_report["fitted"] else "COULD NOT FIT"
+    print(f"Fit report (target: {fit_report['fit_tokens']:,} "
+          "estimated tokens):")
+    print(f"  {'before':>10}  {'after':>10}  result")
+    print(f"  {'-' * 10}  {'-' * 10}  {'-' * 12}")
+    print(f"  {fit_report['before_tokens']:>10,}  "
+          f"{fit_report['after_tokens']:>10,}  {verdict}")
     if "redacted_after_tokens" in fit_report:
         print(f"  after redaction: {fit_report['redacted_after_tokens']:,} estimated "
               "tokens (the ladder judged pre-redaction slices; manifest totals "
               "are post-redaction)")
-    print(f"  downgrades: {step_text}")
+    if steps:
+        print("  downgrade steps:")
+        print(f"    {'step':<22}  {'files':>5}")
+        print(f"    {'-' * 22}  {'-' * 5}")
+        for name, count in steps.items():
+            print(f"    {name:<22}  {count:>5}")
+    else:
+        print("  downgrade steps: none needed")
     if not fit_report["fitted"]:
         print(f"WARNING: could not fit the bundle into {fit_report['fit_tokens']:,} estimated tokens "
               f"(best achievable {fit_report['after_tokens']:,}); the bundle was still written.",
@@ -264,27 +278,57 @@ def _print_fit(fit_report) -> bool:
     return fit_report["fitted"]
 
 
+_HEAT_WIDTH = 16
+
+
+def _heat_bar(tokens: int, max_tokens: int) -> str:
+    """A block-char bar scaled so the largest file fills the
+    width; any non-empty file gets at least one block."""
+    if tokens <= 0 or max_tokens <= 0:
+        return ""
+    blocks = round(_HEAT_WIDTH * tokens / max_tokens)
+    return "█" * max(1, min(_HEAT_WIDTH, blocks))
+
+
+def _share(tokens: int, total: int) -> float:
+    return (100.0 * tokens / total) if total else 0.0
+
+
 def _print_scan(result, model=None, prices=None, recs=None, secrets=None, dups=None,
-                packages=None, ws_missing=None, ws_warnings=None) -> None:
+                packages=None, ws_missing=None, ws_warnings=None, top=15) -> None:
+    total = result.total_tokens
     print(f"Project: {result.root}")
-    print(f"Files: {len(result.files)}  Estimated tokens: {result.total_tokens:,}")
-    print(f"{'tokens':>9}  {'lines':>6}  file")
-    for f in result.files[:200]:
-        flags = []
-        if f.is_test:
-            flags.append("test")
-        if f.is_lockfile:
-            flags.append("lockfile")
-        if f.is_generated:
-            flags.append("generated")
-        if f.is_minified:
-            flags.append("minified")
-        if f.is_vendored:
-            flags.append("vendored")
-        suffix = f"  [{', '.join(flags)}]" if flags else ""
-        print(f"{f.tokens:>9,}  {f.lines:>6}  {f.path}{suffix}")
-    if len(result.files) > 200:
-        print(f"... and {len(result.files) - 200} more files")
+    print(f"Files: {len(result.files)}  Estimated tokens: {total:,}")
+    shown = result.files[:top]
+    if shown:
+        print(f"\nTop {len(shown)} of {len(result.files)} files "
+              "by estimated tokens:")
+        print(f"  {'tokens':>9}  {'lines':>6}  {'share':>6}  "
+              f"{'heat':<{_HEAT_WIDTH}}  file")
+        max_tokens = max(f.tokens for f in shown)
+        for f in shown:
+            flags = []
+            if f.is_test:
+                flags.append("test")
+            if f.is_lockfile:
+                flags.append("lockfile")
+            if f.is_generated:
+                flags.append("generated")
+            if f.is_minified:
+                flags.append("minified")
+            if f.is_vendored:
+                flags.append("vendored")
+            suffix = f"  [{', '.join(flags)}]" if flags else ""
+            print(f"  {f.tokens:>9,}  {f.lines:>6,}  "
+                  f"{_share(f.tokens, total):>5.1f}%  "
+                  f"{_heat_bar(f.tokens, max_tokens):<{_HEAT_WIDTH}}  "
+                  f"{f.path}{suffix}")
+        rest = result.files[top:]
+        if rest:
+            rest_tokens = sum(f.tokens for f in rest)
+            print(f"  ... and {len(rest)} more files "
+                  f"({rest_tokens:,} estimated tokens, "
+                  f"{_share(rest_tokens, total):.1f}% of total)")
     if packages and len(packages) > 1:
         print(f"\nPackages ({len(packages)}):")
         for p in packages:
@@ -299,10 +343,6 @@ def _print_scan(result, model=None, prices=None, recs=None, secrets=None, dups=N
         print("\nWorkspace warnings:")
         for w in ws_warnings:
             print(f"  {w}")
-    if model is not None:
-        cost = estimate_cost(result.total_tokens, model)
-        print(f"\nPre-flight (input cost, prices as of {prices.get('as_of')} from local prices.json, not live):")
-        print(f"  {model['name']}: ~${cost:.4f} for {result.total_tokens:,} estimated tokens")
     if secrets:
         print(f"\nSecrets warning ({len(secrets)} finding(s), values redacted):")
         for f in secrets[:20]:
@@ -320,6 +360,38 @@ def _print_scan(result, model=None, prices=None, recs=None, secrets=None, dups=N
         for r in recs[:15]:
             print(f"  {r['tokens']:>9,}  {r['path']}  ({r['reason']})")
         print("  Recommendations to review, not instructions: dynamic imports can hide real use.")
+    _print_scan_summary(result, model=model, prices=prices)
+
+
+def _print_scan_summary(result, model=None, prices=None) -> None:
+    """The closing summary box (v1.0, Ryan's mockup): the scan in
+    three factual lines — how much context, where it concentrates,
+    and what it would cost to feed whole. All figures labelled
+    estimates; the cost line (previously a separate Pre-flight
+    block) lives here now."""
+    total = result.total_tokens
+    lines = [
+        f"Files: {len(result.files)}   "
+        f"Estimated tokens: {total:,}"
+    ]
+    if result.files:
+        biggest = result.files[0]
+        lines.append(
+            f"Largest file: {biggest.path} ({biggest.tokens:,} "
+            f"estimated tokens, {_share(biggest.tokens, total):.1f}% "
+            "of total)")
+    if model is not None:
+        cost = estimate_cost(total, model)
+        lines.append(
+            f"Est. input cost at {model['name']}: ~${cost:.4f} "
+            f"(prices as of {prices.get('as_of')} from local "
+            "prices.json, not live)")
+    width = max(len(ln) for ln in lines)
+    border = "  +" + "-" * (width + 2) + "+"
+    print(f"\n{border}")
+    for ln in lines:
+        print(f"  | {ln:<{width}} |")
+    print(border)
 
 
 def _print_calls(payload, single=None, dead=False) -> None:
@@ -387,6 +459,22 @@ def _print_calls(payload, single=None, dead=False) -> None:
                   "run with --dead to list them.")
 
 
+_DOCTOR_MARKS = {"ok": "OK  ", "warn": "WARN", "fail": "FAIL"}
+
+
+def _print_doctor(payload) -> None:
+    print(f"GhostSlice doctor for {payload['root']} "
+          f"(ghostslice {payload['version']}; token counts are estimates)")
+    for c in payload["checks"]:
+        print(f"  [{_DOCTOR_MARKS[c['status']]}] {c['label']}: {c['detail']}")
+        if c.get("remedy"):
+            print(f"         remedy: {c['remedy']}")
+    n = payload["counts"]
+    verdict = "healthy" if payload["ok"] else "needs attention"
+    print(f"Doctor: {n['ok']} ok, {n['warn']} warning(s), "
+          f"{n['fail']} failed — {verdict}.")
+
+
 def _print_lint(payload) -> None:
     findings = payload["findings"]
     print(f"Lint: {payload['root']} (token counts are estimates)")
@@ -450,6 +538,10 @@ def _main_impl(argv: list[str] | None = None) -> int:
     p_scan = sub.add_parser("scan", help="scan a project and rank files by estimated token cost")
     p_scan.add_argument("path")
     p_scan.add_argument("--json", action="store_true")
+    p_scan.add_argument("--top", type=int, default=15, metavar="N",
+                        help="show the top N files by estimated tokens "
+                             "in the text table (default 15; the rest "
+                             "collapse into one summary line)")
     p_scan.add_argument("--model", default=None, help="model id from prices.json, for a cost line")
     p_scan.add_argument("--timing", action="store_true",
                         help="print a phase breakdown (scan vs analysis) and cache counters")
@@ -664,6 +756,13 @@ def _main_impl(argv: list[str] | None = None) -> int:
     p_cache_clear = cache_sub.add_parser("clear", help="delete the whole cache (it is derived data; it rebuilds on demand)")
     p_cache_clear.add_argument("path")
 
+    p_doctor = sub.add_parser("doctor", help="health check: environment + project (versions, prices, profile, cache, ledger, plugins, git, workspaces); exit 1 on any failed check; never writes")
+    p_doctor.add_argument("path")
+    p_doctor.add_argument("--json", action="store_true")
+
+    p_completions = sub.add_parser("completions", help="print a shell completion script generated from the live argument parser")
+    p_completions.add_argument("shell", choices=("bash", "zsh"))
+
     sub.add_parser("mcp", help="run the stdio MCP server (JSON-RPC)")
 
     p_serve = sub.add_parser("serve", help="serve the local dashboard")
@@ -677,9 +776,20 @@ def _main_impl(argv: list[str] | None = None) -> int:
     try:
         prices = load_prices()
     except (ValueError, OSError) as exc:
-        print(f"ghostslice: cannot load the price table: {exc}",
-              file=sys.stderr)
-        return 2
+        # v1.0: doctor's whole job is reporting a broken price
+        # table (and completions never read it), so those two run
+        # with prices=None; every other command keeps the early,
+        # clean exit 2.
+        if args.cmd not in ("doctor", "completions"):
+            print(f"ghostslice: cannot load the price table: {exc}",
+                  file=sys.stderr)
+            return 2
+        prices = None
+
+    if args.cmd == "completions":
+        from .completions import build_completions
+        sys.stdout.write(build_completions(parser, args.shell))
+        return 0
 
     if args.cmd == "prices":
         print(f"Local prices.json (as of {prices.get('as_of')}, not live): {prices.get('_path')}")
@@ -780,6 +890,22 @@ def _main_impl(argv: list[str] | None = None) -> int:
                 print(f"Cache for {args.path}: nothing to clear")
             return 0
         return 2
+
+    if args.cmd == "doctor":
+        # Handled before the generic profile load and the plugin
+        # activation: doctor REPORTS a broken profile and failing
+        # plugins instead of dying on them, and never writes.
+        if not Path(args.path).is_dir():
+            print(f"doctor: no such project directory: {args.path}",
+                  file=sys.stderr)
+            return 2
+        from .doctor import doctor_exit_code, run_doctor
+        payload = run_doctor(args.path)
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            _print_doctor(payload)
+        return doctor_exit_code(payload)
 
     # All remaining commands target a project path (or a bundle for check).
     target = getattr(args, "path", None) or getattr(args, "bundle", None)
@@ -957,6 +1083,9 @@ def _main_impl(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "scan":
+        if args.top < 1:
+            print("scan: --top must be >= 1", file=sys.stderr)
+            return 2
         from .duplicates import find_duplicates
         _t0 = time.perf_counter()
         _scan_cache = None if args.no_cache else open_cache(args.path, namespace=_plugins.active_digest())
@@ -985,7 +1114,8 @@ def _main_impl(argv: list[str] | None = None) -> int:
         _print_scan(result, model=model, prices=prices, recs=recs, secrets=findings,
                     dups=dups, packages=summarize_packages(result),
                     ws_missing=ws.missing if ws else None,
-                    ws_warnings=ws.warnings if ws else None)
+                    ws_warnings=ws.warnings if ws else None,
+                    top=args.top)
         if args.timing:
             _print_scan_timing(_t0, _t1, _scan_cache)
         return 0
