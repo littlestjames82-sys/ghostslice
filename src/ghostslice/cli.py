@@ -7,11 +7,11 @@ Commands:
   ghostslice task         <path> (--task "words" | --diff) [--budget N] [--fit N] -o <bundle> [--preset P]
   ghostslice export       <path> -o <bundle> [--mode MODE] [--model ID] [--preset P] [--fit N] [--exclude-secrets] [--redact] [--auto-shrink] [--symbols SPEC] [--timing] [--no-cache] [--workers N]
   ghostslice symbols      <path> [file] [--json]
-  ghostslice calls        <path> [file] [--json] [--dead]
+  ghostslice calls        <path> [file] [--json] [--dead] [--no-cache]
   ghostslice watch        <path> [--export] [-o <bundle>] [--interval S] [--debounce S] [--once] [--max-events N] [--fit N] [--redact] [--auto-shrink]
   ghostslice check-budget <path> [--max-tokens N]
   ghostslice ci           <path> [--budget N] [--strict] [--allow-secrets] [--json | --pr-comment] [--out report.html]
-  ghostslice lint         <path> [--json] [--strict]
+  ghostslice lint         <path> [--json] [--strict] [--no-cache]
   ghostslice init         <path> [--yes] [--force] [--dry-run] [--budget N] [--model ID]
   ghostslice cache        stats|clear <path>
   ghostslice check        <bundle>
@@ -216,15 +216,21 @@ def _print_scan_timing(t0, t1, cache, stream=None) -> None:
               f"{c['stores']} store(s), {c['corrupt']} corrupt", file=stream)
 
 
-def _with_dead_symbol_recs(result, graph, profile, recs):
+def _with_dead_symbol_recs(result, graph, profile, recs, cache=None):
     """Append v0.19 dead-symbol candidates to a recommendation list
     (the `scan` / `graph` surfaces). graph.recommendations itself is
     unchanged — lint consumes it and gains nothing this round. A
     call-graph failure must never break a scan, so this is guarded
-    the same way graph.recommendations guards its duplicate pass."""
+    the same way graph.recommendations guards its duplicate pass.
+
+    `cache` (v1.0.2): the scan command passes the content cache it
+    already opened for its scan records, so the dead-symbol pass
+    reuses the outline kind instead of re-outlining every Python
+    file; the graph command passes none (it opens no cache)."""
     try:
         from .callgraph import dead_symbol_recommendations
-        extra = dead_symbol_recommendations(result, profile, graph)
+        extra = dead_symbol_recommendations(result, profile, graph,
+                                            cache=cache)
     except Exception:
         return recs
     if not extra:
@@ -632,6 +638,8 @@ def _main_impl(argv: list[str] | None = None) -> int:
     p_calls.add_argument("--json", action="store_true")
     p_calls.add_argument("--dead", action="store_true",
                          help="list dead-function candidates (symbols no caller or reference reaches)")
+    p_calls.add_argument("--no-cache", action="store_true",
+                         help="do not consult or fill the .ghostslice-cache content cache")
 
     p_diff = sub.add_parser("diff", help="diff two bundles: mode changes, token deltas, added/removed files")
     p_diff.add_argument("bundle_a")
@@ -702,6 +710,8 @@ def _main_impl(argv: list[str] | None = None) -> int:
     p_lint.add_argument("--json", action="store_true")
     p_lint.add_argument("--strict", action="store_true",
                         help="exit 1 on warnings too (default: exit 1 only on error-severity findings)")
+    p_lint.add_argument("--no-cache", action="store_true",
+                        help="do not consult or fill the .ghostslice-cache content cache")
 
     p_budget = sub.add_parser("check-budget", help="exit non-zero if the selected context exceeds a token budget (CI gate)")
     p_budget.add_argument("path")
@@ -955,8 +965,11 @@ def _main_impl(argv: list[str] | None = None) -> int:
 
     if args.cmd == "lint":
         from .lint import lint_exit_code, lint_project
+        _lint_cache = None if args.no_cache else open_cache(
+            args.path, namespace=_plugins.active_digest())
         try:
-            payload = lint_project(args.path, profile=profile)
+            payload = lint_project(args.path, profile=profile,
+                                   cache=_lint_cache)
         except FileNotFoundError:
             print(f"lint: no such project: {args.path}", file=sys.stderr)
             return 2
@@ -1010,7 +1023,7 @@ def _main_impl(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "explain":
-        from .duplicates import find_duplicates
+        from .duplicates import find_duplicates, near_min_chars_for
         from .exporter import default_mode_for
         from .graph import importers_of as _imp_of
         result = _scan_with_profile(args.path, profile)
@@ -1050,7 +1063,7 @@ def _main_impl(argv: list[str] | None = None) -> int:
         sliced = slice_text(rel, source, mode)
         graph = build_graph(result)
         rev = _imp_of(graph)
-        dups = find_duplicates(result)
+        dups = find_duplicates(result, near_min_chars=near_min_chars_for(profile))
         dup_notes = []
         for g in dups["exact"]:
             if rel in g["files"]:
@@ -1086,16 +1099,17 @@ def _main_impl(argv: list[str] | None = None) -> int:
         if args.top < 1:
             print("scan: --top must be >= 1", file=sys.stderr)
             return 2
-        from .duplicates import find_duplicates
+        from .duplicates import find_duplicates, near_min_chars_for
         _t0 = time.perf_counter()
         _scan_cache = None if args.no_cache else open_cache(args.path, namespace=_plugins.active_digest())
         result = _scan_with_profile(args.path, profile, cache=_scan_cache)
         _t1 = time.perf_counter()
         graph = build_graph(result)
         recs = _with_dead_symbol_recs(result, graph, profile,
-                                      recommendations(result, graph, profile))
+                                      recommendations(result, graph, profile),
+                                      cache=_scan_cache)
         findings = scan_scan_result(result)
-        dups = find_duplicates(result)
+        dups = find_duplicates(result, near_min_chars=near_min_chars_for(profile))
         if args.json:
             payload = result.to_dict()
             payload["token_method"] = TOKEN_METHOD
@@ -1126,12 +1140,12 @@ def _main_impl(argv: list[str] | None = None) -> int:
         recs = _with_dead_symbol_recs(result, graph, profile,
                                       recommendations(result, graph, profile))
         if args.json:
-            from .duplicates import find_duplicates
+            from .duplicates import find_duplicates, near_min_chars_for
             print(json.dumps({
                 "graph": graph,
                 "importers": importers_of(graph),
                 "recommendations": recs,
-                "duplicates": find_duplicates(result),
+                "duplicates": find_duplicates(result, near_min_chars=near_min_chars_for(profile)),
             }, indent=2))
             return 0
         print(f"Import graph for {result.root} ({len(graph)} files)")
@@ -1146,8 +1160,8 @@ def _main_impl(argv: list[str] | None = None) -> int:
                 print(f"  {r['tokens']:>9,}  {r['path']}  ({r['reason']}; {r['detail']})")
         else:
             print("\nNo prune recommendations.")
-        from .duplicates import find_duplicates
-        dups = find_duplicates(result)
+        from .duplicates import find_duplicates, near_min_chars_for
+        dups = find_duplicates(result, near_min_chars=near_min_chars_for(profile))
         if dups["exact"] or dups["near"]:
             print("\nDuplicates:")
             for g in dups["exact"]:
@@ -1262,13 +1276,17 @@ def _main_impl(argv: list[str] | None = None) -> int:
 
     if args.cmd == "calls":
         from .callgraph import build_call_graph
+        _calls_cache = None if args.no_cache else open_cache(
+            args.path, namespace=_plugins.active_digest())
         try:
-            result = _scan_with_profile(args.path, profile)
+            result = _scan_with_profile(args.path, profile,
+                                        cache=_calls_cache)
         except FileNotFoundError:
             print(f"calls: no such project: {args.path}", file=sys.stderr)
             return 2
         graph = build_graph(result)
-        payload = build_call_graph(result, profile, graph)
+        payload = build_call_graph(result, profile, graph,
+                                   cache=_calls_cache)
         single = None
         if args.file:
             single = args.file.replace("\\", "/").lstrip("./")

@@ -589,3 +589,13 @@ the audit findings that drove the two improvement rounds.
   784 -> 795 (11 new; one existing pin updated, the release
   version pin 1.0.0 -> 1.0.1). Audit:
   audits/POLISH_101_audit.md.
+- Post-marathon polish round 2 (v1.0.2, 2026-10-14): the
+  persistent content cache now serves `lint` and `calls` too
+  (byte-identical output off/cold/warm; `--no-cache` on both),
+  the dashboard's /api/graph carries Python call relationships
+  (who calls what, capped and labelled) in a new Call graph
+  panel, and both duplicate floors are profile settings
+  ("duplicates".near_min_chars, "ci".duplicates_floor_tokens;
+  defaults unchanged). Tests 795 -> 829 (34 new; the release
+  version pin moved 1.0.1 -> 1.0.2). Audit:
+  audits/POLISH_102_audit.md.

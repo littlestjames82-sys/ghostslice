@@ -51,6 +51,16 @@ def _default_mode(entry) -> str:
 # displayed text is cut, and the response says so (truncated flag).
 SLICE_PREVIEW_CAP = 200_000
 
+# v1.0.2: caps for the /api/graph "calls" payload. Symbols ship in
+# full (the dashboard's per-file call view needs every symbol of
+# the file being previewed, and symbol rows are small), but the
+# edge list of a large project is not bounded by anything, so it
+# is cut at CALL_EDGE_CAP entries (the payload reports the true
+# total and a truncated flag, and the UI repeats the caveat where
+# the lists render). Dead candidates are capped the same way.
+CALL_EDGE_CAP = 2000
+CALL_DEAD_CAP = 200
+
 
 def _cap_text(text: str) -> tuple[str, bool]:
     """(text, was_truncated): cut at SLICE_PREVIEW_CAP characters
@@ -81,8 +91,9 @@ class _State:
         self.scan = scan(self.root, ignore_matcher=matcher)
         self.graph = build_graph(self.scan)
         self.recommendations = recommendations(self.scan, self.graph, self.profile)
-        from .duplicates import find_duplicates
-        self.duplicates = find_duplicates(self.scan)
+        from .duplicates import find_duplicates, near_min_chars_for
+        self.duplicates = find_duplicates(
+            self.scan, near_min_chars=near_min_chars_for(self.profile))
         self.secrets = scan_scan_result(self.scan)
         from .lint import lint_project
         self.lint = lint_project(self.root, profile=self.profile,
@@ -93,6 +104,12 @@ class _State:
         self._mode_tokens_cache: dict[tuple[str, str], int] = {}
         self._slice_cache: dict[tuple[str, str], object] = {}
         self._slice_lock = threading.Lock()
+        # v1.0.2: the call-graph payload is built lazily on the
+        # first /api/graph request and kept for the server's life —
+        # the state is a startup snapshot, so a per-run memo matches
+        # its semantics (same rule as the slice memo above).
+        self._calls_payload: dict | None = None
+        self._calls_lock = threading.Lock()
 
     def slice_result(self, entry, mode: str):
         """Memoised slice_text for the preview endpoints (v0.22).
@@ -151,6 +168,41 @@ class _State:
                 source = _gs_read_text(entry.abspath)
                 self._mode_tokens_cache[key] = slice_text(entry.path, source, mode).sliced_tokens
         return self._mode_tokens_cache[key]
+
+    def calls_payload(self) -> dict:
+        """Call relationships for the served project (v1.0.2):
+        Python symbols with their call edges from
+        callgraph.build_call_graph over the state's startup scan.
+
+        Computed on first use, then memoised for the server run.
+        Non-Python files honestly have no call data: they simply
+        contribute no symbols or edges, and the payload's "scope"
+        line says the analysis is Python-only. Edge and dead lists
+        are capped (CALL_EDGE_CAP / CALL_DEAD_CAP) with the true
+        totals and truncation flags reported alongside."""
+        if self._calls_payload is None:
+            with self._calls_lock:
+                if self._calls_payload is None:
+                    from .callgraph import build_call_graph
+                    full = build_call_graph(self.scan, self.profile,
+                                            self.graph)
+                    edges = full["edges"]
+                    dead = full["dead"]
+                    self._calls_payload = {
+                        "symbols": full["symbols"],
+                        "edges": edges[:CALL_EDGE_CAP],
+                        "edges_total": len(edges),
+                        "edges_truncated": len(edges) > CALL_EDGE_CAP,
+                        "dead": dead[:CALL_DEAD_CAP],
+                        "dead_total": len(dead),
+                        "dead_truncated": len(dead) > CALL_DEAD_CAP,
+                        "counts": full["counts"],
+                        "skipped_files": full["skipped_files"],
+                        "note": full["note"],
+                        "scope": ("call analysis covers Python files "
+                                  "only; other files have no call data"),
+                    }
+        return self._calls_payload
 
     def scan_payload(self) -> dict:
         files = []
@@ -340,7 +392,8 @@ def make_server(root: str, port: int = 8765, host: str = "127.0.0.1"):
             elif parsed.path == "/api/graph":
                 self._json(200, {"graph": state.graph,
                                  "recommendations": state.recommendations,
-                                 "duplicates": state.duplicates})
+                                 "duplicates": state.duplicates,
+                                 "calls": state.calls_payload()})
             elif parsed.path == "/api/secrets":
                 self._json(200, {"findings": state.secrets, "count": len(state.secrets),
                                  "note": "values redacted to first 4 characters"})

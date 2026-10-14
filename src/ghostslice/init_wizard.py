@@ -316,6 +316,17 @@ def analyze_project(root, *, budget_override: int | None = None,
         "lint_why": ("omitted: lint stays at its documented defaults; "
                      "no single rule pattern was strong enough to pin "
                      "(findings are in the wins below)"),
+        "duplicates_why": (
+            "omitted: the near-duplicate size floor stays at its "
+            "documented default of 200 normalized characters (set "
+            "\"duplicates\": {\"near_min_chars\": N} in the profile "
+            "to compare smaller files, or raise it to skip more "
+            "boilerplate)"),
+        "ci_why": (
+            "omitted: the CI duplicates floor stays at its "
+            "documented default of 500 recoverable estimated "
+            "tokens (set \"ci\": {\"duplicates_floor_tokens\": N} "
+            "in the profile to move the gate)"),
         "lint_counts": lint_payload["counts"],
         "wins": wins,
     }
@@ -348,6 +359,8 @@ def justification_lines(analysis: dict) -> list[str]:
     for why in analysis["entry_why"]:
         lines.append(f"entry_points: {why}")
     lines.append(f"lint: {analysis['lint_why']}")
+    lines.append(f"duplicates: {analysis['duplicates_why']}")
+    lines.append(f"ci: {analysis['ci_why']}")
     return lines
 
 
@@ -434,6 +447,11 @@ def _existing_summary(existing: Profile) -> list[str]:
         parts.append("auto_shrink on")
     if existing.lint:
         parts.append(f"lint section ({len(existing.lint)} rule(s))")
+    if existing.duplicates:
+        parts.append("duplicates section "
+                     f"({len(existing.duplicates)} floor(s))")
+    if existing.ci:
+        parts.append(f"ci section ({len(existing.ci)} floor(s))")
     return parts or ["(no settings — an empty profile)"]
 
 

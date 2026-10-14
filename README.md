@@ -526,6 +526,10 @@ normalized content) and near-duplicates (line-shingle Jaccard >= 0.85,
 only for files with at least 8 distinct lines and 200 normalized
 characters, to avoid boilerplate noise). A duplicate copy appears in
 prune recommendations with its token cost as the potential saving.
+The 200-character floor is a profile setting (v1.0.2):
+`"duplicates": {"near_min_chars": N}` in `.ghostslice.json` lowers
+it to compare smaller files or raises it to skip more boilerplate;
+unset, every surface uses the default above.
 
 ### Report + explain (v0.4)
 
@@ -756,6 +760,15 @@ per rule (see Context lint above), `"auto_shrink": true` makes
 exports exclude detected generated/vendored/minified files (see
 Detection + auto-shrink above), and `"redact": true` makes exports
 replace flagged secret values in place (see Redact in place above).
+Two floor sections (v1.0.2) tune duplicate detection:
+`"duplicates": {"near_min_chars": N}` moves the near-duplicate
+size floor (default 200 normalized characters; see Duplicates
+above) and `"ci": {"duplicates_floor_tokens": N}` moves the CI
+duplicates gate floor (default 500 recoverable estimated tokens;
+see the CI pack below). Both take positive whole numbers, unknown
+keys are a loud error at load time exactly like the `"lint"`
+section, and unset means the documented defaults. The floors are
+profile-only settings: no CLI flag overrides them for one run.
 
 ### Init: generate a tuned profile (v0.15)
 
@@ -833,7 +846,9 @@ because the gate's job is keeping secrets out of agent context;
 including lint's L005 rule), **fit** (whether the auto-fit ladder
 can reach the budget from the default selection), and
 **duplicates** (exact-duplicate groups holding 500+ recoverable
-estimated tokens warn). Exit codes: 0 when no check failed
+estimated tokens warn; the floor is a profile setting, v1.0.2:
+`"ci": {"duplicates_floor_tokens": N}` in `.ghostslice.json`).
+Exit codes: 0 when no check failed
 (warnings and skips never fail a run), 1 when any check failed,
 2 for usage/config errors. The run writes nothing (no bundle, no
 ledger record, no cache) unless `--out` names a report file; a
@@ -959,7 +974,14 @@ GHOSTSLICE_NO_CACHE=1 ghostslice export ...           # or disable it entirely
 
 What is cached: per-file scan derivations (token estimate, line
 count, detection evidence), slice results (text + token counts),
-symbol outlines, and symbol-slice renders. Every entry is keyed
+symbol outlines, and symbol-slice renders. Since v1.0.2 the
+`lint` and `calls` commands route through the same cache (their
+scans, the slices lint prices, and the per-file outlines the call
+graph builds), each with a `--no-cache` flag like the other
+commands; their output is byte-identical off, cold, or warm.
+Duplicate detection is not cached — the cache has no kind for
+normalized text — so `lint` still re-reads file texts for its
+L004 rule. Every entry is keyed
 by the sha256 of *all* its inputs — the file's content hash, its
 relative path, the slice mode (or sorted symbol keep-set), the
 GhostSlice version, and the token-estimator version — so a hit is
@@ -1120,6 +1142,16 @@ already did), and the export `out` path is verified to stay inside
 the served project. The dashboard is a startup snapshot: the file
 set, secret findings, and token table reflect the project as scanned
 when `serve` started.
+
+Call graph panel (v1.0.2): selecting a file also lists its Python
+symbols with **who calls each one and what each one calls** (plus a
+"possibly dead" tag for symbols nothing reaches). The data rides
+the existing `GET /api/graph` response as a `"calls"` payload —
+symbols in full, call edges capped at 2,000 and dead candidates at
+200, with the true totals and truncation flags reported when a cap
+engages. It is computed on the first request and kept for the
+server run. Call analysis covers Python files only; other files
+honestly show "no call data" in the panel.
 
 ## Plugins
 

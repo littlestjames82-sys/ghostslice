@@ -9,7 +9,7 @@ from __future__ import annotations
 import html
 from pathlib import Path
 
-from .duplicates import find_duplicates
+from .duplicates import find_duplicates, near_min_chars_for
 from .exporter import estimate_context_tokens
 from .graph import build_graph, recommendations
 from .ledger import analytics as ledger_analytics
@@ -105,7 +105,8 @@ def build_report(root, model_id: str = "claude-sonnet") -> str:
     result = scan(root, ignore_matcher=matcher)
     graph = build_graph(result)
     recs = recommendations(result, graph, profile)
-    dups = find_duplicates(result)
+    dups = find_duplicates(result,
+                           near_min_chars=near_min_chars_for(profile))
     secrets = scan_scan_result(result)
     prices = load_prices()
     try:

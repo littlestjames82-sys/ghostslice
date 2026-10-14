@@ -216,8 +216,9 @@ def recommendations(scan_result, graph: dict, profile=None) -> list[dict]:
     # Duplicate copies are prune candidates too (v0.4): keep the first
     # file of an exact group / the first file of a near pair, flag the rest.
     try:
-        from .duplicates import find_duplicates
-        dups = find_duplicates(scan_result)
+        from .duplicates import find_duplicates, near_min_chars_for
+        dups = find_duplicates(
+            scan_result, near_min_chars=near_min_chars_for(profile))
     except Exception:
         dups = {"exact": [], "near": []}
     have = {r["path"] for r in out}

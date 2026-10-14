@@ -75,6 +75,15 @@ stored in a dict/list, assigned, or named in a default argument is
 alive. Attribute loads count by name for methods, which keeps
 properties and protocol attributes alive when they are accessed
 but never called.
+
+Caching (v1.0.2): CallGraph accepts the optional content cache
+(cache.py) the export path uses. The per-file symbol outlines —
+the derivation cache.py keys as "outline" — go through it with
+the same discipline (content-hash keys, plugin-digest
+namespacing, corrupt-never-fails), so a warm `calls` skips
+re-outlining every Python file. The ast parse and the walk itself
+are not cache kinds and still run per call; output is identical
+either way.
 """
 from __future__ import annotations
 
@@ -84,7 +93,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 from .graph import _py_module_base
-from .symslice import outline_source
+from .symslice import Symbol, outline_source
 from .tokens import METHOD as TOKEN_METHOD
 from .tokens import estimate_tokens
 from .textio import read_text as _gs_read_text
@@ -705,9 +714,12 @@ def _collect_globals(func) -> set:
 # ---------------------------------------------------------------------------
 
 class CallGraph:
-    def __init__(self, scan_result, profile=None, graph=None):
+    def __init__(self, scan_result, profile=None, graph=None, cache=None):
         self.scan_result = scan_result
         self.profile = profile
+        # v1.0.2: optional cache.ProjectCache for the per-file
+        # outlines (see module docstring); None = always recompute.
+        self.cache = cache
         self.root_files = {f.path for f in scan_result.files}
         self.files: dict[str, _File] = {}
         self.symbols: dict[str, _Sym] = {}
@@ -769,7 +781,7 @@ class CallGraph:
         except Exception:
             self.skipped_files.append(entry.path)
             return None
-        outline = outline_source(source, "python", entry.path) or []
+        outline = self._outline(entry, source)
         for sym in outline:
             if not sym.selectable:
                 continue
@@ -788,6 +800,26 @@ class CallGraph:
             fi.symbols[sym.qualified] = rec
         _collect_file_facts(fi)
         return fi
+
+    def _outline(self, entry, source: str) -> list:
+        """The file's symbol outline, through the content cache
+        when one is attached: the same get/put seam
+        symslice.resolve_symbol_selection uses (rows are the
+        Symbol dataclass as dicts; a shape drift on read falls
+        back to recompute, never to a wrong outline)."""
+        if self.cache is not None:
+            rows = self.cache.get_outline(entry.path, source)
+            if rows is not None:
+                try:
+                    return [Symbol(**row) for row in rows]
+                except TypeError:
+                    pass  # shape drift: recompute below
+        syms = outline_source(source, "python", entry.path)
+        if self.cache is not None and syms is not None:
+            from dataclasses import asdict
+            self.cache.put_outline(entry.path, source,
+                                   [asdict(s) for s in syms])
+        return syms or []
 
     # -- cross-file resolution helpers --------------------------------------
 
@@ -1157,19 +1189,23 @@ class CallGraph:
 # Public API
 # ---------------------------------------------------------------------------
 
-def build_call_graph(scan_result, profile=None, graph=None) -> dict:
-    """Full call-graph payload for a scan (Python files only)."""
-    return CallGraph(scan_result, profile, graph).payload(graph)
+def build_call_graph(scan_result, profile=None, graph=None,
+                     cache=None) -> dict:
+    """Full call-graph payload for a scan (Python files only).
+
+    `cache` (v1.0.2): an optional cache.ProjectCache for the
+    per-file outlines; output is identical either way."""
+    return CallGraph(scan_result, profile, graph, cache).payload(graph)
 
 
 def dead_symbol_recommendations(scan_result, profile=None,
-                                graph=None) -> list[dict]:
+                                graph=None, cache=None) -> list[dict]:
     """Prune-recommendation-shaped dead-symbol candidates.
 
     Merged into the `scan` / `graph` command surfaces by the CLI;
     graph.recommendations itself (and lint, which consumes it) is
     unchanged."""
-    cg = CallGraph(scan_result, profile, graph)
+    cg = CallGraph(scan_result, profile, graph, cache)
     out = []
     for d in cg.dead_candidates(graph):
         out.append({

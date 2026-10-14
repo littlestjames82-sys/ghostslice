@@ -16,8 +16,11 @@ each as pass / warn / fail / skipped with a one-line evidence string:
               findings cannot fail the run through the side door)
   fit         whether the auto-fit ladder can reach the budget from
               the default selection (skipped with no budget)
-  duplicates  exact-duplicate groups holding at least
-              DUP_FLOOR_TOKENS recoverable estimated tokens (warn)
+  duplicates  exact-duplicate groups holding at least the
+              duplicates floor (DUP_FLOOR_TOKENS recoverable
+              estimated tokens by default; the profile's "ci"
+              section key "duplicates_floor_tokens" overrides,
+              v1.0.2) in recoverable estimated tokens (warn)
 
 Exit semantics: 0 when no check failed (warnings and skips do not
 fail the run), 1 when any check failed, 2 for usage/config errors
@@ -39,7 +42,7 @@ from __future__ import annotations
 import dataclasses
 
 from . import __version__
-from .duplicates import find_duplicates
+from .duplicates import find_duplicates, near_min_chars_for
 from .exporter import resolve_modes
 from .fit import fit_modes
 from .lint import lint_exit_code, lint_project
@@ -53,8 +56,18 @@ from .tokens import METHOD as TOKEN_METHOD
 # Exact-duplicate groups below this many recoverable estimated
 # tokens are noise for a CI gate (small shared fixtures, tiny
 # config twins — this repo's own test fixtures live under it);
-# at or above it the group warns.
+# at or above it the group warns. The profile's "ci" section key
+# "duplicates_floor_tokens" overrides it per project (v1.0.2).
 DUP_FLOOR_TOKENS = 500
+
+
+def duplicates_floor_for(profile) -> int:
+    """The effective duplicates floor for a profile: its "ci"
+    section's "duplicates_floor_tokens" when set, else the
+    documented default DUP_FLOOR_TOKENS (zero behaviour change)."""
+    cfg = getattr(profile, "ci", None) or {}
+    val = cfg.get("duplicates_floor_tokens")
+    return DUP_FLOOR_TOKENS if val is None else val
 
 CHECK_IDS = ("budget", "lint", "secrets", "fit", "duplicates")
 STATUSES = ("pass", "warn", "fail", "skipped")
@@ -181,10 +194,11 @@ def _check_fit(ctx):
 def _check_duplicates(ctx):
     if ctx["dups_error"] is not None:
         raise ctx["dups_error"]
+    floor = duplicates_floor_for(ctx["profile"])
     groups = [g for g in ctx["dups"]["exact"]
-              if g["potential_savings"] >= DUP_FLOOR_TOKENS]
+              if g["potential_savings"] >= floor]
     below = len(ctx["dups"]["exact"]) - len(groups)
-    details = {"floor_tokens": DUP_FLOOR_TOKENS,
+    details = {"floor_tokens": floor,
                "groups": [{"files": g["files"],
                            "tokens_each": g["tokens_each"],
                            "potential_savings": g["potential_savings"]}
@@ -192,7 +206,7 @@ def _check_duplicates(ctx):
                "groups_below_floor": below}
     if not groups:
         evidence = ("no exact-duplicate group holds "
-                    f"{DUP_FLOOR_TOKENS:,}+ recoverable estimated tokens")
+                    f"{floor:,}+ recoverable estimated tokens")
         if below:
             evidence += f" ({below} smaller group(s) below the floor)"
         return "pass", evidence, details
@@ -241,7 +255,8 @@ def run_ci(root, profile=None, budget=None, strict=False,
     dups = None
     dups_error = None
     try:
-        dups = find_duplicates(result)
+        dups = find_duplicates(
+            result, near_min_chars=near_min_chars_for(profile))
     except Exception as exc:  # surfaced via the duplicates check
         dups_error = exc
 

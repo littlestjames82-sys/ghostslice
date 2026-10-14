@@ -46,11 +46,27 @@ options (the allowed option names live in lint.RULES). Unknown rule
 ids, severities, option names, or non-positive option values are a
 loud ValueError at load time — a typo'd rule id must never silently
 disable (or fail to disable) a rule.
+
+Two floor sections (v1.0.2) tune duplicate detection, with the
+same loud-validation discipline:
+
+  "duplicates": {"near_min_chars": 200}
+  "ci":         {"duplicates_floor_tokens": 500}
+
+"duplicates.near_min_chars" is the minimum normalized-character
+size for a file to enter near-duplicate comparison
+(duplicates.NEAR_MIN_CHARS when unset). "ci.duplicates_floor_tokens"
+is the recoverable-token floor at or above which an exact-duplicate
+group warns in `ghostslice ci` (ci.DUP_FLOOR_TOKENS when unset).
+Both must be positive whole numbers; unknown keys are a ValueError
+at load time, exactly like the lint section. Unset means the
+documented defaults — zero behaviour change.
 """
 from __future__ import annotations
 
 import fnmatch
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -108,6 +124,11 @@ class Profile:
     path: str | None = None  # where it was loaded from, if any
     # v0.11: normalised lint config {rule_id: {"severity": str, option: number}}
     lint: dict = field(default_factory=dict)
+    # v1.0.2: normalised floor sections (only the keys the user set;
+    # consumers resolve unset keys to the documented defaults in
+    # duplicates.py / ci.py, so an absent section is zero change).
+    duplicates: dict = field(default_factory=dict)
+    ci: dict = field(default_factory=dict)
 
     def is_ignored(self, rel: str) -> bool:
         return any(match_glob(p, rel) for p in self.ignore)
@@ -128,6 +149,7 @@ class Profile:
             "auto_shrink": self.auto_shrink, "redact": self.redact,
             "plugins": self.plugins,
             "path": self.path, "lint": self.lint,
+            "duplicates": self.duplicates, "ci": self.ci,
         }
 
 
@@ -176,6 +198,46 @@ def _parse_lint_section(raw, candidate: Path) -> dict:
                     f"(allowed: severity{', ' if allowed_options else ''}"
                     f"{', '.join(sorted(allowed_options))})")
         out[rule_id] = norm
+    return out
+
+
+# v1.0.2: the floor sections and the single key each accepts. The
+# defaults themselves live with their consumers (duplicates.py /
+# ci.py); the profile stores only what the user set.
+FLOOR_SECTIONS = {
+    "duplicates": ("near_min_chars",),
+    "ci": ("duplicates_floor_tokens",),
+}
+
+
+def _parse_floor_section(raw, candidate: Path, section: str) -> dict:
+    """Validate + normalise one floor section ("duplicates" / "ci").
+
+    Same discipline as the lint section: unknown keys, non-numeric
+    values, and non-positive or fractional values are a loud
+    ValueError at load time — a typo'd floor key must never silently
+    leave the default in place while the user believes it moved.
+    Returns {} when the section is absent."""
+    if raw is None:
+        return {}
+    allowed = FLOOR_SECTIONS[section]
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"{candidate}: {section!r} must be an object with keys "
+            f"from: {', '.join(allowed)}")
+    out: dict = {}
+    for key, val in raw.items():
+        if key not in allowed:
+            raise ValueError(
+                f"{candidate}: unknown {section} option {key!r} "
+                f"(allowed: {', '.join(allowed)})")
+        if isinstance(val, bool) or not isinstance(val, (int, float)) \
+                or not math.isfinite(val) or val <= 0 \
+                or int(val) != val:
+            raise ValueError(
+                f"{candidate}: {section} option {key!r} must be a "
+                f"positive whole number, got {val!r}")
+        out[key] = int(val)
     return out
 
 
@@ -260,4 +322,7 @@ def load_profile(root: str | Path) -> Profile:
         plugins=_str_list("plugins"),
         path=str(candidate),
         lint=_parse_lint_section(data.get("lint"), candidate),
+        duplicates=_parse_floor_section(data.get("duplicates"),
+                                        candidate, "duplicates"),
+        ci=_parse_floor_section(data.get("ci"), candidate, "ci"),
     )

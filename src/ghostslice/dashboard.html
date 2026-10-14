@@ -49,6 +49,8 @@
   .wi-grid input[type=range] { width:130px; }
   .wi-grid input[type=number] { width:90px; }
   #wiResult { margin-top:10px; font-size:13px; }
+  .call-sym { margin-top:8px; }
+  .call-rel { margin-left:14px; }
 </style>
 </head>
 <body>
@@ -89,6 +91,8 @@
       <div><h4>Slice</h4><pre id="sliceText">Select a file to see its slice.</pre></div>
     </div>
     <div class="muted" id="truncNote" style="margin-top:6px"></div>
+    <h3>Call graph</h3>
+    <div class="muted" id="calls">Select a file to see who calls its symbols and what they call (Python files only).</div>
     <div id="status"></div>
     <h3>Prune recommendations</h3>
     <div class="muted" id="recs">Loading...</div>
@@ -325,9 +329,77 @@ function setView(v){
 
 const MODE_LIST = ['full','signatures','interfaces','structure','headings','strip-tests','exclude'];
 let CURRENT = null, PREVIEW_SEQ = 0;
+let CALLS = null, SYMBOLS_BY_ID = {}, DEAD_IDS = new Set();
+
+function symLabel(id, currentPath){
+  const s = SYMBOLS_BY_ID[id];
+  if (s) return s.path === currentPath ? s.qualified : s.qualified + ' · ' + s.path;
+  if (id.endsWith(':<module>')) {
+    const p = id.slice(0, -':<module>'.length);
+    return p === currentPath ? '(module level)' : '(module level) · ' + p;
+  }
+  return id;
+}
+
+function renderCalls(f){
+  // Call relationships for the previewed file (v1.0.2). Symbol
+  // names and paths are untrusted text: built with createElement
+  // + textContent like every other surface in this page.
+  const box = $('calls');
+  box.replaceChildren();
+  if (!CALLS) { box.textContent = 'Call data unavailable.'; return; }
+  if (f.language !== 'python') {
+    box.textContent = 'No call data for this file: call relationships are computed for Python files only.';
+    return;
+  }
+  if (CALLS.edges_truncated) {
+    const n = document.createElement('div');
+    n.textContent = 'Showing the first ' + fmt(CALLS.edges.length) + ' of ' +
+      fmt(CALLS.edges_total) + ' call edges; per-symbol lists may be incomplete.';
+    box.appendChild(n);
+  }
+  const syms = CALLS.symbols.filter(s => s.path === f.path);
+  if (!syms.length) {
+    const d = document.createElement('div');
+    d.textContent = 'No symbols outlined in this file.';
+    box.appendChild(d);
+    return;
+  }
+  const rel = (label, list, key) => {
+    const d = document.createElement('div');
+    d.className = 'call-rel';
+    const names = [...new Set(list.map(e => symLabel(e[key], f.path)))];
+    d.textContent = label + (names.length ? names.join(', ') : 'none recorded');
+    box.appendChild(d);
+  };
+  syms.forEach(s => {
+    const head = document.createElement('div');
+    head.className = 'call-sym';
+    const name = document.createElement('span');
+    name.className = 'path'; name.textContent = s.qualified;
+    head.appendChild(name);
+    head.appendChild(document.createTextNode(' '));
+    const meta = document.createElement('span');
+    meta.className = 'tag';
+    meta.textContent = s.kind + ' · lines ' + s.start_line + '-' + s.end_line;
+    head.appendChild(meta);
+    if (DEAD_IDS.has(s.id)) {
+      head.appendChild(document.createTextNode(' '));
+      const tag = document.createElement('span');
+      tag.className = 'tag'; tag.textContent = 'possibly dead';
+      head.appendChild(tag);
+    }
+    box.appendChild(head);
+    rel('called by: ', CALLS.edges.filter(e => e.callee === s.id && e.kind !== 'reference'), 'caller');
+    rel('calls: ', CALLS.edges.filter(e => e.caller === s.id && e.kind !== 'reference'), 'callee');
+    const refs = CALLS.edges.filter(e => e.callee === s.id && e.kind === 'reference');
+    if (refs.length) rel('referenced by: ', refs, 'caller');
+  });
+}
 
 async function preview(f){
   CURRENT = f;
+  renderCalls(f);
   const seq = ++PREVIEW_SEQ;
   $('sliceMode').value = f.mode;
   $('previewMeta').textContent = 'Loading ' + f.path + ' (' + f.mode + ')...';
@@ -380,6 +452,15 @@ async function init(){
   const [scanR, pricesR] = await Promise.all([fetch('/api/scan'), fetch('/api/prices')]);
   const scan = await scanR.json(); PRICES = await pricesR.json();
   FILES = scan.files;
+  try {
+    const graphR = await fetch('/api/graph');
+    const graphData = await graphR.json();
+    CALLS = graphData.calls || null;
+    if (CALLS) {
+      CALLS.symbols.forEach(s => { SYMBOLS_BY_ID[s.id] = s; });
+      DEAD_IDS = new Set(CALLS.dead.map(d => d.id));
+    }
+  } catch (e) { CALLS = null; }
   const recs = scan.recommendations || [];
   // Recommendation paths and reasons are untrusted text too:
   // textContent, never innerHTML (same rule as the file table).

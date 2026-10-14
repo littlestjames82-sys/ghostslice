@@ -61,7 +61,7 @@ _ghostslice() {
             _arguments '-h' '--help' '--json'
             ;;
         calls)
-            _arguments '-h' '--help' '--json' '--dead'
+            _arguments '-h' '--help' '--json' '--dead' '--no-cache'
             ;;
         check)
             _arguments '-h' '--help'
@@ -97,7 +97,7 @@ _ghostslice() {
             _arguments '-h' '--help' '--yes' '--force' '--dry-run' '--budget' '--model'
             ;;
         lint)
-            _arguments '-h' '--help' '--json' '--strict'
+            _arguments '-h' '--help' '--json' '--strict' '--no-cache'
             ;;
         mcp)
             _arguments '-h' '--help'

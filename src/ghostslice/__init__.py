@@ -3,5 +3,5 @@
 Zero-dependency (Python stdlib only), local-first, no network, no telemetry.
 Token counts are estimates, not exact model tokenizer counts.
 """
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 __all__ = ["__version__"]

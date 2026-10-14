@@ -3,6 +3,48 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [1.0.2] - 2026-10-14
+Polish round 2: integration, performance, and config. The
+persistent cache reaches the two commands that never used it,
+the dashboard learns call relationships, and the duplicate
+floors become settings. Audit: `audits/POLISH_102_audit.md`.
+
+### Added
+- **Call data in the dashboard graph.** `GET /api/graph` now
+  carries a `"calls"` payload: Python symbols with their call
+  edges (callers/callees from the call graph), computed on the
+  first request and kept for the server run. A new Call graph
+  panel under the slice preview lists the selected file's
+  symbols with who calls each one, what each one calls, and a
+  "possibly dead" tag. Edges are capped at 2,000 and dead
+  candidates at 200 (true totals and truncation flags are
+  reported, and the panel repeats the caveat); non-Python files
+  honestly show no call data. Rendering stays textContent-only.
+- **Configurable duplicate floors.** Two `.ghostslice.json`
+  sections, validated as loudly as the `"lint"` section
+  (unknown keys and non-positive or fractional values are load
+  errors): `"duplicates": {"near_min_chars": N}` moves the
+  near-duplicate size floor (default 200 normalized
+  characters) and `"ci": {"duplicates_floor_tokens": N}` moves
+  the CI duplicates gate floor (default 500 recoverable
+  estimated tokens). Unset means the historical defaults on
+  every surface; the init wizard documents both keys and the
+  CI check reports the effective floor it used.
+
+### Changed
+- **`lint` and `calls` use the content cache.** Their scans,
+  the slices lint prices, and the call graph's per-file
+  outlines route through `.ghostslice-cache` with the export
+  path's discipline (content-hash keys, plugin-digest
+  namespacing, corrupt entries read as misses), and both
+  commands gain `--no-cache`. Output is byte-identical with
+  the cache off, cold, or warm (pinned on fixtures and on this
+  repo; on this repo warm lint runs ~27% faster and warm calls
+  ~18%). Duplicate detection is not cached (the cache has no
+  kind for normalized text). The `scan` command's dead-symbol
+  pass now reuses the cache scan already opens. The dashboard,
+  MCP, and `ci` keep their no-disk-cache behaviour.
+
 ## [1.0.1] - 2026-10-13
 Polish release: no new features — the tool run on itself, and
 its own findings fixed. Audit: `audits/POLISH_101_audit.md`.
