@@ -3,6 +3,58 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [1.0.6] - 2026-10-14
+Polish round 6: Kotlin constructor properties become symbols, the
+dashboard gains per-symbol call lists, and the test suite gets
+~40% faster without changing a single assertion. Audit:
+`audits/POLISH_106_audit.md`.
+
+### Fixed
+- **Kotlin primary-constructor properties are nameable symbols.**
+  `data class User(val name: String, var age: Int)` now outlines
+  `User.name` / `User.age` as attribute symbols of the class —
+  for plain classes too (`Repo.db`), because `val`/`var` in a
+  primary constructor is a member by Kotlin's rule; a parameter
+  without `val`/`var` is not a member and stays unlisted. Spans
+  sit on the class head, so sliced output ships each property
+  exactly once, with the head. Multi-line constructor heads are
+  fixed with them: the class span used to truncate to the
+  declaration line, its parameters leaked into the outline as
+  parentless top-level constants (an annotated parameter vanished
+  entirely), its methods lost their parent, and signatures mode
+  dropped the declaration line altogether. Wrapped defaults,
+  string templates with `${...}`, lambda defaults, generic types
+  with commas, annotations (including use-site targets), enum
+  classes, and supertype lists after the constructor are all
+  handled; selection, signatures, and task selection see the
+  properties like any other member.
+
+### Added
+- **`GET /api/calls?symbol=` — one symbol's complete call lists.**
+  The bulk `/api/graph` payload caps edges at 2,000, which on a
+  large project hides most symbols' relationships. The new
+  endpoint serves a single symbol's callers / callees /
+  referenced-by from the same memoised call graph (no second
+  build; a request during the startup warm-up waits for the same
+  build, and a build failure surfaces exactly as `/api/graph`'s
+  does). Query by symbol id (`util.py:helper`) or qualified name;
+  a name matching several files answers with the candidate list,
+  an unknown symbol is a 404. Per-list cap 500 with true totals
+  and truncation flags. The dashboard's Call graph panel grows a
+  "complete lists" button per symbol whenever the bulk payload is
+  truncated, swapping in the fetched lists and saying whether
+  they are complete or were themselves capped.
+
+### Changed
+- **Test suite wall time cut ~40%** (84.3s -> 50.7s measured on
+  the build machine; 925 tests before and after, no assertion
+  changed, nothing skipped). Two infrastructure fixes: HTTP-server
+  tests now serve with a 0.02s poll interval, so `shutdown()` no
+  longer waits out the 0.5s default on every boot (measured
+  0.506s -> 0.025s per boot+shutdown), and the perf suite's
+  synthetic big tree is halved to 1,000 files (the warm/cold CPU
+  ratio it pins re-measured at 4.7x against the 3x threshold).
+
 ## [1.0.5] - 2026-10-14
 Polish round 5: lite-language depth pass 2, MCP parity for the
 read-only insights, and the manual's restructure into a landing

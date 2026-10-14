@@ -163,7 +163,7 @@ def test_warmup_failure_surfaces_and_server_keeps_serving(
     monkeypatch.setattr(callgraph_mod, "build_call_graph", boom)
     server, state = make_server(str(tmp_path), port=0)
     port = server.server_address[1]
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.02), daemon=True)
     thread.start()
     try:
         state.start_calls_warmup()
@@ -206,7 +206,7 @@ def test_shutdown_during_warmup_build_does_not_hang(
 
     monkeypatch.setattr(callgraph_mod, "build_call_graph", slow_build)
     server, state = make_server(str(tmp_path), port=0)
-    serve_thread = threading.Thread(target=server.serve_forever,
+    serve_thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.02),
                                     daemon=True)
     serve_thread.start()
     try:

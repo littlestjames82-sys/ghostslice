@@ -872,7 +872,7 @@ def test_dashboard_export_surfaces_plugin_errors(tmp_path):
                     plugin_rel="tools/boom.py",
                     files={"bad.boom": "this has a BOOM inside\n"})
     server, _state = make_server(str(root), port=0)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.02), daemon=True)
     thread.start()
     try:
         port = server.server_address[1]

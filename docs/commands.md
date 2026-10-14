@@ -571,7 +571,13 @@ and Rust type declarations with multi-line `where` clauses,
 whose trait methods enumerate like any other trait's (v1.0.5).
 Lite limits, stated plainly: nested functions are outlined only
 for Python (lite outlines are top-level definitions plus class
-members); constructors are not selectable in lite languages; C#
+members); constructors are not selectable in lite languages —
+one exception: Kotlin primary-constructor properties (`val` /
+`var` parameters, in data classes and plain classes alike) ARE
+symbols of their class as of v1.0.6, because Kotlin makes them
+members; a constructor parameter without `val`/`var` is not a
+member and stays unlisted. Their spans sit on the class head, so
+a slice ships them exactly once, with the head; C#
 namespaces do not prefix qualified names; C# records enumerate
 their members like classes, expression-bodied methods are
 recognised, and Allman-brace declarations (the C# default:

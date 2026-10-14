@@ -313,9 +313,13 @@ class TestCacheSurfaces:
 
 
 # ---------------------------------------------------------------------------
-# The 2,000-file synthetic tree: generated once per module run.
+# The 1,000-file synthetic tree: generated once per module run.
+# (v1.0.6 suite-speed pass: halved from 2,000 — the warm/cold CPU
+# ratio and the byte-identity contracts are size-independent, and
+# the ratio was re-measured at this size with the same ~5x margin;
+# see audits/POLISH_106_audit.md.)
 
-def _gen_tree(root: Path, n_files: int = 2000) -> None:
+def _gen_tree(root: Path, n_files: int = 1000) -> None:
     for i in range(n_files):
         rng = random.Random(1234 + i)
         pkg = root / f"pkg{i % 40:02d}"

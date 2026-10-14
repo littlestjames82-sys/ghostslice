@@ -643,3 +643,18 @@ the audit findings that drove the two improvement rounds.
   test_v03.py (6 -> 9 tools), and the two dogfood-budget pins
   in test_v24_ci.py, re-measured per the workflow's own
   headroom rule). Audit: audits/POLISH_105_audit.md.
+- Post-marathon polish round 6 (v1.0.6, 2026-10-14): Kotlin
+  primary-constructor properties are symbols (val/var params of
+  data and plain classes, multi-line heads outlining/slicing with
+  true spans instead of truncating the class and leaking the
+  parameters as parentless top-level constants; nested-generics
+  comma splitting fixed on the way), the dashboard's per-symbol
+  call lookup (GET /api/calls serves one symbol's complete
+  callers/callees/referenced-by from the same memoised graph the
+  2,000-edge bulk cap cuts; panel "complete lists" fetch), and a
+  test-suite speed pass (84.3s -> 50.7s, -40%: serve_forever poll
+  interval in server tests, big-tree fixture halved to 1,000
+  files; zero assertions changed). Tests 925 -> 946 (21 new in
+  tests/test_v31_polish6.py; existing pins moved: the release
+  version pin 1.0.5 -> 1.0.6 only, plus Item C's test-infra
+  edits). Audit: audits/POLISH_106_audit.md.

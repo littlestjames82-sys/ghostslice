@@ -23,6 +23,16 @@ others reuse the string/comment-aware brace matcher. Parser-lite
 honesty applies: conventional formatting slices well, exotic syntax
 may not.
 
+Kotlin note (v1.0.6): primary-constructor properties are symbols.
+A `val`/`var` parameter of a primary constructor — in a data class
+or a plain class, one-line or multi-line head — is a member
+property of the class for outlines, `slice --symbols`, signatures,
+and task selection (a parameter without `val`/`var` is not a
+member and is not listed). Multi-line constructor heads outline
+and slice with their true spans; before v1.0.6 the class span
+truncated to the declaration line and the parameters leaked into
+outlines as parentless top-level properties.
+
 v0.8 adds C, C++, and Scala, same parser-lite label:
 
 | Language | signatures / interfaces keep | strip-tests drops |

@@ -165,7 +165,7 @@ def test_workspace_fallback_ignores_symlinked_children(tmp_path):
 
 def _serve(root: Path):
     server, state = make_server(str(root), port=0)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.02), daemon=True)
     thread.start()
     return server, server.server_address[1]
 

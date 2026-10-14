@@ -60,3 +60,18 @@ first request usually finds it ready instead of paying the
 build (a request that beats the build simply waits for the same
 payload). Call analysis covers Python files only; other files
 honestly show "no call data" in the panel.
+
+Per-symbol call lists (v1.0.6): the bulk payload's 2,000-edge cap
+hides most relationships on a large project, so the panel can
+fetch one symbol's complete lists from `GET /api/calls?symbol=`
+(a symbol id like `util.py:helper`, or a qualified name — one
+matching symbols in several files is answered with the candidate
+list, never a silent pick; an unknown symbol is a 404). The
+endpoint serves the same memoised call graph as `/api/graph` (no
+second build; a request during the startup warm-up waits for the
+same build), returning the symbol's callers, callees, and
+referenced-by with per-list caps of 500, true totals, and
+truncation flags. When the bulk payload is truncated, each symbol
+in the panel grows a "complete lists" button that swaps its lists
+for the fetched ones and says whether they are complete or were
+themselves capped.

@@ -200,7 +200,7 @@ def test_dashboard_page_has_no_innerhtml_interpolation(tmp_path):
     _write_project(tmp_path, {"app.py": "x = 1\n"})
     server, _state = make_server(str(tmp_path), port=0)
     port = server.server_address[1]
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.02), daemon=True)
     thread.start()
     try:
         with urllib.request.urlopen(

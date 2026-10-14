@@ -344,7 +344,7 @@ class TestSurfaces(MonoCase):
 
     def test_api_scan_packages(self):
         server, _state = make_server(str(self.root), port=0)
-        t = threading.Thread(target=server.serve_forever, daemon=True)
+        t = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.02), daemon=True)
         t.start()
         try:
             url = f"http://127.0.0.1:{server.server_address[1]}/api/scan"

@@ -21,7 +21,7 @@ class TestServer(unittest.TestCase):
         make_project(self.root)
         self.server, _ = make_server(str(self.root), port=0)
         self.port = self.server.server_address[1]
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread = threading.Thread(target=lambda: self.server.serve_forever(poll_interval=0.02), daemon=True)
         self.thread.start()
 
     def tearDown(self):

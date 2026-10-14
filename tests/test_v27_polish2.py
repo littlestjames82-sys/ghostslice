@@ -317,7 +317,7 @@ def dash(tmp_path):
     _write(root, "evil<script>.py", "def sneaky():\n    return 0\n")
     server, state = make_server(str(root), port=0)
     port = server.server_address[1]
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.02), daemon=True)
     thread.start()
     yield root, state, port
     server.shutdown()

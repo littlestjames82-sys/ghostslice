@@ -39,8 +39,10 @@ Python (lite outlines are top-level plus class members); methods
 of declaration types (interfaces, traits, protocols) are listed
 and selectable, but selecting one ships the whole type —
 declaration types are surface, exactly as in signatures mode.
-Constructors are not selectable symbols in lite languages; C#
-namespaces do not prefix qualified names; Go grouped
+Constructors are not selectable symbols in lite languages —
+except Kotlin primary-constructor properties, which are members
+by the language's own rule and are symbols of their class
+(v1.0.6). C# namespaces do not prefix qualified names; Go grouped
 `type ( ... )` declarations are not outlined; Kotlin/Swift
 single-expression function bodies that continue on more-indented
 lines are part of the symbol only on their first line; and a C++
@@ -63,7 +65,8 @@ from .slicer import (
     _CPP_NS_RE, _C_TYPE_RE, _ENUM_RE,
     _EXTRA_CFG, _FUNCTION_RE, _GO_TYPE_RE, _IMPORT_LINE_RES, _IMPORT_RE,
     _INTERFACE_RE, _JV_METHOD_HEAD_RE, _JV_TYPE_RE, _METHOD_RE,
-    _PREPROC_RE, _RB_ATTR_RE,
+    _PREPROC_RE, _RB_ATTR_RE, _declaration_stop, _kt_ctor_head,
+    _kt_ctor_params,
     _RB_CONST_RE, _RB_DEF_RE, _RB_REQUIRE_RE, _RB_TYPE_RE, _RS_FN_RE,
     _RS_IMPL_RE, _RS_TYPE_RE, _SC_ALIAS_RE, _SC_IMPORT_RE,
     _SC_TYPE_RE, _SC_VAL_RE, _TYPE_RE, _block_end, _body_brace_col,
@@ -732,24 +735,57 @@ def _extra_region(lines: list[str], i0: int, end: int, lang: str,
             if nm:
                 name = nm.group(1)
                 is_decl = kind_word in cfg["full_kinds"]
-                found = _find_block_brace(lines, i, limit=3)
-                if found:
-                    bl, bcol = found
+                # Kotlin primary constructors (v1.0.6): the head may
+                # span lines, and its val/var parameters are member
+                # properties living ON the head lines.
+                kt = _kt_ctor_head(lines, i, nm.end()) \
+                    if lang == "kotlin" else None
+                if kt is not None:
+                    ctor, brace, head_end = kt
+                else:
+                    ctor, brace = None, None
+                    # Kotlin body-less heads must not steal the
+                    # next declaration's brace (v1.0.6, audit F-A2).
+                    found = _find_block_brace(
+                        lines, i, limit=3,
+                        stop=_declaration_stop(cfg)
+                        if lang == "kotlin" else None)
+                    if found:
+                        brace = found
+                        head_end = found[0]
+                    else:
+                        head_end = i
+                if brace:
+                    bl, bcol = brace
                     bend = _brace_end(lines, bl, body_col=bcol, lang=lang)
                     head_end = bl
                 else:
-                    bend = i
-                    head_end = i
+                    bend = head_end
                 q = f"{parent_q}.{name}" if parent_q else name
                 out.append(Symbol(name, q, "type" if is_decl else "class",
                                   _decl_start(lines, i), bend, head_end, i,
                                   parent=parent_q))
-                if bend > i:
+                if ctor is not None:
+                    # Spans sit inside the head (start <= head_end),
+                    # so the renderer never emits them separately:
+                    # the head ships them exactly once, like the
+                    # always-context a body property gets — but the
+                    # names now resolve, list, and select.
+                    for pname, pstart, pend, pdecl in \
+                            _kt_ctor_params(lines, ctor):
+                        out.append(Symbol(pname, f"{q}.{pname}",
+                                          "attribute", pstart, pend,
+                                          pstart, pdecl, parent=q))
+                if brace and bend > head_end:
                     # Classes/objects recurse for members; declaration
                     # types (interface/trait/protocol) recurse too —
                     # their method declarations are symbols (the type
-                    # itself renders whole).
-                    _extra_region(lines, i + 1, bend, lang, q, out,
+                    # itself renders whole). Member walking starts
+                    # after the head: a constructor head's lines are
+                    # not body members.
+                    _extra_region(lines,
+                                  head_end + 1 if ctor else i + 1,
+                                  bend, lang, q, out,
                                   parent_kind=kind_word)
                 i = bend + 1
                 continue

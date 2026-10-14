@@ -61,6 +61,15 @@ SLICE_PREVIEW_CAP = 200_000
 CALL_EDGE_CAP = 2000
 CALL_DEAD_CAP = 200
 
+# v1.0.6: per-list cap for the /api/calls per-symbol endpoint. The
+# bulk payload above is cut for size, so on a large project most
+# symbols' relationships fall past it; the per-symbol endpoint
+# serves ONE symbol's complete lists from the same memoised build.
+# The cap is generous (a symbol with more than 500 distinct callers
+# is vanishingly rare) but bounded, and like the bulk caps it is
+# reported with true totals and a truncated flag.
+CALL_LIST_CAP = 500
+
 
 def _cap_text(text: str) -> tuple[str, bool]:
     """(text, was_truncated): cut at SLICE_PREVIEW_CAP characters
@@ -113,6 +122,10 @@ class _State:
         # request usually finds it ready; the lazy path remains the
         # fallback and the two produce identical payloads.
         self._calls_payload: dict | None = None
+        # v1.0.6: the UNCAPPED build result, kept alongside the
+        # capped bulk payload so /api/calls can serve one symbol's
+        # complete lists from the same single build (no re-scan).
+        self._calls_full: dict | None = None
         self._calls_error: BaseException | None = None
         self._calls_lock = threading.Lock()
         self._calls_thread: threading.Thread | None = None
@@ -178,6 +191,7 @@ class _State:
     def _build_calls_payload(self) -> dict:
         from .callgraph import build_call_graph
         full = build_call_graph(self.scan, self.profile, self.graph)
+        self._calls_full = full
         edges = full["edges"]
         dead = full["dead"]
         return {
@@ -233,6 +247,104 @@ class _State:
                 self._calls_error = exc
                 raise
         return self._calls_payload
+
+    def symbol_calls(self, query: str) -> tuple[int, dict]:
+        """One symbol's complete call lists (v1.0.6): the bulk
+        /api/graph payload caps its edge list (CALL_EDGE_CAP), so
+        past the cap a symbol's relationships are invisible in the
+        UI. This serves a single symbol's callers / callees /
+        referenced-by from the SAME memoised build the bulk
+        payload was cut from — `calls_payload()` runs first (and
+        is the only build trigger), so the warm-up/lazy interplay
+        and the stored-failure semantics are exactly /api/graph's.
+
+        `query` is a symbol id ("path:Qualified.name", what the
+        panel holds) or a bare qualified name. An id always wins;
+        a qualified name matching several files' symbols is
+        answered honestly with the candidate list instead of a
+        silent pick. Returns (status, payload): 404 with an error
+        object for an unknown symbol, matching the content
+        endpoints' error style."""
+        self.calls_payload()
+        full = self._calls_full
+        symbols = full["symbols"]
+        by_id = {s["id"]: s for s in symbols}
+        target = by_id.get(query)
+        if target is None:
+            matches = [s for s in symbols if s["qualified"] == query]
+            if len(matches) == 1:
+                target = matches[0]
+            elif matches:
+                return 200, {
+                    "ambiguous": True,
+                    "query": query,
+                    "matches": [{"id": s["id"],
+                                 "qualified": s["qualified"],
+                                 "path": s["path"],
+                                 "kind": s["kind"]}
+                                for s in matches],
+                    "note": ("the qualified name matches symbols in "
+                             "several files; ask by symbol id "
+                             "(\"path:Qualified.name\") to pick one"),
+                }
+        if target is None:
+            return 404, {"error": f"no such symbol: {query}"}
+        sid = target["id"]
+
+        def row(other_id: str, kind: str, sites: int) -> dict:
+            other = by_id.get(other_id)
+            if other is not None:
+                qualified, path = other["qualified"], other["path"]
+            elif other_id.endswith(":<module>"):
+                qualified = "<module>"
+                path = other_id[:-len(":<module>")]
+            else:  # pragma: no cover - edges carry resolved ids
+                qualified, path = other_id, ""
+            return {"id": other_id, "qualified": qualified,
+                    "path": path, "kind": kind, "sites": sites}
+
+        def collect(key: str, want_kind: str | None) -> list[dict]:
+            rows = []
+            for e in full["edges"]:
+                if want_kind is None and e["kind"] == "reference":
+                    continue
+                if want_kind is not None and e["kind"] != want_kind:
+                    continue
+                if key == "callee" and e["callee"] == sid:
+                    rows.append(row(e["caller"], e["kind"], e["sites"]))
+                elif key == "caller" and e["caller"] == sid:
+                    rows.append(row(e["callee"], e["kind"], e["sites"]))
+            rows.sort(key=lambda r: (-r["sites"], r["id"]))
+            return rows
+
+        callers = collect("callee", None)
+        callees = collect("caller", None)
+        referenced_by = collect("callee", "reference")
+
+        def capped(rows: list[dict]) -> tuple[list[dict], int, bool]:
+            return rows[:CALL_LIST_CAP], len(rows), \
+                len(rows) > CALL_LIST_CAP
+
+        c_rows, c_total, c_trunc = capped(callers)
+        e_rows, e_total, e_trunc = capped(callees)
+        r_rows, r_total, r_trunc = capped(referenced_by)
+        return 200, {
+            "symbol": target,
+            "callers": c_rows, "callers_total": c_total,
+            "callers_truncated": c_trunc,
+            "callees": e_rows, "callees_total": e_total,
+            "callees_truncated": e_trunc,
+            "referenced_by": r_rows, "referenced_by_total": r_total,
+            "referenced_by_truncated": r_trunc,
+            "list_cap": CALL_LIST_CAP,
+            "dead": sid in {d["id"] for d in full["dead"]},
+            "scope": ("call analysis covers Python files "
+                      "only; other files have no call data"),
+            "note": ("complete lists for this symbol from the "
+                     "project call graph (the bulk /api/graph "
+                     "payload is capped; this endpoint is not, up "
+                     f"to {CALL_LIST_CAP} entries per list)"),
+        }
 
     def start_calls_warmup(self) -> None:
         """Begin building the call-graph payload on a daemon thread
@@ -454,6 +566,17 @@ def make_server(root: str, port: int = 8765, host: str = "127.0.0.1"):
                                  "recommendations": state.recommendations,
                                  "duplicates": state.duplicates,
                                  "calls": state.calls_payload()})
+            elif parsed.path == "/api/calls":
+                # v1.0.6: one symbol's complete call lists — the
+                # bulk graph payload's edge cap hides most of a
+                # large project's relationships; this serves them
+                # per symbol from the same memoised build.
+                query = (qs.get("symbol") or [""])[0]
+                if not query:
+                    self._json(400, {"error": "missing symbol"})
+                    return
+                status, payload = state.symbol_calls(query)
+                self._json(status, payload)
             elif parsed.path == "/api/secrets":
                 self._json(200, {"findings": state.secrets, "count": len(state.secrets),
                                  "note": "values redacted to first 4 characters"})

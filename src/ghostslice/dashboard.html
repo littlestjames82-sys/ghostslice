@@ -330,6 +330,7 @@ function setView(v){
 const MODE_LIST = ['full','signatures','interfaces','structure','headings','strip-tests','exclude'];
 let CURRENT = null, PREVIEW_SEQ = 0;
 let CALLS = null, SYMBOLS_BY_ID = {}, DEAD_IDS = new Set();
+let FETCHED_CALLS = {};
 
 function symLabel(id, currentPath){
   const s = SYMBOLS_BY_ID[id];
@@ -339,6 +340,24 @@ function symLabel(id, currentPath){
     return p === currentPath ? '(module level)' : '(module level) · ' + p;
   }
   return id;
+}
+
+async function fetchSymbolCalls(s, f){
+  // Per-symbol complete lists (v1.0.6): the bulk payload is edge-
+  // capped, so one symbol's full relationships come from
+  // /api/calls, served from the same server-side call graph.
+  try {
+    const r = await fetch('/api/calls?symbol=' + encodeURIComponent(s.id));
+    const d = await r.json();
+    if (!r.ok || d.error) {
+      FETCHED_CALLS[s.id] = { error: (d && d.error) || ('HTTP ' + r.status) };
+    } else {
+      FETCHED_CALLS[s.id] = d;
+    }
+  } catch (e) {
+    FETCHED_CALLS[s.id] = { error: String(e) };
+  }
+  if (CURRENT === f) renderCalls(f);
 }
 
 function renderCalls(f){
@@ -355,7 +374,8 @@ function renderCalls(f){
   if (CALLS.edges_truncated) {
     const n = document.createElement('div');
     n.textContent = 'Showing the first ' + fmt(CALLS.edges.length) + ' of ' +
-      fmt(CALLS.edges_total) + ' call edges; per-symbol lists may be incomplete.';
+      fmt(CALLS.edges_total) + ' call edges in bulk; the lists below may be incomplete. ' +
+      'Use "complete lists" on a symbol to fetch its full relationships.';
     box.appendChild(n);
   }
   const syms = CALLS.symbols.filter(s => s.path === f.path);
@@ -365,14 +385,16 @@ function renderCalls(f){
     box.appendChild(d);
     return;
   }
-  const rel = (label, list, key) => {
+  const rel = (parent, label, labels) => {
     const d = document.createElement('div');
     d.className = 'call-rel';
-    const names = [...new Set(list.map(e => symLabel(e[key], f.path)))];
+    const names = [...new Set(labels)];
     d.textContent = label + (names.length ? names.join(', ') : 'none recorded');
-    box.appendChild(d);
+    parent.appendChild(d);
   };
   syms.forEach(s => {
+    const block = document.createElement('div');
+    block.className = 'call-block';
     const head = document.createElement('div');
     head.className = 'call-sym';
     const name = document.createElement('span');
@@ -383,17 +405,51 @@ function renderCalls(f){
     meta.className = 'tag';
     meta.textContent = s.kind + ' · lines ' + s.start_line + '-' + s.end_line;
     head.appendChild(meta);
-    if (DEAD_IDS.has(s.id)) {
+    const fetched = FETCHED_CALLS[s.id];
+    const haveFull = fetched && !fetched.error;
+    if (DEAD_IDS.has(s.id) || (haveFull && fetched.dead)) {
       head.appendChild(document.createTextNode(' '));
       const tag = document.createElement('span');
       tag.className = 'tag'; tag.textContent = 'possibly dead';
       head.appendChild(tag);
     }
-    box.appendChild(head);
-    rel('called by: ', CALLS.edges.filter(e => e.callee === s.id && e.kind !== 'reference'), 'caller');
-    rel('calls: ', CALLS.edges.filter(e => e.caller === s.id && e.kind !== 'reference'), 'callee');
-    const refs = CALLS.edges.filter(e => e.callee === s.id && e.kind === 'reference');
-    if (refs.length) rel('referenced by: ', refs, 'caller');
+    block.appendChild(head);
+    if (haveFull) {
+      rel(block, 'called by: ', fetched.callers.map(r => symLabel(r.id, f.path)));
+      rel(block, 'calls: ', fetched.callees.map(r => symLabel(r.id, f.path)));
+      if (fetched.referenced_by.length) {
+        rel(block, 'referenced by: ', fetched.referenced_by.map(r => symLabel(r.id, f.path)));
+      }
+      const st = document.createElement('div');
+      st.className = 'call-rel';
+      if (fetched.callers_truncated || fetched.callees_truncated || fetched.referenced_by_truncated) {
+        st.textContent = 'Complete lists fetched, but a list exceeded the per-symbol cap of ' +
+          fmt(fetched.list_cap) + ': ' + fmt(fetched.callers_total) + ' caller(s), ' +
+          fmt(fetched.callees_total) + ' callee(s), ' + fmt(fetched.referenced_by_total) +
+          ' reference(s) in total.';
+      } else {
+        st.textContent = 'Complete lists fetched (not cut by the bulk edge cap).';
+      }
+      block.appendChild(st);
+    } else {
+      rel(block, 'called by: ', CALLS.edges.filter(e => e.callee === s.id && e.kind !== 'reference').map(e => symLabel(e.caller, f.path)));
+      rel(block, 'calls: ', CALLS.edges.filter(e => e.caller === s.id && e.kind !== 'reference').map(e => symLabel(e.callee, f.path)));
+      const refs = CALLS.edges.filter(e => e.callee === s.id && e.kind === 'reference');
+      if (refs.length) rel(block, 'referenced by: ', refs.map(e => symLabel(e.caller, f.path)));
+      if (fetched && fetched.error) {
+        const st = document.createElement('div');
+        st.className = 'call-rel';
+        st.textContent = 'Complete-list fetch failed: ' + fetched.error;
+        block.appendChild(st);
+      } else if (CALLS.edges_truncated) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = 'complete lists';
+        btn.addEventListener('click', () => fetchSymbolCalls(s, f));
+        block.appendChild(btn);
+      }
+    }
+    box.appendChild(block);
   });
 }
 

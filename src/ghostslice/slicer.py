@@ -1170,10 +1170,26 @@ def _extra_block_end(lines, start, lang):
 
 def _extra_class_members(lines, start, lang, cfg):
     """Member signatures of a class-like block starting at `start`."""
-    end = _extra_block_end(lines, start, lang)
-    header = _sig_before_body(lines[start]) + " {"
-    out = [header]
-    i = start + 1
+    # Kotlin multi-line primary-constructor head (v1.0.6): the
+    # header is every head line, not just the declaration line, and
+    # members start after the block brace — the head's own lines
+    # (constructor parameters) belong to the header, not the body.
+    kt = None
+    if lang == "kotlin":
+        tm0 = cfg["type"].match(lines[start])
+        if tm0:
+            kt = _kt_ctor_head(lines, start, tm0.end())
+    if kt is not None and kt[1] is not None and kt[2] > start:
+        _ctor, (bl, bcol), _he = kt
+        end = _brace_end(lines, bl, body_col=bcol, lang=lang)
+        out = [ln.rstrip() for ln in lines[start:bl]]
+        out.append(_sig_before_body(lines[bl]) + " {")
+        i = bl + 1
+    else:
+        end = _extra_block_end(lines, start, lang)
+        header = _sig_before_body(lines[start]) + " {"
+        out = [header]
+        i = start + 1
     while i < end:
         line = lines[i]
         stripped = line.strip()
@@ -1190,12 +1206,14 @@ def _extra_class_members(lines, start, lang, cfg):
                 i += 1
         elif tm:
             kind = tm.group(2)
-            if _find_block_brace(lines, i, limit=3) is not None \
-                    and kind in cfg["full_kinds"]:
+            stop = _declaration_stop(cfg) if lang == "kotlin" else None
+            if _find_block_brace(lines, i, limit=3, stop=stop) \
+                    is not None and kind in cfg["full_kinds"]:
                 bend = _extra_block_end(lines, i, lang)
                 out.extend(ln.rstrip() for ln in lines[i:bend + 1])
                 i = bend + 1
-            elif _find_block_brace(lines, i, limit=3) is not None:
+            elif _find_block_brace(lines, i, limit=3, stop=stop) \
+                    is not None:
                 sub, nxt = _extra_class_members(lines, i, lang, cfg)
                 out.extend(sub)
                 i = nxt
@@ -1234,22 +1252,47 @@ def _extra_signatures(lines, lang, cfg, mode):
         if cfg["import"].match(line):
             out.append(line.rstrip())
             i += 1
-        elif tm and _find_block_brace(lines, i, limit=3) is not None:
+        elif tm:
             # The block brace may sit on its own line (PSR-12
             # Allman style is the PHP standard); the outline walker
             # has always located it with _find_block_brace, and the
             # signatures gate now agrees with it (v1.0.5).
             kind = tm.group(2)
-            if kind in cfg["full_kinds"]:
-                end = _extra_block_end(lines, i, lang)
-                out.extend(ln.rstrip() for ln in lines[i:end + 1])
+            # Kotlin primary-constructor heads (v1.0.6) may span
+            # lines the 3-line brace gate cannot see, and a
+            # body-less one has no brace at all: its head IS the
+            # declaration and renders whole.
+            kt = _kt_ctor_head(lines, i, tm.end()) \
+                if lang == "kotlin" else None
+            # Kotlin body-less heads must not steal the next
+            # declaration's brace (v1.0.6, audit F-A2).
+            kt_stop = _declaration_stop(cfg) if lang == "kotlin" else None
+            if kt is not None and kt[1] is None:
+                out.extend(ln.rstrip() for ln in lines[i:kt[2] + 1])
                 out.append("")
-                i = end + 1
+                i = kt[2] + 1
+            elif _find_block_brace(lines, i, limit=3, stop=kt_stop) \
+                    is not None or kt is not None:
+                if kind in cfg["full_kinds"]:
+                    end = _extra_block_end(lines, i, lang)
+                    out.extend(ln.rstrip() for ln in lines[i:end + 1])
+                    out.append("")
+                    i = end + 1
+                else:
+                    sub, nxt = _extra_class_members(lines, i, lang, cfg)
+                    out.extend(sub)
+                    out.append("")
+                    i = nxt
+            elif lang == "kotlin" and _find_block_brace(
+                    lines, i, limit=8, stop=kt_stop) is None:
+                # A body-less Kotlin declaration (`data class
+                # Marker`, `interface Callback`): the declaration
+                # line is the whole surface — render it, do not
+                # drop it (or, worse, borrow the next class's body).
+                out.append(line.rstrip())
+                i += 1
             else:
-                sub, nxt = _extra_class_members(lines, i, lang, cfg)
-                out.extend(sub)
-                out.append("")
-                i = nxt
+                i += 1
         elif cfg["func"].match(line):
             if mode == "interfaces":
                 i = _extra_block_end(lines, i, lang) + 1 if "{" in line else i + 1
@@ -1530,11 +1573,20 @@ def _mask_quotes(line: str) -> str:
     return "".join(out)
 
 
-def _find_block_brace(lines, i, limit=5):
+def _find_block_brace(lines, i, limit=5, stop=None):
     """(line, col) of a block-opening `{` at paren depth 0, or None when
-    a `;` at depth 0 comes first (a statement, not a block)."""
+    a `;` at depth 0 comes first (a statement, not a block).
+
+    `stop` (v1.0.6): an optional line predicate — when a line after
+    the first matches it, the search ends with None. Kotlin callers
+    pass a fresh-declaration predicate so a body-less class head
+    (`data class Marker`, `interface Callback`) cannot steal the
+    NEXT declaration's brace, which the bare window search
+    otherwise does whenever the two sit within `limit` lines."""
     depth = 0
     for t in range(i, min(i + limit, len(lines))):
+        if stop is not None and t > i and stop(lines[t]):
+            return None
         masked = _mask_quotes(lines[t])
         for idx, ch in enumerate(masked):
             if ch == "(":
@@ -1548,12 +1600,265 @@ def _find_block_brace(lines, i, limit=5):
     return None
 
 
+def _declaration_stop(cfg):
+    """Line predicate: the line starts a fresh type/function/
+    property declaration of the cfg's language. Used as the `stop`
+    for _find_block_brace on body-less-prone heads (Kotlin)."""
+    pats = [cfg["type"], cfg["func"]]
+    if cfg.get("prop"):
+        pats.append(cfg["prop"])
+
+    def stop(line):
+        return any(p.match(line) for p in pats)
+
+    return stop
+
+
 def _stmt_end(lines, i, limit=6):
     """Index of the line where the statement starting at `i` ends (`;`)."""
     for t in range(i, min(i + limit, len(lines))):
         if ";" in _mask_quotes(lines[t]):
             return t
     return i
+
+
+# ---------------------------------------------------------------------------
+# Kotlin primary-constructor heads (v1.0.6)
+#
+# A Kotlin class head can carry a primary constructor whose parameter
+# list spans lines: `data class Order(\n val id: Long, ...\n) {`.
+# The generic lite machinery assumed the block brace sits within a
+# few lines of the declaration and that the head is one line, so a
+# multi-line constructor truncated the class span to its first line
+# and its parameters leaked into outlines as parentless top-level
+# properties. The helpers below locate the constructor span and the
+# head's true extent so the outline and the signatures slicer can
+# treat the head as what it is. Parser-lite limits, honestly: the
+# constructor's `(` must sit on the declaration line (after the type
+# name and an optional same-line generic parameter list); the
+# `constructor` keyword form (`class Foo @Inject constructor(...)`)
+# is not recognised; quote masking is per line, so a paren inside a
+# multi-line raw string default can still confuse the match.
+# ---------------------------------------------------------------------------
+
+_KT_HEAD_MAX = 200  # lines a constructor head may span (pathology cap)
+
+
+def _kt_ctor_span(lines, i, after):
+    """(open_line, open_col, close_line, close_col) of the primary
+    constructor parameter list of a Kotlin type declared at line `i`,
+    or None when the head has no constructor there.
+
+    The search starts at column `after` on line `i` (just past the
+    type name): an optional generic parameter list is skipped, and
+    the first `(` found is the constructor's — a `:` or `{` first
+    means the head has supertypes/a body but no primary constructor
+    (the parens of a supertype call are not a constructor)."""
+    masked = _mask_quotes(lines[i])
+    j = after
+    while j < len(masked) and masked[j] in " \t":
+        j += 1
+    if j < len(masked) and masked[j] == "<":
+        depth = 0
+        while j < len(masked):
+            if masked[j] == "<":
+                depth += 1
+            elif masked[j] == ">":
+                depth -= 1
+                if depth == 0:
+                    j += 1
+                    break
+            j += 1
+        while j < len(masked) and masked[j] in " \t":
+            j += 1
+    if j >= len(masked) or masked[j] != "(":
+        return None
+    open_col = j
+    depth = 0
+    for t in range(i, min(i + _KT_HEAD_MAX, len(lines))):
+        m = _mask_quotes(lines[t])
+        k = open_col if t == i else 0
+        while k < len(m):
+            ch = m[k]
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    return (i, open_col, t, k)
+            k += 1
+    return None
+
+
+def _kt_head_brace(lines, ctor):
+    """(brace, head_end) for a Kotlin constructor head: `brace` is
+    (line, col) of the body-opening `{` at paren depth 0 after the
+    constructor's close paren, or None for a body-less class;
+    `head_end` is the head's last line either way.
+
+    After the close paren the head may continue with a supertype
+    list (`) : Bar(x), Baz {`), possibly wrapped over lines, or an
+    Allman `{` on its own line. The scan follows the remainder of
+    the close line plus continuation lines only while the head
+    grammatically continues: unbalanced parens, a trailing `,` or
+    `:` (more supertypes coming), or a next line opening with `{`
+    or `:`. Anything else ends the head — a following declaration's
+    brace is never stolen."""
+    _ol, _oc, close_line, close_col = ctor
+    depth = 0
+    t = close_line
+    col = close_col + 1
+    last = close_line
+    while t < len(lines) and t - close_line <= 8:
+        masked = _mask_quotes(lines[t])
+        j = col if t == close_line else 0
+        while j < len(masked):
+            ch = masked[j]
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+            elif depth == 0 and ch == "{":
+                return (t, j), t
+            elif depth == 0 and ch == ";":
+                return None, last
+            j += 1
+        last = t
+        tail = masked.rstrip()
+        nxt = lines[t + 1].lstrip() if t + 1 < len(lines) else ""
+        if depth > 0 or tail.endswith(",") or tail.endswith(":") \
+                or nxt.startswith("{") or nxt.startswith(":"):
+            t += 1
+            continue
+        break
+    return None, last
+
+
+def _kt_ctor_head(lines, i, after):
+    """(ctor, brace, head_end) for a Kotlin type head at line `i`,
+    or None when the head carries no primary constructor. `brace`
+    is None and `head_end` the constructor's close line (extended
+    over any trailing supertype lines) for a body-less class."""
+    ctor = _kt_ctor_span(lines, i, after)
+    if ctor is None:
+        return None
+    brace, head_end = _kt_head_brace(lines, ctor)
+    return ctor, brace, head_end
+
+
+_KT_PROP_KW_RE = re.compile(r"(val|var)\b\s*`?(\w+)`?")
+
+
+def _kt_segment_param(seg):
+    """One constructor segment -> (name, start_line, end_line,
+    decl_line) or None when the segment is not a property.
+
+    `seg` is the segment's masked characters as (line, ch) pairs.
+    A segment is a property when a `val`/`var` keyword appears at
+    the segment's own paren/brace depth 0 (so a `val` inside a
+    lambda default does not count, and neither does one inside an
+    annotation's arguments). Annotations and modifiers precede the
+    keyword in a segment, so the first depth-0 keyword is the
+    property's; a parameter without one is a plain constructor
+    parameter, never a property."""
+    text = "".join(ch for _ln, ch in seg)
+    depth_p = 0
+    depth_b = 0
+    pos = 0
+    kw = None
+    for m in _KT_PROP_KW_RE.finditer(text):
+        # Depth at the keyword: scan the text before it once,
+        # incrementally (segments are constructor-sized).
+        while pos < m.start():
+            ch = text[pos]
+            if ch == "(":
+                depth_p += 1
+            elif ch == ")":
+                depth_p -= 1
+            elif ch == "{":
+                depth_b += 1
+            elif ch == "}":
+                depth_b -= 1
+            pos += 1
+        if depth_p == 0 and depth_b == 0:
+            kw = m
+            break
+    if kw is None:
+        return None
+    content = [k for k, (ln, ch) in enumerate(seg) if not ch.isspace()]
+    if not content:
+        return None
+    start_line = seg[content[0]][0]
+    end_line = seg[content[-1]][0]
+    decl_line = seg[kw.start()][0]
+    return kw.group(2), start_line, end_line, decl_line
+
+
+def _kt_ctor_params(lines, ctor):
+    """Constructor properties of a Kotlin primary constructor:
+    [(name, start_line, end_line, decl_line)] in source order.
+
+    The parameter list is split at top-level commas — paren,
+    bracket, and brace depth are tracked over the quote-masked
+    text, plus a heuristic angle depth for generic types
+    (`Map<String, Int>` must not split): `<` opens an angle span
+    only when it directly follows an identifier/`>` and directly
+    precedes a word character, which spaced comparisons in
+    defaults (`a < b`) never do. Only parameters declared with
+    `val`/`var` are properties — that is Kotlin's rule, for data
+    classes and plain classes alike."""
+    open_line, open_col, close_line, close_col = ctor
+    segments: list[list[tuple[int, str]]] = []
+    seg: list[tuple[int, str]] = []
+    paren = 0
+    bracket = 0
+    brace = 0
+    angle = 0
+    prev_sig = ""  # previous significant (non-space) character
+    for t in range(open_line, close_line + 1):
+        masked = _mask_quotes(lines[t])
+        start = open_col + 1 if t == open_line else 0
+        stop = close_col if t == close_line else len(masked)
+        for k in range(start, stop):
+            ch = masked[k]
+            if ch == "(":
+                paren += 1
+            elif ch == ")":
+                paren -= 1
+            elif ch == "[":
+                bracket += 1
+            elif ch == "]":
+                bracket -= 1
+            elif ch == "{":
+                brace += 1
+            elif ch == "}":
+                brace -= 1
+            elif ch == "<" and paren == 0 and brace == 0:
+                nxt = masked[k + 1] if k + 1 < len(masked) else ""
+                if (prev_sig.isalnum() or prev_sig in "_>") \
+                        and (nxt.isalnum() or nxt in "_?<"):
+                    angle += 1
+            elif ch == ">" and angle > 0 and paren == 0 and brace == 0:
+                if prev_sig.isalnum() or prev_sig in "_?>":
+                    angle -= 1
+            elif ch == "," and paren == 0 and bracket == 0 \
+                    and brace == 0 and angle == 0:
+                segments.append(seg)
+                seg = []
+                prev_sig = ","
+                continue
+            seg.append((t, ch))
+            if not ch.isspace():
+                prev_sig = ch
+        seg.append((t, "\n"))
+    if seg:
+        segments.append(seg)
+    out = []
+    for seg in segments:
+        param = _kt_segment_param(seg)
+        if param is not None:
+            out.append(param)
+    return out
 
 
 def _c_func_head(lines, i, lang, bare_name=None):
