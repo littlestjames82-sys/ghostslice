@@ -426,6 +426,8 @@ def _existing_summary(existing: Profile) -> list[str]:
         parts.append(f"budget_tokens {existing.budget_tokens:,}")
     if existing.entry_points:
         parts.append(f"{len(existing.entry_points)} entry point(s)")
+    if existing.plugins:
+        parts.append(f"{len(existing.plugins)} plugin(s)")
     if existing.preset:
         parts.append(f"preset {existing.preset}")
     if existing.auto_shrink:

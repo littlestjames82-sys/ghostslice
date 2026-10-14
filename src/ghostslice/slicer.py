@@ -52,6 +52,7 @@ import ast
 import re
 from dataclasses import dataclass
 
+from . import plugins as _plugins
 from .configslice import CONFIG_LANGUAGES, slice_config
 from .scanner import is_test_file, language_for
 from .tokens import estimate_tokens
@@ -91,6 +92,16 @@ def slice_source(source: str, language: str, mode: str, path: str = "") -> str:
         return source
     if mode == "strip-tests" and path and is_test_file(path):
         return ""
+    # v0.23: plugin dispatch. A registered plugin slicer for this
+    # language replaces the built-in dispatch below — for a new
+    # language, or for a built-in when the load explicitly allowed
+    # an override. full / exclude (above) and the test-file drop
+    # are core business and never reach a plugin; every other mode
+    # is the plugin's to handle or pass through unchanged
+    # (plugins.try_slice applies the failure discipline).
+    plugin_text = _plugins.try_slice(language, source, mode, path)
+    if plugin_text is not None:
+        return plugin_text
     if mode == "headings" and language not in ("markdown", "notebook"):
         return source  # headings is a docs/notebook mode; other files stay full
     if mode == "structure" and language not in CONFIG_LANGUAGES:

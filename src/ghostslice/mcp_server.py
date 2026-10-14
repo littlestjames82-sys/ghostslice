@@ -12,6 +12,14 @@ Tools:
 
 Token counts are estimates (see tokens.py); prices are the local dated
 prices.json, never live.
+
+Plugins (v0.23): tools that scan, slice, lint, estimate, or export
+honour the project's profile "plugins" entries — the profile is
+the only loading point for MCP (there is no --plugin flag here).
+A profile plugin that fails to LOAD surfaces as that tool call's
+error result; a plugin failing on ONE file degrades per plugins.py's
+failure discipline (full text + a manifest "plugin_errors" entry
+on export).
 """
 from __future__ import annotations
 
@@ -20,6 +28,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
+from . import plugins as _plugins
 from .exporter import build_bundle, estimate_context_tokens
 from .graph import build_graph, recommendations
 from .pricing import estimate_cost, get_model, load_prices
@@ -116,11 +125,20 @@ TOOLS = [
 ]
 
 
+def _project_plugins(path):
+    """The plugin set a project's profile names (v0.23). MCP has no
+    --plugin flag: the profile is the only loading point here, and
+    it is the project's own standing opt-in."""
+    profile = load_profile(path)
+    return profile, _plugins.load_for_project(path, profile=profile)
+
+
 def _scan_project(args: dict) -> dict:
-    profile = load_profile(args["path"])
-    matcher = profile.is_ignored if profile.path else None
-    result = scan(args["path"], ignore_matcher=matcher)
-    graph = build_graph(result)
+    profile, pset = _project_plugins(args["path"])
+    with _plugins.activated(pset):
+        matcher = profile.is_ignored if profile.path else None
+        result = scan(args["path"], ignore_matcher=matcher)
+        graph = build_graph(result)
     return {
         "root": result.root,
         "file_count": len(result.files),
@@ -138,7 +156,13 @@ def _slice_file(args: dict) -> dict:
     abspath = file_arg if file_arg.is_absolute() else root / file_arg
     rel = str(abspath.relative_to(root)) if abspath.is_relative_to(root) else abspath.name
     source = _gs_read_text(abspath)
-    return slice_text(rel, source, args.get("mode", "signatures")).to_dict()
+    _, pset = _project_plugins(root)
+    with _plugins.activated(pset):
+        out = slice_text(rel, source,
+                         args.get("mode", "signatures")).to_dict()
+    if pset.errors:
+        out["plugin_errors"] = list(pset.errors)
+    return out
 
 
 def _estimate_cost(args: dict) -> dict:
@@ -177,6 +201,10 @@ def _export_bundle(args: dict) -> dict:
         out["redaction"] = manifest["redaction"]
     if manifest.get("symbols"):
         out["symbols"] = manifest["symbols"]
+    if manifest.get("plugins"):
+        out["plugins"] = manifest["plugins"]
+    if manifest.get("plugin_errors"):
+        out["plugin_errors"] = manifest["plugin_errors"]
     return out
 
 
@@ -189,9 +217,12 @@ def _check_secrets(args: dict) -> dict:
 
 def _lint_project(args: dict) -> dict:
     from .lint import lint_exit_code, lint_project
-    profile = load_profile(args["path"])
-    payload = lint_project(args["path"], profile=profile)
+    profile, pset = _project_plugins(args["path"])
+    with _plugins.activated(pset):
+        payload = lint_project(args["path"], profile=profile)
     payload = dict(payload)
+    if pset.errors:
+        payload["plugin_errors"] = list(pset.errors)
     payload["exit_code"] = lint_exit_code(payload, strict=bool(args.get("strict")))
     return payload
 

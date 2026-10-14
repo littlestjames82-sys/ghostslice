@@ -1,7 +1,7 @@
 """GhostSlice command line.
 
 Commands:
-  ghostslice scan         <path> [--json] [--model ID] [--timing] [--no-cache]
+  ghostslice scan         <path> [--json] [--top N] [--model ID] [--timing] [--no-cache]
   ghostslice graph        <path> [--json]
   ghostslice slice        <path> --mode MODE -o <dir> [--no-cache]
   ghostslice task         <path> (--task "words" | --diff) [--budget N] [--fit N] -o <bundle> [--preset P]
@@ -10,12 +10,15 @@ Commands:
   ghostslice calls        <path> [file] [--json] [--dead]
   ghostslice watch        <path> [--export] [-o <bundle>] [--interval S] [--debounce S] [--once] [--max-events N] [--fit N] [--redact] [--auto-shrink]
   ghostslice check-budget <path> [--max-tokens N]
+  ghostslice ci           <path> [--budget N] [--strict] [--allow-secrets] [--json | --pr-comment] [--out report.html]
   ghostslice lint         <path> [--json] [--strict]
   ghostslice init         <path> [--yes] [--force] [--dry-run] [--budget N] [--model ID]
   ghostslice cache        stats|clear <path>
   ghostslice check        <bundle>
   ghostslice diff         <bundleA> <bundleB> [--json]
   ghostslice history      <path> [--json] [--trend] [--model ID]
+  ghostslice doctor       <path> [--json]
+  ghostslice completions  bash|zsh
   ghostslice mcp                              (stdio MCP server, see mcp_server.py)
   ghostslice serve        <path> --port 8765
   ghostslice prices
@@ -33,9 +36,10 @@ import time
 from pathlib import Path
 
 from . import __version__
+from . import plugins as _plugins
 from .cache import cached_slice_text, clear_cache, open_cache
 from .cache import cache_stats as _cache_stats
-from .exporter import SLICABLE, build_bundle, estimate_context_tokens, validate_bundle
+from .exporter import build_bundle, estimate_context_tokens, is_slicable, validate_bundle
 from .graph import build_graph, importers_of, recommendations
 from .ledger import analytics as ledger_analytics
 from .ledger import summary as ledger_summary
@@ -136,6 +140,21 @@ def _print_redaction(manifest, exclude_secrets_on: bool = False) -> None:
               "the remaining files.")
 
 
+def _print_plugin_errors(manifest) -> None:
+    """Print the v0.23 plugin failure summary from the manifest:
+    each file a plugin failed on shipped its FULL text instead of
+    a slice — that must never be silent."""
+    for err in manifest.get("plugin_errors") or ():
+        where = err.get("path") or "(unknown file)"
+        mode = f" mode {err['mode']}" if err.get("mode") else ""
+        fallback = ("treated as no outline"
+                    if str(err.get("kind", "")).startswith("outline")
+                    else "full text used instead")
+        print(f"plugins: warning: {err.get('kind')} failed for {where} "
+              f"({err.get('language')}{mode}): {err.get('error')} — "
+              f"{fallback}", file=sys.stderr)
+
+
 def _print_symbols(manifest) -> None:
     """Print the v0.18 symbol-selection report from the manifest:
     what was requested, how much matched where, and — loudly — the
@@ -227,19 +246,31 @@ def _warn_secrets(findings, heading="WARNING: possible secrets detected") -> Non
 
 
 def _print_fit(fit_report) -> bool:
-    """Print the --fit report; return True when the bundle fitted."""
+    """Print the --fit report (v1.0: mockup table layout; same
+    content the report has always carried); return True when the
+    bundle fitted."""
     if not fit_report:
         return True
     steps = fit_report["steps"]
-    step_text = ", ".join(f"{k} x{n}" for k, n in steps.items()) if steps else "no downgrades needed"
-    print(f"Fit target: {fit_report['fit_tokens']:,} estimated tokens: "
-          f"{fit_report['before_tokens']:,} -> {fit_report['after_tokens']:,} "
-          f"({'fitted' if fit_report['fitted'] else 'COULD NOT FIT'})")
+    verdict = "fitted" if fit_report["fitted"] else "COULD NOT FIT"
+    print(f"Fit report (target: {fit_report['fit_tokens']:,} "
+          "estimated tokens):")
+    print(f"  {'before':>10}  {'after':>10}  result")
+    print(f"  {'-' * 10}  {'-' * 10}  {'-' * 12}")
+    print(f"  {fit_report['before_tokens']:>10,}  "
+          f"{fit_report['after_tokens']:>10,}  {verdict}")
     if "redacted_after_tokens" in fit_report:
         print(f"  after redaction: {fit_report['redacted_after_tokens']:,} estimated "
               "tokens (the ladder judged pre-redaction slices; manifest totals "
               "are post-redaction)")
-    print(f"  downgrades: {step_text}")
+    if steps:
+        print("  downgrade steps:")
+        print(f"    {'step':<22}  {'files':>5}")
+        print(f"    {'-' * 22}  {'-' * 5}")
+        for name, count in steps.items():
+            print(f"    {name:<22}  {count:>5}")
+    else:
+        print("  downgrade steps: none needed")
     if not fit_report["fitted"]:
         print(f"WARNING: could not fit the bundle into {fit_report['fit_tokens']:,} estimated tokens "
               f"(best achievable {fit_report['after_tokens']:,}); the bundle was still written.",
@@ -247,27 +278,57 @@ def _print_fit(fit_report) -> bool:
     return fit_report["fitted"]
 
 
+_HEAT_WIDTH = 16
+
+
+def _heat_bar(tokens: int, max_tokens: int) -> str:
+    """A block-char bar scaled so the largest file fills the
+    width; any non-empty file gets at least one block."""
+    if tokens <= 0 or max_tokens <= 0:
+        return ""
+    blocks = round(_HEAT_WIDTH * tokens / max_tokens)
+    return "█" * max(1, min(_HEAT_WIDTH, blocks))
+
+
+def _share(tokens: int, total: int) -> float:
+    return (100.0 * tokens / total) if total else 0.0
+
+
 def _print_scan(result, model=None, prices=None, recs=None, secrets=None, dups=None,
-                packages=None, ws_missing=None, ws_warnings=None) -> None:
+                packages=None, ws_missing=None, ws_warnings=None, top=15) -> None:
+    total = result.total_tokens
     print(f"Project: {result.root}")
-    print(f"Files: {len(result.files)}  Estimated tokens: {result.total_tokens:,}")
-    print(f"{'tokens':>9}  {'lines':>6}  file")
-    for f in result.files[:200]:
-        flags = []
-        if f.is_test:
-            flags.append("test")
-        if f.is_lockfile:
-            flags.append("lockfile")
-        if f.is_generated:
-            flags.append("generated")
-        if f.is_minified:
-            flags.append("minified")
-        if f.is_vendored:
-            flags.append("vendored")
-        suffix = f"  [{', '.join(flags)}]" if flags else ""
-        print(f"{f.tokens:>9,}  {f.lines:>6}  {f.path}{suffix}")
-    if len(result.files) > 200:
-        print(f"... and {len(result.files) - 200} more files")
+    print(f"Files: {len(result.files)}  Estimated tokens: {total:,}")
+    shown = result.files[:top]
+    if shown:
+        print(f"\nTop {len(shown)} of {len(result.files)} files "
+              "by estimated tokens:")
+        print(f"  {'tokens':>9}  {'lines':>6}  {'share':>6}  "
+              f"{'heat':<{_HEAT_WIDTH}}  file")
+        max_tokens = max(f.tokens for f in shown)
+        for f in shown:
+            flags = []
+            if f.is_test:
+                flags.append("test")
+            if f.is_lockfile:
+                flags.append("lockfile")
+            if f.is_generated:
+                flags.append("generated")
+            if f.is_minified:
+                flags.append("minified")
+            if f.is_vendored:
+                flags.append("vendored")
+            suffix = f"  [{', '.join(flags)}]" if flags else ""
+            print(f"  {f.tokens:>9,}  {f.lines:>6,}  "
+                  f"{_share(f.tokens, total):>5.1f}%  "
+                  f"{_heat_bar(f.tokens, max_tokens):<{_HEAT_WIDTH}}  "
+                  f"{f.path}{suffix}")
+        rest = result.files[top:]
+        if rest:
+            rest_tokens = sum(f.tokens for f in rest)
+            print(f"  ... and {len(rest)} more files "
+                  f"({rest_tokens:,} estimated tokens, "
+                  f"{_share(rest_tokens, total):.1f}% of total)")
     if packages and len(packages) > 1:
         print(f"\nPackages ({len(packages)}):")
         for p in packages:
@@ -282,10 +343,6 @@ def _print_scan(result, model=None, prices=None, recs=None, secrets=None, dups=N
         print("\nWorkspace warnings:")
         for w in ws_warnings:
             print(f"  {w}")
-    if model is not None:
-        cost = estimate_cost(result.total_tokens, model)
-        print(f"\nPre-flight (input cost, prices as of {prices.get('as_of')} from local prices.json, not live):")
-        print(f"  {model['name']}: ~${cost:.4f} for {result.total_tokens:,} estimated tokens")
     if secrets:
         print(f"\nSecrets warning ({len(secrets)} finding(s), values redacted):")
         for f in secrets[:20]:
@@ -303,6 +360,38 @@ def _print_scan(result, model=None, prices=None, recs=None, secrets=None, dups=N
         for r in recs[:15]:
             print(f"  {r['tokens']:>9,}  {r['path']}  ({r['reason']})")
         print("  Recommendations to review, not instructions: dynamic imports can hide real use.")
+    _print_scan_summary(result, model=model, prices=prices)
+
+
+def _print_scan_summary(result, model=None, prices=None) -> None:
+    """The closing summary box (v1.0, Ryan's mockup): the scan in
+    three factual lines — how much context, where it concentrates,
+    and what it would cost to feed whole. All figures labelled
+    estimates; the cost line (previously a separate Pre-flight
+    block) lives here now."""
+    total = result.total_tokens
+    lines = [
+        f"Files: {len(result.files)}   "
+        f"Estimated tokens: {total:,}"
+    ]
+    if result.files:
+        biggest = result.files[0]
+        lines.append(
+            f"Largest file: {biggest.path} ({biggest.tokens:,} "
+            f"estimated tokens, {_share(biggest.tokens, total):.1f}% "
+            "of total)")
+    if model is not None:
+        cost = estimate_cost(total, model)
+        lines.append(
+            f"Est. input cost at {model['name']}: ~${cost:.4f} "
+            f"(prices as of {prices.get('as_of')} from local "
+            "prices.json, not live)")
+    width = max(len(ln) for ln in lines)
+    border = "  +" + "-" * (width + 2) + "+"
+    print(f"\n{border}")
+    for ln in lines:
+        print(f"  | {ln:<{width}} |")
+    print(border)
 
 
 def _print_calls(payload, single=None, dead=False) -> None:
@@ -370,6 +459,22 @@ def _print_calls(payload, single=None, dead=False) -> None:
                   "run with --dead to list them.")
 
 
+_DOCTOR_MARKS = {"ok": "OK  ", "warn": "WARN", "fail": "FAIL"}
+
+
+def _print_doctor(payload) -> None:
+    print(f"GhostSlice doctor for {payload['root']} "
+          f"(ghostslice {payload['version']}; token counts are estimates)")
+    for c in payload["checks"]:
+        print(f"  [{_DOCTOR_MARKS[c['status']]}] {c['label']}: {c['detail']}")
+        if c.get("remedy"):
+            print(f"         remedy: {c['remedy']}")
+    n = payload["counts"]
+    verdict = "healthy" if payload["ok"] else "needs attention"
+    print(f"Doctor: {n['ok']} ok, {n['warn']} warning(s), "
+          f"{n['fail']} failed — {verdict}.")
+
+
 def _print_lint(payload) -> None:
     findings = payload["findings"]
     print(f"Lint: {payload['root']} (token counts are estimates)")
@@ -418,9 +523,25 @@ def _main_impl(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", action="version", version=f"ghostslice {__version__}")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
+    def _plugin_args(p) -> None:
+        # v0.23: user slicer plugins, named explicitly per run
+        # (the profile's "plugins" entries load without these).
+        p.add_argument("--plugin", action="append", default=None,
+                       metavar="PATH",
+                       help="load a user slicer plugin file (repeatable; "
+                            "plugins are user code and run with your full "
+                            "privileges — only load ones you trust)")
+        p.add_argument("--allow-plugin-override", action="store_true",
+                       help="allow plugins to replace a BUILT-IN language "
+                            "slicer (default: refused)")
+
     p_scan = sub.add_parser("scan", help="scan a project and rank files by estimated token cost")
     p_scan.add_argument("path")
     p_scan.add_argument("--json", action="store_true")
+    p_scan.add_argument("--top", type=int, default=15, metavar="N",
+                        help="show the top N files by estimated tokens "
+                             "in the text table (default 15; the rest "
+                             "collapse into one summary line)")
     p_scan.add_argument("--model", default=None, help="model id from prices.json, for a cost line")
     p_scan.add_argument("--timing", action="store_true",
                         help="print a phase breakdown (scan vs analysis) and cache counters")
@@ -438,6 +559,7 @@ def _main_impl(argv: list[str] | None = None) -> int:
     p_slice.add_argument("--no-cache", action="store_true",
                          help="do not consult or fill the .ghostslice-cache content cache "
                               "(tree slices only; a single file is never cached)")
+    _plugin_args(p_slice)
 
     p_task = sub.add_parser("task", help="task-focused context: keyword or git-diff selection, exported as a bundle")
     p_task.add_argument("path")
@@ -455,6 +577,7 @@ def _main_impl(argv: list[str] | None = None) -> int:
                              "[REDACTED:...] placeholders instead of shipping them "
                              "(--no-redact overrides a profile's \"redact\": true; "
                              "default: the profile setting)")
+    _plugin_args(p_task)
 
     p_export = sub.add_parser("export", help="write an agent context bundle")
     p_export.add_argument("path")
@@ -494,6 +617,7 @@ def _main_impl(argv: list[str] | None = None) -> int:
                           help="slice files on N threads (default: 1; measured no "
                                "faster for this workload under the GIL — see "
                                "BENCHMARKS.md — but output is identical for any N)")
+    _plugin_args(p_export)
 
     p_symbols = sub.add_parser("symbols", help="list a project's symbols (name, kind, lines, estimated tokens) for symbol-level slicing")
     p_symbols.add_argument("path")
@@ -558,6 +682,7 @@ def _main_impl(argv: list[str] | None = None) -> int:
                               "files, as in export --auto-shrink")
     p_watch.add_argument("--fit", type=int, default=None, metavar="N",
                          help="with --export: auto-fit the bundle to N estimated tokens, as in export --fit")
+    _plugin_args(p_watch)
 
     p_init = sub.add_parser("init", help="analyze a project and generate a tuned .ghostslice.json profile")
     p_init.add_argument("path")
@@ -584,6 +709,29 @@ def _main_impl(argv: list[str] | None = None) -> int:
                           help="budget in sliced tokens (default: profile budget_tokens)")
     p_budget.add_argument("--mode", choices=MODES, default=None)
 
+    p_ci = sub.add_parser("ci", help="CI gate: budget + lint + secrets + fit + duplicates in one read-only run (exit 1 on any failed check, 2 on usage/config errors)")
+    p_ci.add_argument("path")
+    p_ci.add_argument("--budget", type=int, default=None, metavar="N",
+                      help="sliced-token budget (default: profile budget_tokens; "
+                           "with no budget anywhere, the budget and fit checks are "
+                           "skipped, not failed)")
+    p_ci.add_argument("--strict", action="store_true",
+                      help="lint warnings fail the lint check too (default: only lint errors fail)")
+    p_ci.add_argument("--allow-secrets", action="store_true",
+                      help="downgrade secret-guard findings to a warning "
+                           "(default: findings FAIL the secrets check, because the "
+                           "gate's job is keeping secrets out of agent context)")
+    p_ci.add_argument("--fail-on-secrets", action="store_true",
+                      help="fail on secret-guard findings (this is the default; "
+                           "the flag exists so workflows can say it out loud)")
+    p_ci_fmt = p_ci.add_mutually_exclusive_group()
+    p_ci_fmt.add_argument("--json", action="store_true",
+                          help="print one machine payload: checks, totals, exit_code")
+    p_ci_fmt.add_argument("--pr-comment", action="store_true",
+                          help="print a compact Markdown summary for a PR comment")
+    p_ci.add_argument("--out", default=None, metavar="FILE",
+                      help="also write the HTML report to FILE")
+
     p_check = sub.add_parser("check", help="validate a bundle against its manifest")
     p_check.add_argument("bundle")
 
@@ -608,6 +756,13 @@ def _main_impl(argv: list[str] | None = None) -> int:
     p_cache_clear = cache_sub.add_parser("clear", help="delete the whole cache (it is derived data; it rebuilds on demand)")
     p_cache_clear.add_argument("path")
 
+    p_doctor = sub.add_parser("doctor", help="health check: environment + project (versions, prices, profile, cache, ledger, plugins, git, workspaces); exit 1 on any failed check; never writes")
+    p_doctor.add_argument("path")
+    p_doctor.add_argument("--json", action="store_true")
+
+    p_completions = sub.add_parser("completions", help="print a shell completion script generated from the live argument parser")
+    p_completions.add_argument("shell", choices=("bash", "zsh"))
+
     sub.add_parser("mcp", help="run the stdio MCP server (JSON-RPC)")
 
     p_serve = sub.add_parser("serve", help="serve the local dashboard")
@@ -621,9 +776,20 @@ def _main_impl(argv: list[str] | None = None) -> int:
     try:
         prices = load_prices()
     except (ValueError, OSError) as exc:
-        print(f"ghostslice: cannot load the price table: {exc}",
-              file=sys.stderr)
-        return 2
+        # v1.0: doctor's whole job is reporting a broken price
+        # table (and completions never read it), so those two run
+        # with prices=None; every other command keeps the early,
+        # clean exit 2.
+        if args.cmd not in ("doctor", "completions"):
+            print(f"ghostslice: cannot load the price table: {exc}",
+                  file=sys.stderr)
+            return 2
+        prices = None
+
+    if args.cmd == "completions":
+        from .completions import build_completions
+        sys.stdout.write(build_completions(parser, args.shell))
+        return 0
 
     if args.cmd == "prices":
         print(f"Local prices.json (as of {prices.get('as_of')}, not live): {prices.get('_path')}")
@@ -725,6 +891,22 @@ def _main_impl(argv: list[str] | None = None) -> int:
             return 0
         return 2
 
+    if args.cmd == "doctor":
+        # Handled before the generic profile load and the plugin
+        # activation: doctor REPORTS a broken profile and failing
+        # plugins instead of dying on them, and never writes.
+        if not Path(args.path).is_dir():
+            print(f"doctor: no such project directory: {args.path}",
+                  file=sys.stderr)
+            return 2
+        from .doctor import doctor_exit_code, run_doctor
+        payload = run_doctor(args.path)
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            _print_doctor(payload)
+        return doctor_exit_code(payload)
+
     # All remaining commands target a project path (or a bundle for check).
     target = getattr(args, "path", None) or getattr(args, "bundle", None)
     try:
@@ -749,6 +931,27 @@ def _main_impl(argv: list[str] | None = None) -> int:
                 print(f"{args.cmd}: unknown model id: {_mid} "
                       "(see `ghostslice prices`)", file=sys.stderr)
                 return 2
+
+    # v0.23: plugins load HERE, once, before any command handler —
+    # from the profile's "plugins" entries plus --plugin flags, and
+    # never from anywhere else (no auto-discovery: loading a plugin
+    # executes it). A load failure is exit 2 before anything runs or
+    # is written. The set (possibly empty) stays active for the
+    # whole command, so the scanner, slicers, outlines, lint, and
+    # the content cache all see the same plugin world.
+    if args.cmd not in ("check", "history"):
+        from . import plugins as _plugins_mod
+        try:
+            _pset = _plugins_mod.load_for_project(
+                target, profile=profile,
+                extra_paths=getattr(args, "plugin", None) or (),
+                allow_override=bool(
+                    getattr(args, "allow_plugin_override", False)))
+        except _plugins_mod.PluginError as exc:
+            print(f"{args.cmd}: {exc}", file=sys.stderr)
+            return 2
+        _plugins_mod.activate(_pset)
+        _plugins_mod.report_loaded(_pset, sys.stderr)
 
     if args.cmd == "lint":
         from .lint import lint_exit_code, lint_project
@@ -839,7 +1042,7 @@ def _main_impl(argv: list[str] | None = None) -> int:
                     why = "default: test file -> strip-tests"
                 elif entry.is_lockfile:
                     why = "default: lockfile -> exclude"
-                elif entry.language in SLICABLE:
+                elif is_slicable(entry.language):
                     why = f"default: {entry.language} code -> signatures"
                 else:
                     why = "default: non-code file stays full"
@@ -876,12 +1079,16 @@ def _main_impl(argv: list[str] | None = None) -> int:
                 print(f"    line {f['line']}  {f['type']}  ({f['redacted']})")
         else:
             print("  secrets: none")
+        _plugins.report_errors(_plugins.active_set(), sys.stderr)
         return 0
 
     if args.cmd == "scan":
+        if args.top < 1:
+            print("scan: --top must be >= 1", file=sys.stderr)
+            return 2
         from .duplicates import find_duplicates
         _t0 = time.perf_counter()
-        _scan_cache = None if args.no_cache else open_cache(args.path)
+        _scan_cache = None if args.no_cache else open_cache(args.path, namespace=_plugins.active_digest())
         result = _scan_with_profile(args.path, profile, cache=_scan_cache)
         _t1 = time.perf_counter()
         graph = build_graph(result)
@@ -907,7 +1114,8 @@ def _main_impl(argv: list[str] | None = None) -> int:
         _print_scan(result, model=model, prices=prices, recs=recs, secrets=findings,
                     dups=dups, packages=summarize_packages(result),
                     ws_missing=ws.missing if ws else None,
-                    ws_warnings=ws.warnings if ws else None)
+                    ws_warnings=ws.warnings if ws else None,
+                    top=args.top)
         if args.timing:
             _print_scan_timing(_t0, _t1, _scan_cache)
         return 0
@@ -957,13 +1165,14 @@ def _main_impl(argv: list[str] | None = None) -> int:
             r = slice_text(src.name, text, args.mode)
             (out / src.name).write_text(r.text, encoding="utf-8")
             print(f"{src.name}: {r.original_tokens:,} -> {r.sliced_tokens:,} estimated tokens ({args.mode})")
+            _plugins.report_errors(_plugins.active_set(), sys.stderr)
             return 0
-        _slice_cache = None if args.no_cache else open_cache(src)
+        _slice_cache = None if args.no_cache else open_cache(src, namespace=_plugins.active_digest())
         result = _scan_with_profile(src, profile, cache=_slice_cache)
         before = after = 0
         for entry in result.files:
             text = _gs_read_text(entry.abspath)
-            mode = args.mode if entry.language in SLICABLE or entry.language == "markdown" \
+            mode = args.mode if is_slicable(entry.language) or entry.language == "markdown" \
                 or entry.language in CONFIG_LANGUAGES else "full"
             r = cached_slice_text(_slice_cache, entry.path, text, mode)
             before += r.original_tokens
@@ -974,6 +1183,7 @@ def _main_impl(argv: list[str] | None = None) -> int:
                 dest.write_text(r.text, encoding="utf-8")
         print(f"Sliced {len(result.files)} files ({args.mode} for code): {before:,} -> {after:,} estimated tokens")
         print(f"Output: {out}")
+        _plugins.report_errors(_plugins.active_set(), sys.stderr)
         return 0
 
     if args.cmd == "symbols":
@@ -997,7 +1207,8 @@ def _main_impl(argv: list[str] | None = None) -> int:
         no_outline: list[str] = []
         total_symbols = 0
         for e in entries:
-            if e.language not in OUTLINE_LANGUAGES:
+            if e.language not in OUTLINE_LANGUAGES \
+                    and not _plugins.has_outline(e.language):
                 no_outline.append(e.path)
                 files_payload.append({"path": e.path, "language": e.language,
                                       "symbols": None})
@@ -1046,6 +1257,7 @@ def _main_impl(argv: list[str] | None = None) -> int:
         if no_outline and not single:
             print(f"{len(no_outline)} file(s) have no symbol outline "
                   "(notebook, markdown, config/data, or plain text).")
+        _plugins.report_errors(_plugins.active_set(), sys.stderr)
         return 0
 
     if args.cmd == "calls":
@@ -1117,6 +1329,7 @@ def _main_impl(argv: list[str] | None = None) -> int:
         print(f"Estimated tokens (whole project -> selection): {pf['before_tokens']:,} -> {pf['after_tokens']:,}")
         _print_wrapper(manifest)
         _print_redaction(manifest)
+        _print_plugin_errors(manifest)
         fitted = _print_fit(manifest.get("fit"))
         check = validate_bundle(args.out)
         print(f"Validation: {'OK' if check['ok'] else 'FAILED: ' + '; '.join(check['errors'])}")
@@ -1125,7 +1338,7 @@ def _main_impl(argv: list[str] | None = None) -> int:
     if args.cmd == "export":
         _export_scan = _scan_with_profile(
             args.path, profile,
-            cache=None if args.no_cache else open_cache(args.path))
+            cache=None if args.no_cache else open_cache(args.path, namespace=_plugins.active_digest()))
         _warn_secrets(scan_scan_result(_export_scan))
         model_id = args.model or profile.model or "claude-sonnet"
         _timing: dict = {}
@@ -1158,6 +1371,7 @@ def _main_impl(argv: list[str] | None = None) -> int:
         print(f"Estimated tokens: {pf['before_tokens']:,} -> {pf['after_tokens']:,} (saved {pf['saved_tokens']:,})")
         _print_wrapper(manifest)
         _print_redaction(manifest, exclude_secrets_on=args.exclude_secrets)
+        _print_plugin_errors(manifest)
         _print_symbols(manifest)
         print(f"Pre-flight input cost at {pf['model_name']} (prices as of {pf['prices_as_of']}, local, not live): "
               f"~${pf['before_cost_usd']:.4f} -> ~${pf['after_cost_usd']:.4f}")
@@ -1210,10 +1424,53 @@ def _main_impl(argv: list[str] | None = None) -> int:
             return 2
         before, after = estimate_context_tokens(
             args.path, profile=profile, default_mode=args.mode,
-            cache=open_cache(args.path))
+            cache=open_cache(args.path, namespace=_plugins.active_digest()))
         status = "OK" if after <= budget else "OVER BUDGET"
         print(f"Selected context: {after:,} sliced estimated tokens (full project {before:,}); budget {budget:,}: {status}")
         return 0 if after <= budget else 1
+
+    if args.cmd == "ci":
+        # v0.24: the CI pack. Checks run read-only inside run_ci;
+        # exit 0 = no failed check, 1 = a check failed, 2 = usage /
+        # config errors (bad --budget, missing project, invalid
+        # profile — the last is handled by the generic loader above,
+        # and an --out report that cannot be written).
+        if args.budget is not None and args.budget <= 0:
+            print("ci: --budget must be > 0", file=sys.stderr)
+            return 2
+        from .ci import render_pr_comment, render_text, run_ci
+        try:
+            payload = run_ci(args.path, profile=profile,
+                             budget=args.budget, strict=args.strict,
+                             allow_secrets=args.allow_secrets)
+        except FileNotFoundError:
+            print(f"ci: no such project: {args.path}", file=sys.stderr)
+            return 2
+        exit_code = payload["exit_code"]
+        if args.out:
+            from .report import write_report
+            try:
+                out_path = write_report(
+                    args.path, args.out,
+                    model_id=profile.model or "claude-sonnet")
+                payload["report"] = {"path": str(out_path), "written": True}
+            except OSError as exc:
+                payload["report"] = {"path": args.out, "written": False,
+                                     "error": str(exc)}
+                exit_code = 2
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        elif args.pr_comment:
+            print(render_pr_comment(payload))
+        else:
+            print(render_text(payload))
+            report = payload.get("report")
+            if report and report["written"]:
+                print(f"Report: {report['path']}")
+            elif report:
+                print(f"ci: could not write report to {args.out}: "
+                      f"{report['error']}", file=sys.stderr)
+        return exit_code
 
     if args.cmd == "check":
         check = validate_bundle(args.bundle)

@@ -55,7 +55,8 @@ import re
 from collections import Counter
 from pathlib import Path
 
-from .exporter import SLICABLE, default_mode_for
+from . import plugins as _plugins
+from .exporter import SLICABLE, default_mode_for, is_slicable
 from .graph import build_graph, changed_files, importers_of
 from .scanner import scan
 from .slicer import _py_fallback_defs, slice_source, slice_text
@@ -233,6 +234,12 @@ def symbols_for_source(language: str, source: str, path: str = "") -> set[str]:
         return _py_symbols(source)
     if language in ("yaml", "toml", "json"):
         return _config_symbols(language, source)
+    if _plugins.has_outline(language):
+        # v0.23: a plugin language's symbols come from its outline —
+        # the same names `ghostslice symbols` lists.
+        from .symslice import outline_source
+        syms = outline_source(source, language, path) or []
+        return {s.name for s in syms} | {s.qualified for s in syms}
     if language in SLICABLE and language != "notebook":
         return _lite_symbols(source, language, path)
     return set()
@@ -321,7 +328,7 @@ def resolve_mode(entry, profile=None, default_mode: str | None = None) -> str:
         m = profile.mode_for(entry.path)
         if m:
             return m
-    if default_mode and entry.language in SLICABLE:
+    if default_mode and is_slicable(entry.language):
         return "strip-tests" if entry.is_test else default_mode
     return default_mode_for(entry)
 

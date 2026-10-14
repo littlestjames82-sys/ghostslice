@@ -33,9 +33,9 @@ Baseline: v0.5.0, 149 tests passed.
 | G15 | Performance: scan caching (.ghostslice-cache), parallel scan, benchmark proof, identical totals | v0.20.0 | done |
 | G16 | Fuzz/robustness: malformed-input fuzzing for every slicer + encoding handling (BOM, UTF-16, latin-1) | v0.21.0 | done |
 | G17 | Dashboard v2: side-by-side slice preview (original vs slice, per Ryan's mockups, Oct 13) with diff highlighting + budget slider with live auto-fit preview | v0.22.0 | done |
-| G18 | Plugin system: user slicers from .ghostslice-plugins/*.py, documented API, example plugin | v0.23.0 | pending |
-| G19 | CI pack: `ghostslice ci` one-shot (budget + secrets + lint) with PR markdown summary + sample GitHub Action | v0.24.0 | pending |
-| G20 | v1.0.0: `doctor` self-check, shell completions, docs restructure, full release-readiness audit + mockup polish (Ryan approved Oct 13): scan CLI top-N with heat bars + % of total + token/cost summary box, export --fit report table in the mockup style | v1.0.0 | pending |
+| G18 | Plugin system: user slicers via a documented contract (profile "plugins" + --plugin, no auto-discovery), example Lua plugin | v0.23.0 | done |
+| G19 | CI pack: `ghostslice ci` one-shot (budget + secrets + lint) with PR markdown summary + sample GitHub Action | v0.24.0 | done |
+| G20 | v1.0.0: `doctor` self-check, shell completions, docs restructure, full release-readiness audit + mockup polish (Ryan approved Oct 13): scan CLI top-N with heat bars + % of total + token/cost summary box, export --fit report table in the mockup style | v1.0.0 | done |
 
 Progress log is appended here as each goal closes, with test counts and
 the audit findings that drove the two improvement rounds.
@@ -492,3 +492,87 @@ the audit findings that drove the two improvement rounds.
   Standing limitation: the dashboard is a startup snapshot (no
   rescan), and the pre-existing file table still renders paths
   via innerHTML (flagged, out of scope).
+- G19 (v0.24.0) DONE Oct 13, 2026: CI pack shipped — `ghostslice
+  ci` runs five named checks over the default selection on one
+  shared scan (budget vs profile/--budget, skipped-not-failed
+  with no budget anywhere; lint via lint_project/lint_exit_code;
+  secrets FAIL by default with --allow-secrets downgrading the
+  whole run including lint's L005; fit via fit_modes in memory;
+  duplicates above a 500-token floor warn), each pass/warn/fail/
+  skipped with evidence, per-check exception isolation, exit
+  0/1/2 semantics pinned against the --json payload by an
+  agreement battery, --pr-comment Markdown, --out HTML report,
+  read-only by fs snapshot. Sample Action in
+  examples/github-action/ installs from GitHub (not on PyPI,
+  stated plainly) with the budget in env; dogfood workflow runs
+  ci on this repo with --budget 180000 on the command line (no
+  repo profile added). Tests 728 -> 760 (32 new). Audit rounds
+  (audits/G19_audit.md): round 1 headline fixes — the sample
+  workflow's failure path broke itself (bash -e starved the
+  second ci run and the comment step; exit code now captured to
+  GITHUB_OUTPUT and enforced from the output) and an --out
+  report inside the tree is scanned by later runs (documented;
+  dogfood artifact names gitignored, mechanism pinned). Round 2
+  re-probed the fixed sample shell logic, the verbatim dogfood
+  run, YAML structure, plugin exit-2 inheritance, and the exact
+  budget boundary; no new defects.
+- G18 (v0.23.0) DONE Oct 13, 2026: plugin system for user slicers
+  shipped (src/ghostslice/plugins.py) — two contract styles
+  (module attributes LANGUAGE/EXTENSIONS/slice_text/optional
+  outline, or register(api) with api.register_slicer /
+  api.estimate_tokens / api.MODES); loading is explicit only:
+  profile "plugins" entries (relative to the project root,
+  resolved inside it, symlinks followed) or --plugin on
+  export/slice/task/watch; no auto-discovery anywhere; the CLI
+  announces each loaded plugin plus the full-privileges warning.
+  Plugin languages join scanning, modes, symbols (optional
+  outline), fit, task selection, lint, dashboard, and MCP;
+  built-in overrides refused without --allow-plugin-override;
+  load failure is exit 2 before writes, per-file failure falls
+  back to full text with a manifest plugin_errors entry; cache
+  keys are namespaced by a hash of plugin file bytes. Shipped
+  example: examples/plugins/lua_slicer.py (parser-lite Lua
+  signatures + outline) with an end-to-end integration test.
+  Tests 679 -> 728 (49 new). Audit rounds (audits/G18_audit.md):
+  round 1 headline fixes — a plugin raising SystemExit no longer
+  escapes the failure discipline (load: clear PluginError exit
+  2; per-file: recorded fallback), recorded plugin errors are
+  surfaced on the slice/symbols/explain surfaces instead of
+  falling back silently, cross-plugin extension re-claims now
+  record a load note, and "--plugin <directory>" reports "not a
+  file". Round 2 headline fixes — the dashboard /api/export
+  response and the MCP slice_file/lint_project results now
+  surface plugin_errors like the CLI and the manifest do, and
+  init's overwrite warning names an existing profile's plugins.
+  Standing limitation: no sandbox (documented trust
+  model: plugins are user code with full privileges), and
+  registrations are per-process (each CLI run reloads).
+- G20 (v1.0.0) DONE Oct 13, 2026: the finale shipped —
+  `ghostslice doctor` (ten read-only checks: python floor,
+  version agreement, estimator, prices, profile, cache,
+  ledger, plugins, git hygiene, workspaces; one-line remedy
+  per warn/fail; exit 1 on any fail; runs even when the price
+  table is broken), `ghostslice completions bash|zsh`
+  generated from the live argparse parser (shipped copies in
+  examples/completions/ pinned byte-equal), the mockup CLI
+  polish (scan top-N table with heat bars + % of total +
+  closing summary box, --top flag; --fit report as a table;
+  all JSON untouched), and the docs completion pass
+  (Quickstart, "What's in 1.0" feature map covering all 25
+  commands, Troubleshooting fed by doctor's remedies).
+  Readiness audit (audits/G20_audit.md): the baseline recon
+  found pyproject.toml still at 0.16.0 against the package's
+  0.24.0 — fixed to 1.0.0 everywhere and pinned by a doctor
+  check + test. The full command matrix (24 commands x
+  GhostSlice + GhostBus, plus cross commands) exits 0
+  everywhere, twice; the README Quickstart runs verbatim;
+  `pip install .` into a fresh venv works and the installed
+  binary verifies; MCP lists all 6 tools at serverInfo
+  1.0.0; the dashboard boots and serves; the dogfood CI
+  passes at 83% of its 180,000 budget. Improve rounds fixed
+  two LOW doc items (unittest wording, stale dogfood
+  comment); Audit #2 found no new defects. Tests 760 -> 784
+  (24 new), zero existing tests modified. MARATHON
+  COMPLETE: 20 goals, v0.6.0 -> v1.0.0, 149 -> 784 tests,
+  every goal audited twice and improved twice, no PyPI
+  publish, no announcements — those gates were never opened.

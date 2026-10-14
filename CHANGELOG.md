@@ -3,6 +3,133 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [1.0.0] - 2026-10-13
+The marathon release: GhostSlice 1.0 is the tool the twenty-goal
+run set out to build — a zero-dependency context optimizer that
+scans, slices, prices, lints, redacts, and bundles project
+context for AI agents, with a dashboard, an MCP server, a plugin
+system, and a CI gate. New in this release:
+
+### Added
+- `ghostslice doctor`: one-screen environment + project health
+  (Python floor, version agreement between the package and
+  pyproject.toml, estimator stamp, price table, profile, cache,
+  ledger, plugins, git hygiene, workspaces) — every warning or
+  failure carries a one-line remedy; exit 1 on any fail; never
+  writes. Doctor runs even when the price table is broken (the
+  one state the rest of the CLI exits early on), because
+  reporting that state is its job.
+- `ghostslice completions bash|zsh`: completion scripts
+  generated from the live argument parser (single source of
+  truth); shipped copies in `examples/completions/` are pinned
+  byte-equal to fresh output by the test suite.
+- README: a stranger-runnable Quickstart, a "What's in 1.0"
+  feature map covering every command, and a Troubleshooting
+  section fed by doctor's remedies.
+
+### Changed
+- `scan` text output (v1.0 layout, Ryan's mockups): the file
+  table is now top-N (`--top`, default 15) with a heat bar
+  scaled to the largest file and each file's % of total; the
+  remaining files collapse into one summary line, and the
+  output closes with a summary box (files, total estimated
+  tokens, largest file, estimated input cost). The separate
+  Pre-flight cost block folded into the box. `scan --json` is
+  unchanged.
+- `--fit` report is a table (before/after/result plus a
+  downgrade-step table); content identical, layout only.
+- pyproject.toml version aligned with the package (it had
+  drifted at 0.16.0 — the readiness audit's doctor caught it;
+  a test and a doctor check now pin the agreement).
+
+### The road here (per-version entries below)
+- 0.6-0.9: watch mode, task selection v2, C/C++/Scala slicers,
+  config structure slicing.
+- 0.10-0.14: estimator calibration, context lint, generated/
+  vendored detection, monorepo support, history analytics.
+- 0.15-0.19: init wizard, XML/JSON bundles, redact-in-place,
+  symbol-level slicing, Python call graph + dead functions.
+- 0.20-0.24: content cache + performance, fuzz/encoding
+  robustness, dashboard v2 (slice preview + what-if), the
+  plugin system, and the CI pack.
+
+## [0.24.0] - 2026-10-13
+### Added
+- CI pack (G19): `ghostslice ci <project>` runs five named checks
+  over the default export selection in one read-only pass:
+  budget (vs the profile's `budget_tokens` or `--budget`;
+  skipped, not failed, when no budget is configured), lint
+  (errors fail; warnings fail only with `--strict`), secrets
+  (guard findings FAIL by default; `--allow-secrets` downgrades
+  them to a warning for the whole run, including lint's L005
+  rule; `--fail-on-secrets` spells the default explicitly), fit
+  (whether the auto-fit ladder can reach the budget), and
+  duplicates (exact-duplicate groups with 500+ recoverable
+  estimated tokens warn). Each check reports pass / warn / fail /
+  skipped with a one-line evidence string.
+- Exit semantics: 0 = no failed check, 1 = a check failed,
+  2 = usage/config errors. `--json` emits one machine payload
+  (checks, totals, summary, `exit_code`); `--pr-comment` prints
+  a compact Markdown summary for PR comments; `--out FILE` also
+  writes the HTML report. A check that errors internally fails
+  that check alone; the run itself never tracebacks and writes
+  nothing without `--out`.
+- GitHub Action sample in `examples/github-action/`: checks out
+  the user's repo, installs GhostSlice from its GitHub repo (it
+  is not on PyPI), runs `ghostslice ci` with the budget from a
+  workflow env var, uploads the JSON + Markdown + HTML artifacts,
+  and optionally posts the summary as a PR comment with the
+  built-in GITHUB_TOKEN. This repo dogfoods the command in
+  `.github/workflows/ghostslice-ci.yml` (budget 180,000 on the
+  command line; no repo profile added).
+
+## [0.23.0] - 2026-10-13
+### Added
+- Plugin system for user slicers (G18): teach GhostSlice a new
+  language, or replace a built-in slicer, with a single Python
+  file. Two contract styles: module attributes (`LANGUAGE`,
+  `EXTENSIONS`, `slice_text(path, text, mode)`, optional
+  `outline(path, text)`) or `register(api)` with
+  `api.register_slicer(...)`, `api.estimate_tokens`, and
+  `api.MODES`. One file may register several languages.
+- Loading is explicit only, never ambient: the profile's
+  `"plugins"` list (paths relative to the project root and
+  required to resolve inside it, symlinks followed) or `--plugin
+  PATH` (repeatable) on export/slice/task/watch. No directory
+  scanning, no entry points, no environment variable. The CLI
+  prints every loaded plugin plus a plain warning that plugins
+  are user code run with full privileges. The profile route also
+  drives the dashboard and the MCP tools.
+- Plugin languages are first-class: the scanner maps their
+  extensions, token estimation is the standard estimator, the
+  modes pipeline hands them resolved modes (`full`/`exclude`
+  stay with the core), outlines join `ghostslice symbols` and
+  `export --symbols` (no outline means an honest "no outline"),
+  and the fit ladder, task selection, lint, and the dashboard
+  what-if all treat them like built-ins.
+- Failure discipline: a plugin load failure (syntax error, broken
+  contract) fails the command with exit 2 before anything is
+  written. A plugin failing on one file falls back to that file's
+  full text, records a `plugin_errors` entry in the manifest, and
+  prints a CLI warning. Bytes returns are decoded as UTF-8; other
+  non-string returns follow the same fallback. Overriding a
+  built-in language or claiming its extension is refused without
+  `--allow-plugin-override`; duplicate claims on a new language
+  resolve last-loaded-wins with a printed note.
+- Cache safety: when plugins are loaded, every content-cache key
+  is namespaced by a hash of the loaded plugins' file bytes, so
+  editing a plugin invalidates its cached slices, outlines, and
+  scans automatically. The manifest gains a `plugins` block
+  (name, language, extensions, source path, sha256) whenever a
+  bundle was built with plugins.
+- Example plugin: `examples/plugins/lua_slicer.py`, a parser-lite
+  Lua signatures slicer (function/end block matching over a
+  string/comment-masked view, long brackets handled) with a basic
+  outline, plus `examples/plugins/README.md`. An integration test
+  runs the full pipeline (scan, export, symbols, symbol slicing,
+  MCP) on a Lua fixture using only the example.
+- 49 new tests (679 -> 728) in tests/test_v23_plugins.py.
+
 ## [0.22.0] - 2026-10-13
 ### Added
 - Dashboard side-by-side slice preview (G17): clicking a file shows

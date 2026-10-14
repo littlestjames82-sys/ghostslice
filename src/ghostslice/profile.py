@@ -26,6 +26,13 @@ placeholders instead of shipping them (the file is kept; contrast
 --exclude-secrets, which drops flagged files entirely). The export
 CLI's --redact / --no-redact override it per run.
 
+An optional "plugins" list (v0.23) names user slicer plugins to
+load for this project: paths relative to the project root, each
+resolved (symlinks followed) and required to stay inside it.
+Loading a plugin EXECUTES it — plugins are user code with full
+privileges, named explicitly here or not at all; there is no
+auto-discovery. See plugins.py for the contract.
+
 An optional "lint" section (v0.11) tunes the context linter per rule:
 
   "lint": {
@@ -95,6 +102,9 @@ class Profile:
     auto_shrink: bool = False
     # v0.17: opt-in redact-in-place for exports (see module docstring).
     redact: bool = False
+    # v0.23: user slicer plugins to load for this project (paths
+    # relative to the project root; see module docstring).
+    plugins: list[str] = field(default_factory=list)
     path: str | None = None  # where it was loaded from, if any
     # v0.11: normalised lint config {rule_id: {"severity": str, option: number}}
     lint: dict = field(default_factory=dict)
@@ -116,6 +126,7 @@ class Profile:
             "budget_tokens": self.budget_tokens,
             "entry_points": self.entry_points, "preset": self.preset,
             "auto_shrink": self.auto_shrink, "redact": self.redact,
+            "plugins": self.plugins,
             "path": self.path, "lint": self.lint,
         }
 
@@ -246,6 +257,7 @@ def load_profile(root: str | Path) -> Profile:
         preset=preset,
         auto_shrink=auto_shrink,
         redact=redact,
+        plugins=_str_list("plugins"),
         path=str(candidate),
         lint=_parse_lint_section(data.get("lint"), candidate),
     )

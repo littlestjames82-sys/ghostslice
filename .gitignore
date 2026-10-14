@@ -7,3 +7,7 @@ dist/
 src/*.egg-info/
 .claude_context/
 .ghostslice-cache/
+# Dogfood CI artifacts (.github/workflows/ghostslice-ci.yml); the
+# scanner honours .gitignore, so local ci runs never count them.
+ghostslice-ci.json
+ghostslice-report.html

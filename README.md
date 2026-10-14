@@ -38,6 +38,56 @@ ghostslice --help
 
 Requires Python 3.10 or newer.
 
+## Quickstart
+
+From the root of this checkout, no install step (the export also
+starts the savings ledger, `.ghostslice-history.jsonl`, in the
+scanned project):
+
+```bash
+PYTHONPATH=src python3 -m ghostslice scan .
+PYTHONPATH=src python3 -m ghostslice doctor .
+PYTHONPATH=src python3 -m ghostslice export . -o /tmp/ghostslice-context --fit 60000
+PYTHONPATH=src python3 -m ghostslice check /tmp/ghostslice-context
+PYTHONPATH=src python3 -m ghostslice history . --trend
+```
+
+Installed instead? Drop the `PYTHONPATH=src python3 -m` prefix and
+run the same commands as `ghostslice ...` against any project.
+
+## What's in 1.0
+
+Every command, one line each (details in the Usage sections
+below; `ghostslice <command> --help` is the full reference):
+
+| Command | What it does |
+|---|---|
+| `ghostslice scan` | Rank a project's files by estimated token cost (top-N table, heat bars, % of total, summary box) |
+| `ghostslice graph` | Import graph between project files, plus prune recommendations |
+| `ghostslice slice` | Slice one file or a whole tree to a mode (signatures, interfaces, ...) |
+| `ghostslice export` | Write an agent context bundle (.claude_context: PROMPT.md, files/, manifest) |
+| `ghostslice task` | Task-focused bundle: keyword- or git-diff-selected files only |
+| `ghostslice symbols` | List a project's symbols for symbol-level slicing |
+| `ghostslice calls` | Python call graph: who calls what, most-called symbols, dead-function candidates |
+| `ghostslice diff` | Diff two bundles by manifest: mode changes, token deltas, added/removed files |
+| `ghostslice secrets` | Scan a project for likely secrets (values always redacted in output) |
+| `ghostslice report` | Write a standalone HTML report for a project |
+| `ghostslice explain` | Explain why one file is included/excluded and how it is sliced |
+| `ghostslice watch` | Watch a project; rescan on change, optionally re-export the bundle |
+| `ghostslice init` | Analyze a project and generate a tuned .ghostslice.json profile |
+| `ghostslice lint` | Lint the default export selection for context waste (rules L001-L010) |
+| `ghostslice check-budget` | CI gate: exit non-zero if the selected context exceeds a token budget |
+| `ghostslice ci` | CI pack: budget + lint + secrets + fit + duplicates in one read-only run |
+| `ghostslice check` | Validate a bundle against its manifest |
+| `ghostslice history` | Savings-ledger summary and trend analytics for a project |
+| `ghostslice calibrate` | Per-language-family token calibration report (raw vs calibrated estimates) |
+| `ghostslice cache` | Inspect or clear the per-project content cache (.ghostslice-cache) |
+| `ghostslice doctor` | One-screen health check: versions, prices, profile, cache, ledger, plugins, git, workspaces |
+| `ghostslice completions` | Print a bash/zsh completion script generated from the live argument parser |
+| `ghostslice mcp` | Run the stdio MCP server (JSON-RPC) for agent clients |
+| `ghostslice serve` | Serve the local dashboard (scan, slice preview, what-if panel) |
+| `ghostslice prices` | Show the local, dated model price table |
+
 ## Usage
 
 ### Scan: rank files by estimated token cost
@@ -47,6 +97,14 @@ ghostslice scan ~/my-project
 ghostslice scan ~/my-project --model claude-sonnet
 ghostslice scan ~/my-project --json
 ```
+
+The text table (v1.0) shows the top 15 files by estimated tokens
+(`--top N` to change it) with a heat bar scaled to the largest
+file and each file's share of the total; the remaining files
+collapse into one summary line, and the output closes with a
+summary box (file count, total estimated tokens, largest file,
+and the estimated input cost when a model is known). `--json`
+output is unchanged.
 
 The scanner respects `.gitignore`, skips built-in junk (`node_modules`,
 `.git`, `dist`, build/cache dirs, binary files), and flags test files and
@@ -752,6 +810,45 @@ ghostslice check-budget ~/my-project --max-tokens 50000   # or profile budget_to
 echo $?   # 1 when the selected (sliced) context exceeds the budget
 ```
 
+### CI pack: one gate command (v0.24)
+
+`ghostslice ci` runs the whole context-health gate in one
+read-only pass and reports five named checks, each with a
+one-line evidence string:
+
+```bash
+ghostslice ci ~/my-project                      # budget from the profile
+ghostslice ci ~/my-project --budget 50000       # or from the flag
+ghostslice ci ~/my-project --json               # one machine payload
+ghostslice ci ~/my-project --pr-comment         # Markdown for a PR comment
+ghostslice ci ~/my-project --out report.html    # plus the HTML report
+```
+
+The checks: **budget** (sliced context vs the configured budget;
+skipped, not failed, when no budget is configured anywhere),
+**lint** (the context-lint rules; errors fail, warnings fail only
+with `--strict`), **secrets** (guard findings FAIL by default,
+because the gate's job is keeping secrets out of agent context;
+`--allow-secrets` downgrades them to a warning for the whole run,
+including lint's L005 rule), **fit** (whether the auto-fit ladder
+can reach the budget from the default selection), and
+**duplicates** (exact-duplicate groups holding 500+ recoverable
+estimated tokens warn). Exit codes: 0 when no check failed
+(warnings and skips never fail a run), 1 when any check failed,
+2 for usage/config errors. The run writes nothing (no bundle, no
+ledger record, no cache) unless `--out` names a report file; a
+check that errors internally fails that check alone, never the
+run. Token counts are estimates.
+
+A copy-paste GitHub Actions workflow lives in
+`examples/github-action/` (installs GhostSlice from its GitHub
+repo, since it is not on PyPI, uploads the JSON/report artifacts,
+and can post the `--pr-comment` summary). This repo dogfoods the
+command in `.github/workflows/ghostslice-ci.yml`. One local-run
+note: a report written into the project tree is a file like any
+other, so later runs scan it; gitignore the report names if you
+use `--out` locally.
+
 ### Savings ledger (v0.2)
 
 Every export appends one line to `.ghostslice-history.jsonl` in the
@@ -893,6 +990,29 @@ regenerable. Estimator changes must bump the estimator version
 stamp (`tokens.METHOD_VERSION`) so old entries miss, which is
 the same discipline the savings ledger already uses.
 
+### Doctor + shell completions (v1.0)
+
+```bash
+ghostslice doctor ~/my-project          # text; --json for machines
+ghostslice completions bash >> ~/.bashrc   # or: zsh > ~/.zsh/_ghostslice
+```
+
+`doctor` runs ten read-only checks in one screen — Python runtime
+vs the supported floor, GhostSlice version (in a source checkout
+it also verifies pyproject.toml agrees), the estimator stamp, the
+price table (present, parseable, dated), the project profile,
+the content cache, the savings ledger (corrupt lines, estimator
+mix), the plugins the profile names (loaded to verify, exactly
+as any command loads them), git hygiene (.gitignore coverage of
+`.claude_context/` and `.ghostslice-cache/`), and workspace
+detection. Every warning or failure carries a one-line remedy;
+the exit code is 0 unless a check fails. Doctor never writes.
+
+`completions` generates its scripts from the live argument
+parser, so the command and flag lists cannot drift from the CLI;
+the shipped copies live in `examples/completions/` and are
+pinned byte-equal to fresh output by the test suite.
+
 ### MCP server (v0.3)
 
 ```bash
@@ -998,6 +1118,87 @@ the served project. The dashboard is a startup snapshot: the file
 set, secret findings, and token table reflect the project as scanned
 when `serve` started.
 
+## Plugins
+
+Teach GhostSlice a new language, or replace a built-in slicer,
+without forking: a plugin is a single Python file you write.
+
+**Trust first: a plugin is your code, run with your full
+privileges.** GhostSlice never auto-discovers plugins: no directory
+scanning, no entry points, no environment variable. A plugin loads
+only when you name it, in one of two places:
+
+- The profile (`.ghostslice.json`): `"plugins": ["./tools/my_slicer.py"]`.
+  Paths are relative to the project root and must resolve inside
+  it (symlinks are followed before the check); absolute or escaping
+  paths are refused with an error.
+- The command line: `--plugin PATH` (repeatable) on `export`,
+  `slice`, `task`, and `watch`.
+
+The profile route works everywhere, including the dashboard and
+the MCP tools. Whenever plugins load, the CLI prints one line per
+plugin (name, language, extensions, file) plus a plain warning
+that plugins are user code. A plugin set that fails to load fails
+the command with exit 2 before anything is written.
+
+### The contract
+
+Attribute style: the module defines
+
+```python
+NAME = "My slicer"                    # optional; default: file name
+LANGUAGE = "lua"
+EXTENSIONS = [".lua"]
+
+def slice_text(path, text, mode):     # -> str
+    ...
+
+def outline(path, text):              # optional
+    return [{"name": "f", "kind": "function", "start": 3, "end": 9}]
+```
+
+Register style: the module defines `register(api)`, and the api
+object offers `api.estimate_tokens(text)`, `api.MODES`, and
+`api.register_slicer(language, extensions, slicer_fn, outline=None)`.
+One file may register several languages.
+
+Rules of the road:
+
+- `slice_text(path, text, mode)` receives RESOLVED modes, the same
+  ones built-in slicers get (`signatures`, `interfaces`,
+  `strip-tests`, ...). The core handles `full` and `exclude`
+  itself; a plugin is never called for them. Return the input
+  unchanged for modes you do not implement.
+- `outline(path, text)` returns rows of `{name, kind, start, end}`
+  (0-based line numbers, inclusive) and joins `ghostslice symbols`
+  and `export --symbols`. Without an outline, the language honestly
+  reports that it has none.
+- Token estimation stays GhostSlice's standard estimator; plugin
+  languages are scanned, costed, fitted, and linted like built-ins.
+- Overriding a BUILT-IN language (or claiming one of its
+  extensions) is refused unless `--allow-plugin-override` is
+  passed. When two plugins claim the same NEW language, the last
+  one loaded wins, and the load output says so.
+
+### Failure discipline
+
+A plugin that raises on one file does not kill the export: that
+file ships its full text, the manifest gains a `plugin_errors`
+entry, and the CLI prints a warning line. A slicer returning bytes
+is decoded as UTF-8; any other non-string return is treated as a
+failure for that file, under the same rule. The content cache keys
+on a hash of every loaded plugin's file bytes, so editing a plugin
+invalidates its cached slices automatically.
+
+There is no sandbox. A plugin can loop forever or read any file
+you can read. Registrations are fixed once loading finishes, and
+nothing loads that you did not name. Treat a plugin the way you
+would a script a colleague handed you: read it first.
+
+A working example ships in `examples/plugins/lua_slicer.py` (a
+parser-lite Lua signatures slicer with an outline), with notes in
+`examples/plugins/README.md`.
+
 ## Honest labels
 
 - **Token counts are estimates.** Method (v2, since v0.10): a BPE-like
@@ -1091,13 +1292,46 @@ to the scanner, the slicers, and the exporter:
   degrade, never a crash: if you find one that tracebacks, that is
   a bug — the fuzz corpus is the regression net.
 
+## Troubleshooting
+
+Run `ghostslice doctor <project>` first: it checks most of the
+failure modes below and prints the remedy next to each finding.
+
+- **A command exits 2 with "invalid profile"** — `.ghostslice.json`
+  has a field of the wrong shape; the message names the field.
+  Fix it, or regenerate the profile with `ghostslice init --force`.
+- **"unknown model id"** — the id (from `--model` or the profile)
+  is not in the local price table. `ghostslice prices` lists the
+  known ids; add yours to `prices.json` if you need another.
+- **"cannot load the price table"** — `prices.json` is missing or
+  not valid JSON. `ghostslice doctor` still runs in this state
+  and reports the exact file; restore or fix it there.
+- **A named plugin fails to load and every command refuses** —
+  that is deliberate (a half-loaded plugin set never runs). The
+  error names the plugin and the reason; fix the file, or remove
+  it from the profile's `plugins` list.
+- **Bundles or caches show up in `git status`** — add
+  `.claude_context/` and `.ghostslice-cache/` to `.gitignore`
+  (doctor's git check flags exactly this).
+- **History warns about an "estimator mix"** — the ledger holds
+  records from before estimator stamping (or from two estimator
+  versions). Nothing is broken; totals across versions are not
+  directly comparable, and new records are stamped.
+- **Numbers look off for one file** — check its encoding:
+  UTF-16/UTF-32 files are decoded via their BOM and non-UTF-8
+  bytes fall back to Latin-1 (see "Encodings, malformed input,
+  and limits"); the manifest records `source_encoding` for
+  anything that was not UTF-8.
+
 ## Tests
 
 ```bash
-PYTHONPATH=src python3 -m pytest tests -q
-# or, anywhere:
-PYTHONPATH=src python3 -m unittest discover -s tests
+PYTHONPATH=src python3 -m pytest tests -q   # the full suite
 ```
+
+(`python -m unittest discover -s tests` also runs and passes,
+but it only collects the unittest-style tests; the
+pytest-fixture files need pytest.)
 
 ## Layout
 
@@ -1126,8 +1360,13 @@ src/ghostslice/
   pricing.py    local prices.json loader + cost estimator
   exporter.py   bundle builder + validator (presets: claude-code/aider/generic/cursor/copilot/anthropic-xml/json)
   watch.py      polling watch mode: debounced rescan + auto re-export (v0.6)
+  plugins.py    user slicer plugins: contract, opt-in loading, containment, failure discipline (v0.23)
+  doctor.py     `ghostslice doctor`: environment + project health checks with remedies (v1.0)
+  completions.py  bash/zsh completion scripts generated from the live parser (v1.0)
   server.py     stdlib http.server dashboard API
   dashboard.html  single-page dashboard UI (violet accent #6716f3)
   cli.py        ghostslice command line
 prices.json     editable local price table (dated)
+examples/plugins/  example user plugins: a parser-lite Lua slicer with outline (v0.23)
+examples/completions/  generated bash/zsh completion scripts (regenerate with `ghostslice completions`)
 ```

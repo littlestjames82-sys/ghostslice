@@ -1,0 +1,104 @@
+# GhostSlice CI: gate your repo's agent-context health on every PR.
+#
+# Copy this file to .github/workflows/ghostslice-ci.yml in YOUR repo
+# and adjust GHOSTSLICE_BUDGET below.
+#
+# What it does: checks out your repo, installs GhostSlice, and runs
+# `ghostslice ci`, which fails the job (exit 1) when any check fails:
+#   budget      sliced context over the budget (skipped if no budget
+#               is configured: set GHOSTSLICE_BUDGET here, or commit
+#               a .ghostslice.json with "budget_tokens" — run
+#               `ghostslice init` locally to generate one)
+#   lint        context-waste rules (errors fail; warnings need
+#               --strict, see the commented flag below)
+#   secrets     likely secrets in the tree FAIL by default: the
+#               gate's job is keeping secrets out of agent context
+#               (--allow-secrets downgrades this to a warning)
+#   fit         whether auto-fit can still reach the budget
+#   duplicates  large exact-duplicate groups (warning only)
+#
+# Install note: GhostSlice is NOT on PyPI. It installs straight
+# from its GitHub repo (zero dependencies, Python stdlib only,
+# Python 3.10+). Pin the ref after @ to a release tag (for example
+# @v1.0.0) if you want reproducible installs instead of main.
+#
+# Artifact note: the report files below land in the workspace
+# root. Fresh CI checkouts are unaffected, but if you also run
+# `ghostslice ci --out` locally, later runs will scan the report
+# like any other file; add ghostslice-ci.json,
+# ghostslice-ci-comment.md, and ghostslice-report.html to your
+# .gitignore to keep local totals clean.
+
+name: GhostSlice CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+env:
+  # Sliced-context budget in estimated tokens. Size it from a local
+  # run (`ghostslice check-budget .` prints your current total) with
+  # headroom for growth; 0 or deleting the --budget flag below
+  # leaves the budget/fit checks skipped instead of failed.
+  GHOSTSLICE_BUDGET: "50000"
+
+jobs:
+  ghostslice-ci:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # only needed by the optional PR-comment step
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install GhostSlice (from GitHub; it is not on PyPI)
+        run: python -m pip install "git+https://github.com/littlestjames82-sys/ghostslice"
+
+      - name: Run GhostSlice CI
+        id: ghostslice
+        # The exit code is captured, never masked and never fatal
+        # mid-step: both report files are always produced, and the
+        # final step enforces the verdict from the captured code.
+        run: |
+          code=0
+          ghostslice ci . --budget "$GHOSTSLICE_BUDGET" --json --out ghostslice-report.html > ghostslice-ci.json || code=$?
+          ghostslice ci . --budget "$GHOSTSLICE_BUDGET" --pr-comment > ghostslice-ci-comment.md || code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+
+      - name: Upload CI report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghostslice-ci
+          path: |
+            ghostslice-ci.json
+            ghostslice-ci-comment.md
+            ghostslice-report.html
+
+      # Optional: post the Markdown summary as a PR comment. Needs
+      # the pull-requests: write permission above; uses only the
+      # workflow's built-in GITHUB_TOKEN.
+      - name: Comment on the PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('ghostslice-ci-comment.md', 'utf8');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+
+      - name: Enforce the GhostSlice verdict
+        if: steps.ghostslice.outputs.exit_code != '0'
+        run: |
+          echo "GhostSlice CI exited ${{ steps.ghostslice.outputs.exit_code }} (a check failed); see ghostslice-ci.json in the artifacts."
+          exit 1

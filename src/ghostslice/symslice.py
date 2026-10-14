@@ -56,6 +56,7 @@ import fnmatch
 import re
 from dataclasses import dataclass
 
+from . import plugins as _plugins
 from .scanner import language_for
 from .slicer import (
     _ACCESS_RE, _ARROW_RE, _CLASS_RE, _CPP_CLASS_RE, _CPP_ENUM_RE,
@@ -877,6 +878,14 @@ def outline_source(source: str, language: str, path: str = "") -> list[Symbol] |
     config/data languages, plain text); a list (possibly empty) for
     the languages in OUTLINE_LANGUAGES.
     """
+    # v0.23: a plugin outline for the language wins (new languages,
+    # or a built-in under an explicit override). A plugin outline
+    # that fails is recorded and falls through to the built-in
+    # behaviour — for a plugin-only language that is None, the
+    # honest "no outline".
+    plugin_symbols = _plugins.try_outline(language, source, path)
+    if plugin_symbols is not None:
+        return plugin_symbols
     if language not in OUTLINE_LANGUAGES:
         return None
     lines = source.splitlines()

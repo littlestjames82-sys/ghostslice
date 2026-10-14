@@ -16,6 +16,12 @@ on disk, keyed by content:
   outline  {gs version, path, source sha}
   scan     {gs version, estimator version, path, raw-bytes sha}
 
+Every dimension set also carries "ns", a namespace string that is
+"" unless a caller namespaces the cache: v0.23 passes the active
+plugin set's digest (plugins.py), so a plugin's code is an input
+to every derivation it can influence and editing a plugin
+invalidates its cached output instead of reusing it.
+
 Every input the underlying functions actually consume is one of
 those dimensions (slicer.slice_source takes path/source/mode; the
 config backstop inside configslice consumes only the rendered text
@@ -91,10 +97,14 @@ class ProjectCache:
     is created lazily on the first store, and the byte total is
     walked lazily on the first store that needs it."""
 
-    def __init__(self, root: str | Path, max_bytes: int = DEFAULT_MAX_BYTES):
+    def __init__(self, root: str | Path, max_bytes: int = DEFAULT_MAX_BYTES,
+                 namespace: str = ""):
         self.root = Path(root)
         self.dir = self.root / CACHE_DIR_NAME / f"v{FORMAT_VERSION}"
         self.max_bytes = max_bytes
+        # v0.23: mixed into every key's dimensions (see module
+        # docstring). "" is the un-namespaced key space.
+        self.namespace = namespace
         self.hits = 0
         self.misses = 0
         self.corrupt = 0
@@ -216,7 +226,8 @@ class ProjectCache:
 
     def _slice_dims(self, path: str, source: str, mode: str) -> dict:
         return {"gs": __version__, "est": METHOD_VERSION, "path": path,
-                "mode": mode, "sha": _source_sha(source)}
+                "mode": mode, "sha": _source_sha(source),
+                "ns": self.namespace}
 
     def get_slice(self, path: str, source: str, mode: str) -> dict | None:
         """Payload {text, original_tokens, sliced_tokens, language}
@@ -244,7 +255,8 @@ class ProjectCache:
 
     def _symslice_dims(self, path: str, source: str, keep) -> dict:
         return {"gs": __version__, "est": METHOD_VERSION, "path": path,
-                "keep": sorted(keep), "sha": _source_sha(source)}
+                "keep": sorted(keep), "sha": _source_sha(source),
+                "ns": self.namespace}
 
     def get_symslice(self, path: str, source: str, keep) -> str | None:
         payload = self._read(
@@ -265,7 +277,8 @@ class ProjectCache:
     # -- symbol outlines (symslice.outline_source) ---------------------
 
     def _outline_dims(self, path: str, source: str) -> dict:
-        return {"gs": __version__, "path": path, "sha": _source_sha(source)}
+        return {"gs": __version__, "path": path, "sha": _source_sha(source),
+                "ns": self.namespace}
 
     def get_outline(self, path: str, source: str) -> list | None:
         """Payload symbol rows (list of dicts) for the file's
@@ -290,7 +303,8 @@ class ProjectCache:
 
     def _scan_dims(self, path: str, data: bytes) -> dict:
         return {"gs": __version__, "est": METHOD_VERSION, "path": path,
-                "sha": hashlib.sha256(data).hexdigest()}
+                "sha": hashlib.sha256(data).hexdigest(),
+                "ns": self.namespace}
 
     def get_scan(self, path: str, data: bytes) -> dict | None:
         """Payload {tokens, lines, evidence, encoding} for a file's
@@ -327,16 +341,19 @@ class ProjectCache:
                 "evictions": self.evictions, "failures": self.failures}
 
 
-def open_cache(root: str | Path) -> ProjectCache | None:
+def open_cache(root: str | Path, namespace: str = "") -> ProjectCache | None:
     """A ProjectCache for a project DIRECTORY, or None when caching
     is disabled by the environment or the root is not a directory
-    (a single-file root has no project dir to hold the cache)."""
+    (a single-file root has no project dir to hold the cache).
+
+    `namespace` (v0.23) is mixed into every cache key; callers pass
+    the active plugin set's digest so plugin code is a key input."""
     if cache_disabled_by_env():
         return None
     root = Path(root)
     if not root.is_dir():
         return None
-    return ProjectCache(root)
+    return ProjectCache(root, namespace=namespace)
 
 
 def cached_slice_text(cache: ProjectCache | None, path: str, source: str,

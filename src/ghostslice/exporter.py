@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import __version__
+from . import plugins as _plugins
 from .cache import cached_slice_text, open_cache
 from .ledger import append_record
 from .scanner import ScanResult, language_for, scan
@@ -32,12 +33,21 @@ SLICABLE = {"python", "typescript", "javascript", "go", "rust", "java", "csharp"
             "c", "cpp", "scala"}
 
 
+def is_slicable(language: str) -> bool:
+    """True when a slicer exists for the language: a built-in, or a
+    loaded plugin's (v0.23). Every "does this language slice?" check
+    goes through here so plugin languages get the same default
+    modes, fit ladder, lint treatment, and dashboard defaults as
+    built-ins."""
+    return language in SLICABLE or _plugins.has_slicer(language)
+
+
 def default_mode_for(entry) -> str:
     if entry.is_test:
         return "strip-tests"
     if entry.is_lockfile:
         return "exclude"
-    if entry.language in SLICABLE:
+    if is_slicable(entry.language):
         return "signatures"
     return "full"
 
@@ -111,7 +121,7 @@ def resolve_modes_detailed(result, profile=None, selections=None,
             if mode is not None:
                 origin = "profile"
         if mode is None:
-            if default_mode and entry.language in SLICABLE and not entry.is_test:
+            if default_mode and is_slicable(entry.language) and not entry.is_test:
                 mode = default_mode
                 origin = "caller-default"
             elif default_mode and entry.is_test:
@@ -274,7 +284,74 @@ def build_bundle(root: str | Path, out: str | Path,
                  symbols=None,
                  use_cache: bool = True,
                  workers: int | None = None,
-                 timing: dict | None = None) -> dict:
+                 timing: dict | None = None,
+                 plugins=None,
+                 allow_plugin_override: bool = False) -> dict:
+    """Slice `root` into bundle dir `out`; return the manifest dict.
+    The full bundle contract (mode precedence, presets, fit,
+    redaction, symbols, cache) is documented on _build_bundle_impl.
+
+    Plugins (v0.23): which plugin set slices this build is decided
+    here, once. A set already active for the process (the CLI
+    activates one per command, from the profile plus --plugin) is
+    used as-is. Otherwise the profile's "plugins" entries — plus
+    any `plugins` paths given here — are loaded and activated for
+    this call only. A load failure raises plugins.PluginError (a
+    ValueError) before anything is written. When plugins are
+    loaded, the manifest gains a "plugins" block naming them, plus
+    a "plugin_errors" list when a plugin failed on a file (that
+    file ships its full text instead).
+    """
+    if plugins is None and not allow_plugin_override:
+        active = _plugins.active_set()
+        if active is not None:
+            return _build_bundle_impl(
+                root, out, selections=selections,
+                default_mode=default_mode, profile=profile,
+                include=include, preset=preset,
+                record_history=record_history,
+                exclude_secrets=exclude_secrets, redact=redact,
+                auto_shrink=auto_shrink, fit=fit,
+                fit_protect_selections=fit_protect_selections,
+                task_scores=task_scores, model=model, symbols=symbols,
+                use_cache=use_cache, workers=workers, timing=timing,
+                _pset=active)
+    pset = _plugins.load_for_project(
+        root, profile=profile, extra_paths=plugins or (),
+        allow_override=allow_plugin_override)
+    with _plugins.activated(pset):
+        return _build_bundle_impl(
+            root, out, selections=selections,
+            default_mode=default_mode, profile=profile,
+            include=include, preset=preset,
+            record_history=record_history,
+            exclude_secrets=exclude_secrets, redact=redact,
+            auto_shrink=auto_shrink, fit=fit,
+            fit_protect_selections=fit_protect_selections,
+            task_scores=task_scores, model=model, symbols=symbols,
+            use_cache=use_cache, workers=workers, timing=timing,
+            _pset=pset)
+
+
+def _build_bundle_impl(root: str | Path, out: str | Path,
+                 selections: dict[str, str] | None = None,
+                 default_mode: str | None = None,
+                 profile=None,
+                 include: set[str] | None = None,
+                 preset: str | None = None,
+                 record_history: bool = True,
+                 exclude_secrets: bool = False,
+                 redact: bool | None = None,
+                 auto_shrink: bool | None = None,
+                 fit: int | None = None,
+                 fit_protect_selections: bool = True,
+                 task_scores: dict | None = None,
+                 model: str | None = None,
+                 symbols=None,
+                 use_cache: bool = True,
+                 workers: int | None = None,
+                 timing: dict | None = None,
+                 _pset=None) -> dict:
     """Slice `root` into bundle dir `out`. Returns the manifest dict.
 
     Mode precedence: explicit `selections` > profile modes (`.ghostslice.json`)
@@ -413,7 +490,11 @@ def build_bundle(root: str | Path, out: str | Path,
                 "symbol selection cannot be combined with an explicit "
                 "include set")
     _t0 = time.perf_counter()
-    cache = open_cache(root) if use_cache else None
+    # v0.23: the plugin set's digest namespaces the cache, so a
+    # plugin's code is a key input to every derivation it can
+    # influence (cache.py); "" when no plugins are loaded.
+    cache = open_cache(root, namespace=_pset.digest if _pset else "") \
+        if use_cache else None
     ignore_matcher = profile.is_ignored if (profile and profile.path) else None
     result: ScanResult = scan(root, ignore_matcher=ignore_matcher, cache=cache)
     _t_scan = time.perf_counter()
@@ -661,6 +742,13 @@ def build_bundle(root: str | Path, out: str | Path,
             "left_in_place": leftover_total,
             "leftover_kinds": sorted(leftover_kinds),
         }
+    if _pset is not None and _pset.plugins:
+        # v0.23: additive; the plugins that sliced this bundle, and
+        # every per-file plugin failure (those files shipped full
+        # text — see plugins.py's failure discipline).
+        manifest["plugins"] = _pset.manifest_plugins()
+    if _pset is not None and _pset.errors:
+        manifest["plugin_errors"] = list(_pset.errors)
     prompt = (
         "# Optimized agent context bundle (GhostSlice)\n\n"
         f"Estimated tokens: {total_after} (was {total_before}, saved {total_before - total_after}). "
@@ -755,6 +843,24 @@ def build_bundle(root: str | Path, out: str | Path,
 
 
 def estimate_context_tokens(root: str | Path, profile=None,
+                            default_mode: str | None = None,
+                            cache=None) -> tuple[int, int]:
+    """(total original, total sliced) tokens for the default/profile
+    selection. Plugin handling mirrors build_bundle: an active set
+    is used as-is; otherwise the profile's plugins load for this
+    call only (v0.23)."""
+    if _plugins.active_set() is not None:
+        return _estimate_context_tokens_impl(root, profile=profile,
+                                             default_mode=default_mode,
+                                             cache=cache)
+    pset = _plugins.load_for_project(root, profile=profile)
+    with _plugins.activated(pset):
+        return _estimate_context_tokens_impl(root, profile=profile,
+                                             default_mode=default_mode,
+                                             cache=cache)
+
+
+def _estimate_context_tokens_impl(root: str | Path, profile=None,
                             default_mode: str | None = None,
                             cache=None) -> tuple[int, int]:
     """(total original, total sliced) tokens for the default/profile selection.
