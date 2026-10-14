@@ -3,6 +3,60 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [1.0.3] - 2026-10-14
+Polish round 3: responsiveness and reach. The dashboard stops
+charging its first graph request for the call-graph build, the
+graph command joins the cache, history learns filters and
+percentiles, and watch stops ignoring profile edits. Audit:
+`audits/POLISH_103_audit.md`.
+
+### Added
+- **History filters and percentiles.** `ghostslice history`
+  gains `--top N` (the N runs with the largest savings, largest
+  first) and `--since WHEN` (an ISO date, an ISO datetime, or a
+  relative form like `7d`). The filters compose; totals, trend,
+  and stats then describe exactly the runs shown, the text
+  output says so on a `Filter:` line, and the JSON payload
+  gains a `filter` block (additive; absent without flags).
+  Records with unparseable timestamps are excluded by `--since`
+  and counted, never silently kept or dropped. The aggregates
+  gain a `percentiles` block (p50/p90 of per-run before / after
+  / saved estimated tokens, linear interpolation), printed in
+  the `--trend` stats; an empty history reports nulls, not
+  invented zeros.
+- **Watch profile reload.** `ghostslice watch` now notices
+  changes to the profile file (the project's `.ghostslice.json`,
+  or whatever file the session's profile was loaded from) and
+  applies a valid new profile to subsequent scans and exports
+  without a restart — including a profile created mid-watch.
+  Detection is by content hash, so a bare `touch` reloads
+  nothing. An invalid edit keeps the last-good profile, is
+  reported once per distinct bad content, and recovers
+  automatically when fixed; deleting the file reverts to the
+  built-in defaults. The session summary gains a
+  `profile_reloads` count. The profile's `plugins` list is not
+  re-applied (process state from startup; changing it still
+  needs a restart).
+
+### Changed
+- **Dashboard call-graph warm-up.** `serve` starts building the
+  `/api/graph` call payload on a background daemon thread at
+  startup, so the first graph request usually finds it ready
+  (on this repo the lazy build measured ~3.3s; a warm-started
+  first request is a memo hit). The payload is byte-identical
+  to the lazy one, requests that arrive mid-build receive the
+  same final payload, and a build failure is recorded and
+  surfaces on the graph request exactly as the lazy failure
+  did — never swallowed by the warm-up thread.
+- **Graph command uses the cache.** `ghostslice graph` opens
+  the persistent content cache under the active plugin digest
+  (scan records + the dead-symbol pass's outlines) and gains
+  `--no-cache`, matching scan/lint/calls. Output is
+  byte-identical cached or not (pinned on fixtures, on this
+  repo, and across a plugin edit). The import-graph walk
+  itself still reads file text directly, as the call graph's
+  ast walk does.
+
 ## [1.0.2] - 2026-10-14
 Polish round 2: integration, performance, and config. The
 persistent cache reaches the two commands that never used it,

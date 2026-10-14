@@ -27,21 +27,32 @@ build_bundle appends exactly one record per call; the initial export
 also appends one. A failed fit or an invalid bundle is reported but
 does not stop the watcher.
 
-The project profile (`.ghostslice.json`) is loaded once at startup;
-edits to it are seen as ordinary file-change events but only take
-effect on the next watch run.
+The project profile (`.ghostslice.json`, or whatever file the
+session's profile was loaded from) is RELOADED when it changes
+(v1.0.3): every poll first stats the profile file, and when the
+stat moves, the content hash decides — a bare `touch` reloads
+nothing. A valid new profile is swapped in atomically (profiles
+are replaced, never mutated, so an export already running keeps
+one consistent profile) and applies to subsequent scans and
+exports. An invalid one is reported once per distinct bad
+content and the last-good profile keeps serving; fixing the file
+recovers automatically. Deleting the file reverts to the built-in
+defaults. One limit: the profile's "plugins" list is NOT
+re-applied — plugins are process state the CLI activates once at
+startup, so changing it still needs a restart.
 
 Ctrl-C exits cleanly (exit code 0) after printing a session summary.
 """
 from __future__ import annotations
 
+import hashlib
 import sys
 import time
 from dataclasses import replace as _dc_replace
 from pathlib import Path
 
 from .exporter import build_bundle, validate_bundle
-from .profile import Profile
+from .profile import PROFILE_NAME, Profile, load_profile_file
 from .textio import read_text as _gs_read_text
 from .scanner import DEFAULT_IGNORE_DIRS, ScanResult, scan
 
@@ -127,9 +138,10 @@ def run_watch(root: str | Path,
               stream=None) -> dict:
     """Run the watch loop. Returns a summary dict.
 
-    Summary keys: duration_s, events, exports, polls, initial_files,
-    initial_tokens (estimated). KeyboardInterrupt is caught and turned
-    into a normal return so the CLI exits 0.
+    Summary keys: duration_s, events, exports, polls, profile_reloads
+    (v1.0.3), initial_files, initial_tokens (estimated).
+    KeyboardInterrupt is caught and turned into a normal return so
+    the CLI exits 0.
 
     `scan_fn`, `sleep`, and `clock` are injectable for tests: tests drive
     the loop deterministically by mutating the project inside a fake
@@ -152,25 +164,121 @@ def run_watch(root: str | Path,
             raise ValueError("watch: bundle output directory cannot be the project root itself")
     if debounce is None:
         debounce = max(1.0, 2.0 * interval)
+
+    def say(msg: str) -> None:
+        print(msg, file=stream, flush=True)
+
     # Exports must never ingest a previous bundle: when the bundle dir
     # is inside the project, hand build_bundle a copy of the profile
     # whose ignore list also excludes the bundle dir. One-shot export
     # is untouched; this is watch-only (audit F3).
-    export_profile = profile
-    if bundle_rel:
-        base = profile if profile is not None else Profile()
-        export_profile = _dc_replace(
+    def derive_export_profile(base_profile):
+        if not bundle_rel:
+            return base_profile
+        base = base_profile if base_profile is not None else Profile()
+        return _dc_replace(
             base,
             ignore=[*base.ignore, f"{bundle_rel}/**"],
             path=base.path or "(watch)")
+
+    # v1.0.3: the live profile. `live` holds the profile currently in
+    # effect (plus its derived export profile); a reload REPLACES
+    # both entries with fresh objects and never mutates a Profile,
+    # so a scan or export already running on the old objects keeps a
+    # consistent view and the next one picks the new profile up.
+    live = {"profile": profile, "export": derive_export_profile(profile)}
+    # The file to watch for changes: whatever file the session's
+    # profile was loaded from (its .path) — which may live outside
+    # the project. When the session started profile-less, the
+    # project's own .ghostslice.json is watched instead, so a
+    # profile CREATED mid-watch also takes effect (audit F1).
+    if profile is not None and profile.path:
+        profile_file = Path(profile.path)
+    else:
+        profile_file = root / PROFILE_NAME
+    profile_state = {"stat": None, "hash": None, "bad_hash": None}
+    profile_reloads = 0
+
+    def _stat_key():
+        """(mtime_ns, size) for the profile file, or None when it
+        does not exist / cannot be stat'ed."""
+        try:
+            st = profile_file.stat()
+        except OSError:
+            return None
+        return (st.st_mtime_ns, st.st_size)
+
+    def _content_hash():
+        """sha256 of the profile file's bytes, or None when it does
+        not exist / cannot be read right now."""
+        try:
+            blob = profile_file.read_bytes()
+        except OSError:
+            return None
+        return hashlib.sha256(blob).hexdigest()
+
+    if profile_file is not None:
+        profile_state["stat"] = _stat_key()
+        profile_state["hash"] = _content_hash()
+
+    def check_profile_reload() -> None:
+        """Apply a changed profile file, if it changed (v1.0.3).
+
+        Runs at the top of every poll, before the scan, so the scan
+        (and any settle/export later in the same cycle) already
+        sees the new profile. The stat is the cheap pre-filter —
+        most polls end there; the content hash is the decider when
+        the stat moved, so an mtime touch without a content change
+        reloads and reports nothing. An invalid file keeps the
+        last-good profile and is reported once per distinct bad
+        content; a deleted file applies the built-in defaults."""
+        nonlocal profile_reloads
+        if profile_file is None:
+            return
+        stat_key = _stat_key()
+        if stat_key == profile_state["stat"]:
+            return
+        if stat_key is None:
+            file_hash = None
+        else:
+            file_hash = _content_hash()
+            if file_hash is None:
+                return  # vanished mid-check; retry next poll
+        profile_state["stat"] = stat_key
+        if file_hash == profile_state["hash"]:
+            return  # stat moved but content identical: a touch
+        profile_state["hash"] = file_hash
+        if file_hash is None:
+            profile_state["bad_hash"] = None
+            live["profile"] = Profile()
+            live["export"] = derive_export_profile(None)
+            profile_reloads += 1
+            say(f"[watch] profile removed ({profile_file}); "
+                "reverted to the built-in defaults")
+            return
+        try:
+            new_profile = load_profile_file(profile_file)
+        except ValueError as exc:
+            if profile_state["bad_hash"] != file_hash:
+                profile_state["bad_hash"] = file_hash
+                say(f"[watch] profile reload failed ({exc}); "
+                    "keeping the previous profile")
+            return
+        recovered = profile_state["bad_hash"] is not None
+        profile_state["bad_hash"] = None
+        live["profile"] = new_profile
+        live["export"] = derive_export_profile(new_profile)
+        profile_reloads += 1
+        say(f"[watch] profile reloaded: {profile_file}"
+            + (" (recovered from an invalid profile)" if recovered
+               else ""))
+
     if scan_fn is None:
-        matcher = profile.is_ignored if (profile is not None and profile.path) else None
-
         def scan_fn(p):  # noqa: F811 - intentional default scanner
+            prof = live["profile"]
+            matcher = prof.is_ignored if (prof is not None
+                                          and prof.path) else None
             return scan(p, ignore_matcher=matcher)
-
-    def say(msg: str) -> None:
-        print(msg, file=stream, flush=True)
 
     def poll() -> ScanResult | None:
         try:
@@ -187,9 +295,12 @@ def run_watch(root: str | Path,
         nonlocal exports
         # A failed export (unwritable bundle dir, disk full, bad mode)
         # is reported and the watcher keeps watching; the next settled
-        # change retries (audit F2).
+        # change retries (audit F2). The profile is read from `live`
+        # at call time: an export already running when a reload lands
+        # keeps the one profile object it started with (reloads
+        # replace, never mutate), the next export uses the new one.
         try:
-            manifest = build_bundle(root, out, profile=export_profile, preset=preset,
+            manifest = build_bundle(root, out, profile=live["export"], preset=preset,
                                     default_mode=default_mode,
                                     exclude_secrets=exclude_secrets,
                                     redact=redact,
@@ -228,6 +339,7 @@ def run_watch(root: str | Path,
     if initial is None:
         say("[watch] initial scan failed; nothing to watch")
         return {"duration_s": 0.0, "events": 0, "exports": 0, "polls": 0,
+                "profile_reloads": 0,
                 "initial_files": 0, "initial_tokens": 0}
     initial_files = len(visible_files(initial, bundle_rel))
     initial_tokens = _tokens_of(initial, bundle_rel)
@@ -291,6 +403,7 @@ def run_watch(root: str | Path,
         if once:
             sleep(interval)
             polls += 1
+            check_profile_reload()
             cur = poll()
             if cur is not None and snapshot_of(cur, bundle_rel) != settled_snap:
                 settle(cur)
@@ -303,6 +416,7 @@ def run_watch(root: str | Path,
                     break
                 sleep(interval)
                 polls += 1
+                check_profile_reload()
                 cur = poll()
                 if cur is None:
                     continue
@@ -330,5 +444,6 @@ def run_watch(root: str | Path,
     say(f"[watch] stopped: watched {duration:.1f}s, {polls} poll(s), "
         f"{events} change event(s), {exports} export(s) written")
     return {"duration_s": duration, "events": events, "exports": exports,
-            "polls": polls, "initial_files": initial_files,
+            "polls": polls, "profile_reloads": profile_reloads,
+            "initial_files": initial_files,
             "initial_tokens": initial_tokens}

@@ -558,6 +558,9 @@ recommendations to review, never automatic deletions: dynamic imports,
 framework wiring, and config-referenced entry files can look dead when
 they are not. Since v0.19 the scan/graph recommendation lists also
 include dead *symbols* (kind `dead-symbol`) from the call graph below.
+Since v1.0.3 the graph command uses the persistent content cache like
+scan, lint, and calls (`--no-cache` opts out); its output is identical
+cached or not.
 
 ### Call graph + dead functions (v0.19)
 
@@ -877,17 +880,33 @@ ghostslice history ~/my-project                 # plain totals (unchanged)
 ghostslice history ~/my-project --trend         # per-run table + charts
 ghostslice history ~/my-project --trend --model claude-opus
 ghostslice history ~/my-project --json          # full analytics payload
+ghostslice history ~/my-project --top 5         # the 5 biggest savings (v1.0.3)
+ghostslice history ~/my-project --since 7d      # the last week (v1.0.3)
 ```
 
 `--trend` prints each run oldest first (before → after, saved,
 saved %, the change in after-tokens versus the previous run, and
 estimated $ saved per run and cumulative), then aggregates: mean /
-median saved %, best and worst runs, the first→last change in
-context size, the span (weekly run rate only when the history spans
-at least a day), and ASCII sparklines of saved and after tokens
-across runs. Dollar figures use the model's **input** rate from the
-local prices snapshot (context is input tokens) and are labelled
-with its date: "prices as of …, local snapshot, not live".
+median saved %, per-run percentiles (p50/p90 of the saved and
+after-token totals, v1.0.3), best and worst runs, the first→last
+change in context size, the span (weekly run rate only when the
+history spans at least a day), and ASCII sparklines of saved and
+after tokens across runs. Dollar figures use the model's **input**
+rate from the local prices snapshot (context is input tokens) and
+are labelled with its date: "prices as of …, local snapshot, not
+live".
+
+**Filters (v1.0.3):** `--top N` keeps only the N runs with the
+largest savings (largest first), and `--since WHEN` keeps runs at
+or after a cutoff — an ISO date (`2026-10-01`), an ISO datetime,
+or a relative form like `7d` (N days ago). They compose, and
+everything shown (totals, trend, aggregates, percentiles) then
+describes the runs shown; the text output says so on a `Filter:`
+line, and the JSON gains a `filter` block with the total and
+shown run counts. Records whose timestamps cannot be parsed are
+excluded by `--since` and counted (`undated_excluded`), never
+silently kept or dropped. With neither flag the output is exactly
+what it was before, plus the percentile block in `aggregates`.
 
 The JSON payload keeps the summary keys (`runs`,
 `total_before_tokens`, `total_after_tokens`, `total_saved_tokens`,
@@ -953,10 +972,18 @@ scanner-ignored, so its own writes never trigger events. The bundle
 output may not be the project root itself (rejected with exit 2).
 With a custom bundle name inside the project, plain scans can still
 see a previous bundle's files; prefer the default `.claude_context`
-name (scanner-ignored) or a path outside the project. The profile is
-loaded once at startup; edit `.ghostslice.json` and restart the watch
-to apply it. `--max-events N` exits after N settled events. Ctrl-C
-exits 0 with a session summary (duration, polls, events, exports).
+name (scanner-ignored) or a path outside the project. The profile
+is reloaded when it changes (v1.0.3): each poll checks the profile
+file, and a content change (a bare `touch` does not count) is
+validated and applied to subsequent scans and exports without a
+restart — including a profile created mid-watch. An invalid edit
+keeps the last-good profile and is reported once per distinct bad
+content; fixing the file recovers automatically, and deleting it
+reverts to the built-in defaults. One limit: the profile's
+`plugins` list is process state loaded once at startup, so
+changing it still needs a restart. `--max-events N` exits after N
+settled events. Ctrl-C exits 0 with a session summary (duration,
+polls, events, exports).
 
 ### Performance: the content cache (v0.20)
 
@@ -1149,8 +1176,11 @@ symbols with **who calls each one and what each one calls** (plus a
 the existing `GET /api/graph` response as a `"calls"` payload —
 symbols in full, call edges capped at 2,000 and dead candidates at
 200, with the true totals and truncation flags reported when a cap
-engages. It is computed on the first request and kept for the
-server run. Call analysis covers Python files only; other files
+engages. It is kept for the server run; since v1.0.3 `serve`
+starts building it on a background thread at startup, so the
+first request usually finds it ready instead of paying the
+build (a request that beats the build simply waits for the same
+payload). Call analysis covers Python files only; other files
 honestly show "no call data" in the panel.
 
 ## Plugins

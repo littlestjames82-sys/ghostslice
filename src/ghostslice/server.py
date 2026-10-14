@@ -108,8 +108,14 @@ class _State:
         # first /api/graph request and kept for the server's life —
         # the state is a startup snapshot, so a per-run memo matches
         # its semantics (same rule as the slice memo above).
+        # v1.0.3: serve() additionally warms the build on a daemon
+        # thread at startup (start_calls_warmup), so the first graph
+        # request usually finds it ready; the lazy path remains the
+        # fallback and the two produce identical payloads.
         self._calls_payload: dict | None = None
+        self._calls_error: BaseException | None = None
         self._calls_lock = threading.Lock()
+        self._calls_thread: threading.Thread | None = None
 
     def slice_result(self, entry, mode: str):
         """Memoised slice_text for the preview endpoints (v0.22).
@@ -169,40 +175,94 @@ class _State:
                 self._mode_tokens_cache[key] = slice_text(entry.path, source, mode).sliced_tokens
         return self._mode_tokens_cache[key]
 
+    def _build_calls_payload(self) -> dict:
+        from .callgraph import build_call_graph
+        full = build_call_graph(self.scan, self.profile, self.graph)
+        edges = full["edges"]
+        dead = full["dead"]
+        return {
+            "symbols": full["symbols"],
+            "edges": edges[:CALL_EDGE_CAP],
+            "edges_total": len(edges),
+            "edges_truncated": len(edges) > CALL_EDGE_CAP,
+            "dead": dead[:CALL_DEAD_CAP],
+            "dead_total": len(dead),
+            "dead_truncated": len(dead) > CALL_DEAD_CAP,
+            "counts": full["counts"],
+            "skipped_files": full["skipped_files"],
+            "note": full["note"],
+            "scope": ("call analysis covers Python files "
+                      "only; other files have no call data"),
+        }
+
     def calls_payload(self) -> dict:
         """Call relationships for the served project (v1.0.2):
         Python symbols with their call edges from
         callgraph.build_call_graph over the state's startup scan.
 
-        Computed on first use, then memoised for the server run.
-        Non-Python files honestly have no call data: they simply
-        contribute no symbols or edges, and the payload's "scope"
-        line says the analysis is Python-only. Edge and dead lists
-        are capped (CALL_EDGE_CAP / CALL_DEAD_CAP) with the true
-        totals and truncation flags reported alongside."""
-        if self._calls_payload is None:
-            with self._calls_lock:
-                if self._calls_payload is None:
-                    from .callgraph import build_call_graph
-                    full = build_call_graph(self.scan, self.profile,
-                                            self.graph)
-                    edges = full["edges"]
-                    dead = full["dead"]
-                    self._calls_payload = {
-                        "symbols": full["symbols"],
-                        "edges": edges[:CALL_EDGE_CAP],
-                        "edges_total": len(edges),
-                        "edges_truncated": len(edges) > CALL_EDGE_CAP,
-                        "dead": dead[:CALL_DEAD_CAP],
-                        "dead_total": len(dead),
-                        "dead_truncated": len(dead) > CALL_DEAD_CAP,
-                        "counts": full["counts"],
-                        "skipped_files": full["skipped_files"],
-                        "note": full["note"],
-                        "scope": ("call analysis covers Python files "
-                                  "only; other files have no call data"),
-                    }
+        Computed once — by the startup warm-up thread when serve()
+        ran one, otherwise lazily here — then memoised for the
+        server run. A request that arrives while the build is in
+        flight waits on the build lock and receives the same final
+        payload object as every other request; the payload contract
+        has no "building" state. Non-Python files honestly have no
+        call data: they simply contribute no symbols or edges, and
+        the payload's "scope" line says the analysis is Python-only.
+        Edge and dead lists are capped (CALL_EDGE_CAP /
+        CALL_DEAD_CAP) with the true totals and truncation flags
+        reported alongside.
+
+        A build failure is stored and re-raised on every call: the
+        build runs over the fixed startup scan snapshot, so it is
+        deterministic and a silent retry could not succeed — the
+        failure surfaces on the graph request exactly as the lazy
+        build's would, instead of being swallowed by the warm-up
+        thread."""
+        if self._calls_payload is not None:
+            return self._calls_payload
+        if self._calls_error is not None:
+            raise self._calls_error
+        with self._calls_lock:
+            if self._calls_payload is not None:
+                return self._calls_payload
+            if self._calls_error is not None:
+                raise self._calls_error
+            try:
+                self._calls_payload = self._build_calls_payload()
+            except BaseException as exc:
+                self._calls_error = exc
+                raise
         return self._calls_payload
+
+    def start_calls_warmup(self) -> None:
+        """Begin building the call-graph payload on a daemon thread
+        (v1.0.3). Called by serve() once the server exists, so the
+        ~seconds the build costs are spent while the user is still
+        opening the page instead of on the first /api/graph request.
+
+        Idempotent (repeat calls are no-ops) and never fatal: the
+        thread is a daemon, so it cannot hold the process open past
+        shutdown, and a build failure is recorded on the state by
+        calls_payload() and reported by the next graph request —
+        the server keeps serving every other endpoint meanwhile."""
+        with self._calls_lock:
+            if self._calls_thread is not None \
+                    or self._calls_payload is not None \
+                    or self._calls_error is not None:
+                return
+            self._calls_thread = threading.Thread(
+                target=self._warm_calls, name="ghostslice-calls-warmup",
+                daemon=True)
+        self._calls_thread.start()
+
+    def _warm_calls(self) -> None:
+        try:
+            self.calls_payload()
+        except BaseException:
+            # Already recorded on the state; the next /api/graph
+            # request re-raises it there. This thread's only job is
+            # to have the result (or the failure) ready early.
+            pass
 
     def scan_payload(self) -> dict:
         files = []
@@ -545,7 +605,11 @@ def make_server(root: str, port: int = 8765, host: str = "127.0.0.1"):
 
 
 def serve(root: str, port: int = 8765, host: str = "127.0.0.1") -> None:
-    server, _state = make_server(root, port=port, host=host)
+    server, state = make_server(root, port=port, host=host)
+    # v1.0.3: warm the call-graph payload in the background while
+    # the user opens the page, instead of charging the first
+    # /api/graph request for the whole build.
+    state.start_calls_warmup()
     print(f"GhostSlice dashboard: http://{host}:{server.server_address[1]}/  (project: {root})")
     print("Token counts are estimates. Prices come from local prices.json (not live). Ctrl+C to stop.")
     try:

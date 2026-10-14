@@ -244,6 +244,18 @@ def _parse_floor_section(raw, candidate: Path, section: str) -> dict:
 def load_profile(root: str | Path) -> Profile:
     root = Path(root)
     candidate = root / PROFILE_NAME if root.is_dir() else root.parent / PROFILE_NAME
+    return load_profile_file(candidate)
+
+
+def load_profile_file(candidate: str | Path) -> Profile:
+    """Load and validate one explicit profile file (v1.0.3).
+
+    `load_profile` resolves a project directory to this; the watch
+    loop calls it directly to RELOAD the exact file the session's
+    profile came from, which may live outside the project. A
+    missing file is an empty profile, exactly as in load_profile;
+    a malformed one raises the same ValueError."""
+    candidate = Path(candidate)
     if not candidate.is_file():
         return Profile()
     # v0.21: a malformed profile is a user error with a message,

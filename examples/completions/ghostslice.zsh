@@ -88,10 +88,10 @@ _ghostslice() {
             _arguments '-h' '--help' '-o' '--out' '--mode' '--preset' '--model' '--exclude-secrets' '--redact' '--no-redact' '--auto-shrink' '--fit' '--symbols' '--timing' '--no-cache' '--workers' '--plugin' '--allow-plugin-override'
             ;;
         graph)
-            _arguments '-h' '--help' '--json'
+            _arguments '-h' '--help' '--json' '--no-cache'
             ;;
         history)
-            _arguments '-h' '--help' '--json' '--trend' '--model'
+            _arguments '-h' '--help' '--json' '--trend' '--model' '--top' '--since'
             ;;
         init)
             _arguments '-h' '--help' '--yes' '--force' '--dry-run' '--budget' '--model'

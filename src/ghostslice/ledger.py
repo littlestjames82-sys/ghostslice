@@ -19,6 +19,8 @@ trended as if its totals were directly comparable.
 from __future__ import annotations
 
 import json
+import math
+import re
 import statistics
 from datetime import datetime, timezone
 from pathlib import Path
@@ -199,6 +201,57 @@ def _parse_ts(raw) -> float | None:
     return dt.timestamp()
 
 
+_REL_SINCE_RE = re.compile(r"^(\d+)d$")
+
+
+def parse_since(raw, *, now: float | None = None) -> float:
+    """Parse a `history --since` value into an epoch-seconds cutoff.
+
+    Accepted forms (kept deliberately minimal — there is no other
+    date syntax in the codebase to follow): an ISO date
+    ("2026-10-01", read as the start of that day, UTC), an ISO
+    datetime (a naive value is read as UTC, the same convention
+    _parse_ts applies to ledger timestamps), or a relative "Nd"
+    (N whole days before `now`, default: the current time).
+    Anything else is a ValueError naming the accepted forms."""
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError(
+            "--since must be an ISO date/datetime or a relative "
+            "form like 7d")
+    text = raw.strip()
+    m = _REL_SINCE_RE.match(text)
+    if m:
+        base = now if now is not None \
+            else datetime.now(timezone.utc).timestamp()
+        return base - int(m.group(1)) * 86400
+    ts = _parse_ts(text)
+    if ts is None:
+        raise ValueError(
+            f"unrecognised --since value: {raw!r} (use an ISO date "
+            "like 2026-10-01, an ISO datetime, or a relative form "
+            "like 7d)")
+    return ts
+
+
+def _percentile(sorted_vals: list, pct: float) -> float:
+    """One percentile of a non-empty sorted series, by linear
+    interpolation between closest ranks (the inclusive method:
+    rank = pct/100 * (n - 1)). A single value is its own p50/p90.
+    Rounded to 2 decimals like the other aggregate floats."""
+    n = len(sorted_vals)
+    if n == 1:
+        return round(float(sorted_vals[0]), 2)
+    rank = pct / 100.0 * (n - 1)
+    lo = math.floor(rank)
+    hi = math.ceil(rank)
+    if lo == hi:
+        return round(float(sorted_vals[int(rank)]), 2)
+    frac = rank - lo
+    return round(float(sorted_vals[lo])
+                 + frac * (float(sorted_vals[hi])
+                           - float(sorted_vals[lo])), 2)
+
+
 def _input_cost(tokens: int, model: dict) -> float:
     """USD for `tokens` of context at the model's INPUT rate, rounded
     for display. Unlike pricing.estimate_cost this does not clamp at
@@ -210,14 +263,64 @@ def _input_cost(tokens: int, model: dict) -> float:
 
 
 def analytics(root: str | Path, model: dict | None = None,
-              prices: dict | None = None) -> dict:
+              prices: dict | None = None,
+              since: float | None = None,
+              top: int | None = None) -> dict:
     """Summary keys (unchanged) + trend/aggregate analytics (additive).
 
     `model`/`prices` follow pricing.py shapes; when a model is given,
     per-run and total estimated dollars saved are computed at its
-    input rate and the payload names the price snapshot date."""
+    input rate and the payload names the price snapshot date.
+
+    `since` (epoch seconds, e.g. from parse_since) and `top`
+    (v1.0.3, the `history` filters) select a subset of runs BEFORE
+    anything is derived: every total, trend row, aggregate, and
+    percentile then describes the shown subset, and the payload
+    gains a "filter" block recording how many runs exist in total,
+    how many are shown, and how many dateless records --since had
+    to exclude (a record whose timestamp cannot be parsed cannot
+    be shown to be in range, so it is excluded and counted, never
+    silently kept). --top keeps the largest savings first; ties
+    keep ledger order. With neither filter the payload is exactly
+    the pre-v1.0.3 shape plus the additive percentile block."""
+    if top is not None and top < 1:
+        raise ValueError(f"top must be >= 1, got {top}")
     base = summary(root)
     records = base["records"]
+    filter_info = None
+    if since is not None or top is not None:
+        runs_total = len(records)
+        undated = 0
+        if since is not None:
+            kept = []
+            for rec in records:
+                ts = _parse_ts(rec.get("at"))
+                if ts is None:
+                    undated += 1
+                elif ts >= since:
+                    kept.append(rec)
+            records = kept
+        if top is not None:
+            records = sorted(records,
+                             key=lambda r: r["saved_tokens"],
+                             reverse=True)[:top]
+        base = dict(base)
+        base["runs"] = len(records)
+        base["total_before_tokens"] = sum(r["before_tokens"]
+                                          for r in records)
+        base["total_after_tokens"] = sum(r["after_tokens"]
+                                         for r in records)
+        base["total_saved_tokens"] = sum(r["saved_tokens"]
+                                         for r in records)
+        base["records"] = records
+        filter_info = {
+            "since": (datetime.fromtimestamp(since, timezone.utc)
+                      .isoformat() if since is not None else None),
+            "top": top,
+            "runs_total": runs_total,
+            "runs_shown": len(records),
+            "undated_excluded": undated,
+        }
     mix = estimator_mix(records)
 
     runs_detail: list[dict] = []
@@ -257,6 +360,12 @@ def analytics(root: str | Path, model: dict | None = None,
     aggregates: dict = {
         "mean_saved_pct": None,
         "median_saved_pct": None,
+        # v1.0.3: per-run distribution of the totals each export
+        # carried (before/after) and of the savings, p50/p90 by
+        # linear interpolation (see _percentile). Each stays None
+        # on an empty history — no invented zeros.
+        "percentiles": {"before_tokens": None, "after_tokens": None,
+                        "saved_tokens": None},
         "best_run": None,
         "worst_run": None,
         "first_after_tokens": None,
@@ -272,6 +381,12 @@ def analytics(root: str | Path, model: dict | None = None,
         pcts = [r["saved_pct"] for r in runs_detail]
         aggregates["mean_saved_pct"] = round(statistics.fmean(pcts), 2)
         aggregates["median_saved_pct"] = round(statistics.median(pcts), 2)
+        for field in ("before_tokens", "after_tokens", "saved_tokens"):
+            vals = sorted(r[field] for r in runs_detail)
+            aggregates["percentiles"][field] = {
+                "p50": _percentile(vals, 50),
+                "p90": _percentile(vals, 90),
+            }
         best = max(runs_detail, key=lambda r: (r["saved_tokens"], -r["index"]))
         worst = min(runs_detail, key=lambda r: (r["saved_tokens"], r["index"]))
         for key, run in (("best_run", best), ("worst_run", worst)):
@@ -306,6 +421,8 @@ def analytics(root: str | Path, model: dict | None = None,
     out["estimator"] = mix
     out["runs_detail"] = runs_detail
     out["aggregates"] = aggregates
+    if filter_info is not None:
+        out["filter"] = filter_info
     out["charts"] = {
         "saved_tokens_sparkline": sparkline([r["saved_tokens"] for r in runs_detail]),
         "after_tokens_sparkline": sparkline([r["after_tokens"] for r in runs_detail]),

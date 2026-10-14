@@ -599,3 +599,13 @@ the audit findings that drove the two improvement rounds.
   defaults unchanged). Tests 795 -> 829 (34 new; the release
   version pin moved 1.0.1 -> 1.0.2). Audit:
   audits/POLISH_102_audit.md.
+- Post-marathon polish round 3 (v1.0.3, 2026-10-14): dashboard
+  call-graph warm-up on a background thread at serve() start
+  (payload identical to lazy; failures surface on the request,
+  never swallowed), the graph command joins the content cache
+  (--no-cache added; byte parity pinned), history gains --top /
+  --since filters and p50/p90 percentiles, and watch reloads a
+  changed profile by content hash (valid applies, invalid keeps
+  last-good with one report per bad content, delete reverts to
+  defaults; plugins list not re-applied). Audit:
+  audits/POLISH_103_audit.md.
