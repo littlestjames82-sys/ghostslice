@@ -10,6 +10,7 @@ Commands:
   ghostslice calls        <path> [file] [--json] [--dead]
   ghostslice watch        <path> [--export] [-o <bundle>] [--interval S] [--debounce S] [--once] [--max-events N] [--fit N] [--redact] [--auto-shrink]
   ghostslice check-budget <path> [--max-tokens N]
+  ghostslice ci           <path> [--budget N] [--strict] [--allow-secrets] [--json | --pr-comment] [--out report.html]
   ghostslice lint         <path> [--json] [--strict]
   ghostslice init         <path> [--yes] [--force] [--dry-run] [--budget N] [--model ID]
   ghostslice cache        stats|clear <path>
@@ -615,6 +616,29 @@ def _main_impl(argv: list[str] | None = None) -> int:
     p_budget.add_argument("--max-tokens", type=int, default=None,
                           help="budget in sliced tokens (default: profile budget_tokens)")
     p_budget.add_argument("--mode", choices=MODES, default=None)
+
+    p_ci = sub.add_parser("ci", help="CI gate: budget + lint + secrets + fit + duplicates in one read-only run (exit 1 on any failed check, 2 on usage/config errors)")
+    p_ci.add_argument("path")
+    p_ci.add_argument("--budget", type=int, default=None, metavar="N",
+                      help="sliced-token budget (default: profile budget_tokens; "
+                           "with no budget anywhere, the budget and fit checks are "
+                           "skipped, not failed)")
+    p_ci.add_argument("--strict", action="store_true",
+                      help="lint warnings fail the lint check too (default: only lint errors fail)")
+    p_ci.add_argument("--allow-secrets", action="store_true",
+                      help="downgrade secret-guard findings to a warning "
+                           "(default: findings FAIL the secrets check, because the "
+                           "gate's job is keeping secrets out of agent context)")
+    p_ci.add_argument("--fail-on-secrets", action="store_true",
+                      help="fail on secret-guard findings (this is the default; "
+                           "the flag exists so workflows can say it out loud)")
+    p_ci_fmt = p_ci.add_mutually_exclusive_group()
+    p_ci_fmt.add_argument("--json", action="store_true",
+                          help="print one machine payload: checks, totals, exit_code")
+    p_ci_fmt.add_argument("--pr-comment", action="store_true",
+                          help="print a compact Markdown summary for a PR comment")
+    p_ci.add_argument("--out", default=None, metavar="FILE",
+                      help="also write the HTML report to FILE")
 
     p_check = sub.add_parser("check", help="validate a bundle against its manifest")
     p_check.add_argument("bundle")
@@ -1274,6 +1298,49 @@ def _main_impl(argv: list[str] | None = None) -> int:
         status = "OK" if after <= budget else "OVER BUDGET"
         print(f"Selected context: {after:,} sliced estimated tokens (full project {before:,}); budget {budget:,}: {status}")
         return 0 if after <= budget else 1
+
+    if args.cmd == "ci":
+        # v0.24: the CI pack. Checks run read-only inside run_ci;
+        # exit 0 = no failed check, 1 = a check failed, 2 = usage /
+        # config errors (bad --budget, missing project, invalid
+        # profile — the last is handled by the generic loader above,
+        # and an --out report that cannot be written).
+        if args.budget is not None and args.budget <= 0:
+            print("ci: --budget must be > 0", file=sys.stderr)
+            return 2
+        from .ci import render_pr_comment, render_text, run_ci
+        try:
+            payload = run_ci(args.path, profile=profile,
+                             budget=args.budget, strict=args.strict,
+                             allow_secrets=args.allow_secrets)
+        except FileNotFoundError:
+            print(f"ci: no such project: {args.path}", file=sys.stderr)
+            return 2
+        exit_code = payload["exit_code"]
+        if args.out:
+            from .report import write_report
+            try:
+                out_path = write_report(
+                    args.path, args.out,
+                    model_id=profile.model or "claude-sonnet")
+                payload["report"] = {"path": str(out_path), "written": True}
+            except OSError as exc:
+                payload["report"] = {"path": args.out, "written": False,
+                                     "error": str(exc)}
+                exit_code = 2
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        elif args.pr_comment:
+            print(render_pr_comment(payload))
+        else:
+            print(render_text(payload))
+            report = payload.get("report")
+            if report and report["written"]:
+                print(f"Report: {report['path']}")
+            elif report:
+                print(f"ci: could not write report to {args.out}: "
+                      f"{report['error']}", file=sys.stderr)
+        return exit_code
 
     if args.cmd == "check":
         check = validate_bundle(args.bundle)

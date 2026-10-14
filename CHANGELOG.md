@@ -3,6 +3,36 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [0.24.0] - 2026-10-13
+### Added
+- CI pack (G19): `ghostslice ci <project>` runs five named checks
+  over the default export selection in one read-only pass:
+  budget (vs the profile's `budget_tokens` or `--budget`;
+  skipped, not failed, when no budget is configured), lint
+  (errors fail; warnings fail only with `--strict`), secrets
+  (guard findings FAIL by default; `--allow-secrets` downgrades
+  them to a warning for the whole run, including lint's L005
+  rule; `--fail-on-secrets` spells the default explicitly), fit
+  (whether the auto-fit ladder can reach the budget), and
+  duplicates (exact-duplicate groups with 500+ recoverable
+  estimated tokens warn). Each check reports pass / warn / fail /
+  skipped with a one-line evidence string.
+- Exit semantics: 0 = no failed check, 1 = a check failed,
+  2 = usage/config errors. `--json` emits one machine payload
+  (checks, totals, summary, `exit_code`); `--pr-comment` prints
+  a compact Markdown summary for PR comments; `--out FILE` also
+  writes the HTML report. A check that errors internally fails
+  that check alone; the run itself never tracebacks and writes
+  nothing without `--out`.
+- GitHub Action sample in `examples/github-action/`: checks out
+  the user's repo, installs GhostSlice from its GitHub repo (it
+  is not on PyPI), runs `ghostslice ci` with the budget from a
+  workflow env var, uploads the JSON + Markdown + HTML artifacts,
+  and optionally posts the summary as a PR comment with the
+  built-in GITHUB_TOKEN. This repo dogfoods the command in
+  `.github/workflows/ghostslice-ci.yml` (budget 180,000 on the
+  command line; no repo profile added).
+
 ## [0.23.0] - 2026-10-13
 ### Added
 - Plugin system for user slicers (G18): teach GhostSlice a new

@@ -1,0 +1,41 @@
+# Dogfood: `ghostslice ci` gating GhostSlice itself.
+#
+# Unlike the user sample in examples/github-action/ (which installs
+# GhostSlice from GitHub into the user's repo), this workflow tests
+# the checked-out source tree directly, like ci.yml does.
+#
+# The budget is passed on the command line on purpose: this repo
+# carries no .ghostslice.json, and adding one would change every
+# command's behaviour repo-wide. 180,000 estimated tokens is the
+# v0.24.0 local sliced total (136,395) plus ~30% headroom; the fit
+# check proves the ladder can always get back under it.
+name: GhostSlice CI (dogfood)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ghostslice-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run GhostSlice CI on GhostSlice
+        run: |
+          set +e
+          PYTHONPATH=src python -m ghostslice ci . --budget 180000 --json --out ghostslice-report.html > ghostslice-ci.json
+          code=$?
+          cat ghostslice-ci.json
+          exit $code
+      - name: Upload CI report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghostslice-ci
+          path: |
+            ghostslice-ci.json
+            ghostslice-report.html

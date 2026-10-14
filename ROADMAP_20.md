@@ -34,7 +34,7 @@ Baseline: v0.5.0, 149 tests passed.
 | G16 | Fuzz/robustness: malformed-input fuzzing for every slicer + encoding handling (BOM, UTF-16, latin-1) | v0.21.0 | done |
 | G17 | Dashboard v2: side-by-side slice preview (original vs slice, per Ryan's mockups, Oct 13) with diff highlighting + budget slider with live auto-fit preview | v0.22.0 | done |
 | G18 | Plugin system: user slicers via a documented contract (profile "plugins" + --plugin, no auto-discovery), example Lua plugin | v0.23.0 | done |
-| G19 | CI pack: `ghostslice ci` one-shot (budget + secrets + lint) with PR markdown summary + sample GitHub Action | v0.24.0 | pending |
+| G19 | CI pack: `ghostslice ci` one-shot (budget + secrets + lint) with PR markdown summary + sample GitHub Action | v0.24.0 | done |
 | G20 | v1.0.0: `doctor` self-check, shell completions, docs restructure, full release-readiness audit + mockup polish (Ryan approved Oct 13): scan CLI top-N with heat bars + % of total + token/cost summary box, export --fit report table in the mockup style | v1.0.0 | pending |
 
 Progress log is appended here as each goal closes, with test counts and
@@ -492,6 +492,30 @@ the audit findings that drove the two improvement rounds.
   Standing limitation: the dashboard is a startup snapshot (no
   rescan), and the pre-existing file table still renders paths
   via innerHTML (flagged, out of scope).
+- G19 (v0.24.0) DONE Oct 13, 2026: CI pack shipped — `ghostslice
+  ci` runs five named checks over the default selection on one
+  shared scan (budget vs profile/--budget, skipped-not-failed
+  with no budget anywhere; lint via lint_project/lint_exit_code;
+  secrets FAIL by default with --allow-secrets downgrading the
+  whole run including lint's L005; fit via fit_modes in memory;
+  duplicates above a 500-token floor warn), each pass/warn/fail/
+  skipped with evidence, per-check exception isolation, exit
+  0/1/2 semantics pinned against the --json payload by an
+  agreement battery, --pr-comment Markdown, --out HTML report,
+  read-only by fs snapshot. Sample Action in
+  examples/github-action/ installs from GitHub (not on PyPI,
+  stated plainly) with the budget in env; dogfood workflow runs
+  ci on this repo with --budget 180000 on the command line (no
+  repo profile added). Tests 728 -> 760 (32 new). Audit rounds
+  (audits/G19_audit.md): round 1 headline fixes — the sample
+  workflow's failure path broke itself (bash -e starved the
+  second ci run and the comment step; exit code now captured to
+  GITHUB_OUTPUT and enforced from the output) and an --out
+  report inside the tree is scanned by later runs (documented;
+  dogfood artifact names gitignored, mechanism pinned). Round 2
+  re-probed the fixed sample shell logic, the verbatim dogfood
+  run, YAML structure, plugin exit-2 inheritance, and the exact
+  budget boundary; no new defects.
 - G18 (v0.23.0) DONE Oct 13, 2026: plugin system for user slicers
   shipped (src/ghostslice/plugins.py) — two contract styles
   (module attributes LANGUAGE/EXTENSIONS/slice_text/optional

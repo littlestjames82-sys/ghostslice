@@ -752,6 +752,45 @@ ghostslice check-budget ~/my-project --max-tokens 50000   # or profile budget_to
 echo $?   # 1 when the selected (sliced) context exceeds the budget
 ```
 
+### CI pack: one gate command (v0.24)
+
+`ghostslice ci` runs the whole context-health gate in one
+read-only pass and reports five named checks, each with a
+one-line evidence string:
+
+```bash
+ghostslice ci ~/my-project                      # budget from the profile
+ghostslice ci ~/my-project --budget 50000       # or from the flag
+ghostslice ci ~/my-project --json               # one machine payload
+ghostslice ci ~/my-project --pr-comment         # Markdown for a PR comment
+ghostslice ci ~/my-project --out report.html    # plus the HTML report
+```
+
+The checks: **budget** (sliced context vs the configured budget;
+skipped, not failed, when no budget is configured anywhere),
+**lint** (the context-lint rules; errors fail, warnings fail only
+with `--strict`), **secrets** (guard findings FAIL by default,
+because the gate's job is keeping secrets out of agent context;
+`--allow-secrets` downgrades them to a warning for the whole run,
+including lint's L005 rule), **fit** (whether the auto-fit ladder
+can reach the budget from the default selection), and
+**duplicates** (exact-duplicate groups holding 500+ recoverable
+estimated tokens warn). Exit codes: 0 when no check failed
+(warnings and skips never fail a run), 1 when any check failed,
+2 for usage/config errors. The run writes nothing (no bundle, no
+ledger record, no cache) unless `--out` names a report file; a
+check that errors internally fails that check alone, never the
+run. Token counts are estimates.
+
+A copy-paste GitHub Actions workflow lives in
+`examples/github-action/` (installs GhostSlice from its GitHub
+repo, since it is not on PyPI, uploads the JSON/report artifacts,
+and can post the `--pr-comment` summary). This repo dogfoods the
+command in `.github/workflows/ghostslice-ci.yml`. One local-run
+note: a report written into the project tree is a file like any
+other, so later runs scan it; gitignore the report names if you
+use `--out` locally.
+
 ### Savings ledger (v0.2)
 
 Every export appends one line to `.ghostslice-history.jsonl` in the
