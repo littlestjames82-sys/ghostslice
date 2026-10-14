@@ -53,12 +53,12 @@ def _tree_snapshot(root: Path) -> dict:
 # ---------------------------------------------------------------
 # version agreement (the drift doctor exists to catch)
 
-def test_version_is_1_0_4_and_pyproject_agrees():
+def test_version_is_1_0_5_and_pyproject_agrees():
     # The pin names the CURRENT release (1.0.0 at G20; bumped to
     # 1.0.1 by the polish round, 1.0.2 by polish round 2, 1.0.3
-    # by polish round 3, and 1.0.4 by polish round 4 — the one
-    # existing pin those rounds change).
-    assert __version__ == "1.0.4"
+    # by polish round 3, 1.0.4 by polish round 4, and 1.0.5 by
+    # polish round 5 — the one existing pin those rounds change).
+    assert __version__ == "1.0.5"
     py = checkout_pyproject()
     assert py is not None, "tests run from the source checkout"
     from ghostslice.doctor import _project_section_version

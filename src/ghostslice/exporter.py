@@ -189,7 +189,7 @@ def render_context_xml(included: list[dict], excluded: list[dict]) -> str:
     {"path", "mode", "reason"} for every manifest file that carries
     no content (mode exclude, or a slice that came out empty).
 
-    Schema (also documented in README):
+    Schema (also documented in docs/commands.md):
       <documents>
         <document index="1" mode="signatures" package=""
                   original_tokens="120" sliced_tokens="45" sha256="...">

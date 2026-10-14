@@ -623,3 +623,23 @@ the audit findings that drove the two improvement rounds.
   digest; failures keep last-good, one report per distinct bad
   content). Tests 864 -> 892 (28 new; the release version pin
   moved 1.0.3 -> 1.0.4). Audit: audits/POLISH_104_audit.md.
+- Post-marathon polish round 5 (v1.0.5, 2026-10-14): lite
+  depth pass 2 (Rust TYPE declarations with multi-line where
+  clauses enumerate like impls; C# records named correctly and
+  enumerating members, Allman-brace spans fixed across Java/C#
+  outlines + signatures, expression-bodied methods recognised;
+  PHP 8 enums are declaration types whose cases are nameable
+  constants — Kotlin data-class constructor properties and
+  Swift extensions demonstrated and recorded, not fixed: one
+  works, one is a smaller partial gap), MCP parity (three new
+  read-only tools: project_graph, project_history, doctor —
+  nine total; summaries + caps, never raw dumps), and the
+  README extraction (75,491 bytes / ~20,198 estimated tokens ->
+  a ~4,457-token landing page plus docs/*.md, mechanically
+  verified lossless; self-lint 5 -> 4 warnings as the L001
+  resolves honestly). Tests 892 -> 925 (33 new in
+  tests/test_v30_polish5.py; existing pins moved: the release
+  version pin 1.0.4 -> 1.0.5, the two MCP tool-surface pins in
+  test_v03.py (6 -> 9 tools), and the two dogfood-budget pins
+  in test_v24_ci.py, re-measured per the workflow's own
+  headroom rule). Audit: audits/POLISH_105_audit.md.

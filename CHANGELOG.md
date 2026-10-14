@@ -3,6 +3,78 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [1.0.5] - 2026-10-14
+Polish round 5: lite-language depth pass 2, MCP parity for the
+read-only insights, and the manual's restructure into a landing
+page plus `docs/`. Audit: `audits/POLISH_105_audit.md`.
+
+### Fixed
+- **Rust type declarations with multi-line `where` clauses.**
+  The type-side twin of the v1.0.4 impl fix: a trait or struct
+  whose block brace follows a `where` clause got a span ending
+  at the first `;` inside its body, so trait methods never
+  enumerated (one leaked out as a parentless free function) and
+  struct bodies fell outside their spans. Outlines now find the
+  block brace the same way impls do; signatures mode renders
+  such types whole instead of dropping the header (or, for
+  structs, the type entirely). `;`-terminated declarations
+  (unit/tuple structs) keep their statement spans and are kept
+  verbatim in signatures mode like their braced siblings.
+- **C# records are real containers.** `record struct` /
+  `record class` were outlined under the names "struct" /
+  "class" (the name capture took the second kind word); record
+  bodies never enumerated their members at all. Records now
+  name correctly and enumerate methods like classes (the type
+  itself still renders whole, the declaration-type rule).
+- **Allman braces in Java/C# outlines and signatures.** A
+  declaration whose brace sits on its own line (the C#
+  default style) got a span ending at its first member's `;`:
+  no member of any Allman class, interface, or record ever
+  enumerated, and signatures mode dropped the type whole.
+  Declaration and method-head spans now locate the block brace
+  before judging a declaration a statement.
+- **Expression-bodied methods (C#) are recognised.** A method
+  shaped `public double Perimeter() => 4.0;` matched no method
+  pattern: invisible to outlines and dropped by signatures
+  mode. The method pattern now accepts the `=> ...;` ending;
+  expression braces (string interpolation, lambdas) are never
+  mistaken for a body brace.
+- **PHP 8 enums keep their cases.** An enum's cases — its
+  whole value surface — were dropped by signatures and
+  interfaces modes (the enum was members-reduced like a class)
+  and could not be named for symbol selection. Enums are
+  declaration types now (rendered whole, like interfaces and
+  traits), and their cases are named constants in the outline.
+
+### Added
+- **MCP tools for the read-only insights that had no route:**
+  `project_graph` (import/entry graph summary: entry points,
+  per-file imports/importers/external dependencies, unreachable
+  files; adjacency capped at 100 files with totals and
+  truncation flags), `project_history` (the savings-ledger
+  analytics with the v1.0.3 `since`/`top` filters and p50/p90
+  percentiles; the raw ledger records are omitted and per-run
+  detail capped at the 50 most recent runs), and `doctor` (the
+  ten health checks as data — doctor never writes, so it fits
+  the read-only surface). The tool surface is now nine tools;
+  stateful/writing operations stay CLI-only.
+
+### Documentation
+- **The README is a landing page; the manual lives in `docs/`.**
+  The README carried everything at 75,491 bytes (25,279
+  estimated tokens by `ghostslice.tokens`) and tripped the
+  tool's own L001 oversize warning. It now keeps the pitch,
+  install, quickstart, the feature map, the flagship
+  scan/slice/export dives, troubleshooting (with the
+  known-warnings note, now four warnings — the L001 is fixed,
+  not explained), tests, and the layout map, at 15,638 bytes
+  (5,328 estimated tokens). The deep reference
+  moved verbatim into `docs/` (commands, profiles, history,
+  operations, dashboard, languages, plugins, reference); no
+  content was lost (heading inventory and body coverage are
+  verified mechanically, and every cross-reference link
+  resolves).
+
 ## [1.0.4] - 2026-10-14
 Polish round 4: hardening and depth. The cyclic-symlink sweep
 reaches the surfaces the v0.21 fuzz round never covered, the
