@@ -33,7 +33,12 @@ pyproject.toml for uv); literally-named members only need to exist.
 Declared members that do not exist on disk are reported in
 `missing`, never an error. Members that escape the project root
 (`..` segments, absolute paths) are skipped and reported in
-`warnings` — detection never reaches outside the root.
+`warnings` — detection never reaches outside the root. A member
+reached through a directory symlink is also skipped with a
+warning (v1.0.4): the scanner never descends into symlinked
+directories, so such a member could never own a scanned file,
+and following the link could escape the root or alias an
+ancestor right back into it (a cycle).
 
 Nested workspaces: if one package path contains another, the
 outermost wins and the inner one is dropped (real member sets do
@@ -305,13 +310,66 @@ def _is_glob_segment(seg: str) -> bool:
     return any(c in seg for c in "*?[")
 
 
+def _is_real_dir(root: Path, rel: str) -> bool:
+    """True when root/rel is a directory the scanner's walk actually
+    descends into: it exists, is a directory, and reaching it
+    follows no symbolic link — its resolved path, relative to the
+    resolved root, is itself (v1.0.4). The scanner walks with
+    followlinks=False, so a directory symlink — a cycle back to a
+    parent, an escape outside the root, an alias of an ancestor —
+    is never descended and can never own a scanned file; detection
+    therefore never calls it a package dir either.
+    """
+    cand = root / rel if rel else root
+    try:
+        if cand.is_symlink() or not cand.is_dir():
+            return False
+        rel_resolved = cand.resolve().relative_to(root.resolve())
+    except (OSError, ValueError):
+        return False
+    return rel_resolved.as_posix() == rel
+
+
+def _through_symlink(root: Path, rel: str) -> bool:
+    """True when root/rel IS a directory, but only by following a
+    symbolic link somewhere along the path (see _is_real_dir)."""
+    try:
+        return (root / rel).is_dir() and not _is_real_dir(root, rel)
+    except OSError:
+        return False
+
+
+def _link_blocked_prefix(root: Path, pat: str) -> str | None:
+    """The longest literal prefix of a member pattern that exists
+    as a directory only through a symbolic link, or None — how a
+    glob like `links/*` (links -> pkgs) ends up matching nothing
+    real even though the path 'exists'."""
+    prefix: list[str] = []
+    for seg in [s for s in pat.split("/") if s not in ("", ".")]:
+        if _is_glob_segment(seg) or seg == "**":
+            break
+        prefix.append(seg)
+        if _through_symlink(root, "/".join(prefix)):
+            return "/".join(prefix)
+    return None
+
+
+def _symlink_warning(source: str, raw: str) -> str:
+    return (f"{source}: member {raw!r} is reached through "
+            "a symbolic link; skipped (detection does not "
+            "follow directory symlinks, matching the "
+            "scanner)")
+
+
 def _expand_pattern(root: Path, pattern: str) -> tuple[list[str], bool]:
     """Expand one member pattern to existing directory rel paths.
 
     Returns (dirs, is_glob). `**` segments behave as `*`. Glob
     segments match directory names via fnmatchcase; literal segments
-    must exist as directories. Never touches anything outside root:
-    callers filter escaping patterns before expanding.
+    must exist as directories. Only real directories count (see
+    _is_real_dir): a path through a directory symlink matches
+    nothing. Never touches anything outside root: callers filter
+    escaping patterns before expanding.
     """
     segments = [s for s in pattern.split("/") if s not in ("", ".")]
     is_glob = any(_is_glob_segment(s) or s == "**" for s in segments)
@@ -323,15 +381,18 @@ def _expand_pattern(root: Path, pattern: str) -> tuple[list[str], bool]:
             base_dir = root / base if base else root
             if _is_glob_segment(seg):
                 try:
-                    children = sorted(p for p in base_dir.iterdir() if p.is_dir())
+                    children = sorted(p for p in base_dir.iterdir()
+                                      if p.is_dir())
                 except OSError:
                     children = []
                 for child in children:
-                    if fnmatch.fnmatchcase(child.name, seg):
-                        nxt.append(f"{base}/{child.name}" if base else child.name)
+                    rel = f"{base}/{child.name}" if base else child.name
+                    if fnmatch.fnmatchcase(child.name, seg) \
+                            and _is_real_dir(root, rel):
+                        nxt.append(rel)
             else:
                 cand = f"{base}/{seg}" if base else seg
-                if (root / cand).is_dir():
+                if _is_real_dir(root, cand):
                     nxt.append(cand)
         current = nxt
         if not current:
@@ -488,11 +549,26 @@ def detect_workspaces(root: str | Path) -> WorkspaceInfo:
                         if (root / d / manifest_name).is_file()]
                 if not dirs:
                     if not matched:
-                        missing.append(raw)
+                        # Nothing real matched. If the pattern's
+                        # literal prefix is a directory only
+                        # through a symlink, that — not absence —
+                        # is the story (v1.0.4).
+                        if _link_blocked_prefix(root, pat) is not None:
+                            warnings.append(
+                                _symlink_warning(source, raw))
+                        else:
+                            missing.append(raw)
                     # Matched directories without the ecosystem
                     # manifest are not members (and not "missing").
                     continue
             if not dirs:
+                if not is_glob and _through_symlink(root, pat):
+                    # The member exists on disk, but only through
+                    # a directory symlink (v1.0.4): the scanner
+                    # never descends into those, so it could never
+                    # own a file. Not "missing" — skipped, loudly.
+                    warnings.append(_symlink_warning(source, raw))
+                    continue
                 missing.append(raw)
                 continue
             for d in dirs:
@@ -519,8 +595,13 @@ def detect_workspaces(root: str | Path) -> WorkspaceInfo:
             return None
 
         def _dirs(d: Path) -> list[Path]:
+            # Real directories only: a symlinked child is never
+            # descended by the scanner either (see _is_real_dir),
+            # and following one here could report the same tree
+            # twice under two names (or a tree outside the root).
             try:
-                return sorted(p for p in d.iterdir() if p.is_dir())
+                return sorted(p for p in d.iterdir()
+                              if p.is_dir() and not p.is_symlink())
             except OSError:
                 return []
 

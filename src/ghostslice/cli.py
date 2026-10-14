@@ -1465,7 +1465,12 @@ def _main_impl(argv: list[str] | None = None) -> int:
                       exclude_secrets=args.exclude_secrets,
                       redact=args.redact,
                       auto_shrink=args.auto_shrink,
-                      profile=profile)
+                      profile=profile,
+                      plugin_extra_paths=tuple(
+                          getattr(args, "plugin", None) or ()),
+                      plugin_allow_override=bool(
+                          getattr(args, "allow_plugin_override", False)),
+                      manage_plugins=True)
         except FileNotFoundError:
             print(f"watch: no such project: {args.path}", file=sys.stderr)
             return 2

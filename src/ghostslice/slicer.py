@@ -686,8 +686,8 @@ def _slice_ts(source: str, mode: str) -> str:
 #   C#:   [Test] / [Fact] / [Theory] methods
 # ---------------------------------------------------------------------------
 
-_GO_FUNC_RE = re.compile(r"^\s*func\s+(\([^)]*\)\s*)?[A-Za-z_]\w*\s*\(")
-_GO_TYPE_RE = re.compile(r"^\s*type\s+[A-Za-z_]\w*\s+(struct|interface)\b")
+_GO_FUNC_RE = re.compile(r"^\s*func\s+(\([^)]*\)\s*)?[A-Za-z_]\w*\s*(?:\[(?:[^\[\]]|\[[^\[\]]*\])*\]\s*)?\(")
+_GO_TYPE_RE = re.compile(r"^\s*type\s+[A-Za-z_]\w*\s*(?:\[(?:[^\[\]]|\[[^\[\]]*\])*\]\s*)?(struct|interface)\b")
 _RS_FN_RE = re.compile(r"^\s*(#\[.*\]\s*)?(pub(\s*\([^)]*\))?\s+)?(async\s+|unsafe\s+|const\s+)*fn\s+[A-Za-z_]\w*\s*[<(]")
 _RS_TYPE_RE = re.compile(r"^\s*(pub(\s*\([^)]*\))?\s+)?(struct|enum|trait|union)\s+[A-Za-z_]\w*")
 _RS_IMPL_RE = re.compile(r"^\s*(unsafe\s+)?impl\b")

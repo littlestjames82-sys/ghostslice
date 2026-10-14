@@ -609,3 +609,17 @@ the audit findings that drove the two improvement rounds.
   last-good with one report per bad content, delete reverts to
   defaults; plugins list not re-applied). Audit:
   audits/POLISH_103_audit.md.
+- Post-marathon polish round 4 (v1.0.4, 2026-10-14): the
+  cyclic-symlink sweep reaches the surfaces G16 never covered
+  (dashboard / workspaces / watch / CI / MCP — one real gap:
+  workspace detection followed directory symlinks into phantom,
+  root-escaping member packages; fixed to the scanner's
+  real-directory rule, everything else pinned safe), Go + Rust
+  symbol depth (generic functions, multi-parameter generic
+  receivers, generic interfaces; Rust nested-generic impl
+  headers and multi-line where-clause impls), and watch plugin
+  reload closes round 3's documented limit (list changes and
+  byte edits apply at poll tops under the new set's cache
+  digest; failures keep last-good, one report per distinct bad
+  content). Tests 864 -> 892 (28 new; the release version pin
+  moved 1.0.3 -> 1.0.4). Audit: audits/POLISH_104_audit.md.

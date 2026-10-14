@@ -84,7 +84,7 @@ _CAMEL_RE = re.compile(r"[A-Z]+(?![a-z])|[A-Z][a-z0-9]*|[a-z0-9]+")
 _DECL_KW_RE = re.compile(
     r"\b(?:function|func|fun|fn|def|class|interface|type|enum|struct|"
     r"protocol|trait|module|object|extension)\s+([A-Za-z_$][\w$]*)")
-_GO_FUNC_RE = re.compile(r"\bfunc\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)\s*\(")
+_GO_FUNC_RE = re.compile(r"\bfunc\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)\s*(?:\[(?:[^\[\]]|\[[^\[\]]*\])*\]\s*)?\(")
 _METHOD_RE = re.compile(
     r"^\s*(?:@[\w.]+\s+)?(?:(?:public|private|protected|internal|open|"
     r"final|abstract|static|async|export|default|override|suspend|pub|"

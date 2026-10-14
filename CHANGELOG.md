@@ -3,6 +3,58 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [1.0.4] - 2026-10-14
+Polish round 4: hardening and depth. The cyclic-symlink sweep
+reaches the surfaces the v0.21 fuzz round never covered, the
+Go/Rust lite parsers learn generics, and watch re-applies plugin
+changes. Audit: `audits/POLISH_104_audit.md`.
+
+### Fixed
+- **Workspace detection no longer follows directory symlinks.**
+  A declared member reached through a directory symlink — one
+  escaping the project root, or aliasing an ancestor of a real
+  member — was reported as a package even though the scanner
+  never descends into symlinked directories and it could never
+  own a file. Detection now accepts only real directories (the
+  same rule the walk uses), skips such members with a warning
+  naming each, and the manifest fallback no longer reports
+  phantom packages through symlinked children. The dashboard,
+  CI, watch, and the MCP server were swept with cyclic-symlink
+  fixtures and pinned safe: everything terminates, and the
+  dashboard still never serves file content from outside the
+  project root.
+- **Go generics in symbol outlines and signatures mode.**
+  Generic functions (`func Map[T any, U any](...)`) were
+  invisible to outlines, `slice --symbols`, task-selection name
+  extraction, and signatures mode. Methods on multi-parameter
+  generic receivers were attributed to a garbage parent
+  (`Pair[K, V]`'s methods to `V]`) because the receiver type was
+  split on whitespace; they now parent to the base type.
+  Generic type declarations (`type Stack[T any] struct`) render
+  in signatures mode, and generic interface methods are
+  enumerated as symbols.
+- **Rust impl headers with nested generics and `where`
+  clauses.** An impl whose generic bounds contain an
+  associated-type binding (`impl<I: Iterator<Item = u8>>
+  Wrapper<I>`) was named `>` and its methods parented to it;
+  generic spans are now stripped nesting-aware. An impl whose
+  opening brace follows a multi-line `where` clause was not a
+  region at all (its methods outlined as parentless free
+  functions); the impl's brace is now found, not assumed.
+
+### Added
+- **Watch plugin reload.** With the CLI's watch session, plugin
+  changes now take effect without a restart: editing the
+  profile's `plugins` list or a plugin file's bytes re-runs the
+  startup load (same validation and containment) at the next
+  poll, and the new set replaces the active one atomically when
+  its digest differs — so exports after the swap derive under
+  the new set's cache namespace. Swaps are announced on the
+  watch stream with the trust warning; a failed load keeps the
+  last-good set, reports once per distinct bad content, and
+  recovers when fixed. The session summary gains a
+  `plugin_reloads` count.
+
 ## [1.0.3] - 2026-10-14
 Polish round 3: responsiveness and reach. The dashboard stops
 charging its first graph request for the call-graph build, the

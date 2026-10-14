@@ -37,9 +37,23 @@ one consistent profile) and applies to subsequent scans and
 exports. An invalid one is reported once per distinct bad
 content and the last-good profile keeps serving; fixing the file
 recovers automatically. Deleting the file reverts to the built-in
-defaults. One limit: the profile's "plugins" list is NOT
-re-applied — plugins are process state the CLI activates once at
-startup, so changing it still needs a restart.
+defaults.
+
+The profile's "plugins" list IS re-applied too (v1.0.4), when the
+session manages plugins (the CLI does): the trigger is the same
+poll-top check — it stats every plugin file the live profile
+names (plus any --plugin files) and re-runs the full plugin load
+whenever the list changes or a plugin file's stat moves. The
+freshly loaded set replaces the active one atomically (a single
+registry swap between polls, never mid-export) only when its
+digest differs from the active set's, so a bare `touch` of a
+plugin file reloads and reports nothing, while a byte edit takes
+effect for subsequent scans and exports — under the new set's own
+cache namespace, never the old set's cached derivations. A load
+failure keeps the last-good plugin set and is reported once per
+distinct failure; fixing the file recovers automatically. Every
+swap is announced on the watch stream with the standard trust
+warning, because loading a plugin executes it.
 
 Ctrl-C exits cleanly (exit code 0) after printing a session summary.
 """
@@ -132,6 +146,9 @@ def run_watch(root: str | Path,
               redact: bool | None = None,
               auto_shrink: bool = False,
               profile=None,
+              plugin_extra_paths=(),
+              plugin_allow_override: bool = False,
+              manage_plugins: bool = False,
               scan_fn=None,
               sleep=time.sleep,
               clock=time.monotonic,
@@ -139,9 +156,19 @@ def run_watch(root: str | Path,
     """Run the watch loop. Returns a summary dict.
 
     Summary keys: duration_s, events, exports, polls, profile_reloads
-    (v1.0.3), initial_files, initial_tokens (estimated).
+    (v1.0.3), plugin_reloads (v1.0.4; always 0 unless
+    `manage_plugins`), initial_files, initial_tokens (estimated).
     KeyboardInterrupt is caught and turned into a normal return so
     the CLI exits 0.
+
+    `manage_plugins` (the CLI sets it) makes the poll-top check
+    also re-apply the profile's plugin list and plugin file edits;
+    `plugin_extra_paths` / `plugin_allow_override` mirror the
+    --plugin / --allow-plugin-override values the startup load
+    used, so a reload reproduces the startup load exactly apart
+    from the profile's current list. The STARTUP load itself stays
+    the caller's job (the CLI loads and activates before calling),
+    exactly as before.
 
     `scan_fn`, `sleep`, and `clock` are injectable for tests: tests drive
     the loop deterministically by mutating the project inside a fake
@@ -273,6 +300,117 @@ def run_watch(root: str | Path,
             + (" (recovered from an invalid profile)" if recovered
                else ""))
 
+    # v1.0.4: plugin reload state — the inputs the ACTIVE plugin
+    # set was loaded from (the live profile's "plugins" entries at
+    # baseline) plus a stat signature of every plugin file (the
+    # profile's entries and the session's --plugin files). The
+    # baseline is the startup set the caller (the CLI) loaded and
+    # activated before calling run_watch.
+    plugin_state = {"entries": None, "sig": None, "bad_key": None}
+    plugin_reloads = 0
+
+    def _plugin_file_sig(entries) -> tuple:
+        """(label, mtime_ns, size) per plugin file, in load order;
+        (label, None, None) for a file that cannot be stat'ed."""
+        sig: list = []
+        root_res = root.resolve()
+        for entry in entries:
+            try:
+                st = (root_res / entry).stat()
+                sig.append((entry, st.st_mtime_ns, st.st_size))
+            except OSError:
+                sig.append((entry, None, None))
+        for given in plugin_extra_paths:
+            label = str(given)
+            try:
+                st = Path(label).expanduser().stat()
+                sig.append((label, st.st_mtime_ns, st.st_size))
+            except OSError:
+                sig.append((label, None, None))
+        return tuple(sig)
+
+    def _plugin_content_digests(entries) -> tuple:
+        """sha256 per plugin file (None when unreadable), in load
+        order. Computed only on polls where the stat signature
+        moved, to key failure reports by CONTENT: re-saving the
+        same bad bytes moves the mtime but must not re-report —
+        the same once-per-distinct-content rule the profile
+        reload follows with its content hash."""
+        digests: list = []
+        root_res = root.resolve()
+        paths = [root_res / e for e in entries]
+        paths += [Path(str(g)).expanduser() for g in plugin_extra_paths]
+        for p in paths:
+            try:
+                digests.append(
+                    hashlib.sha256(p.read_bytes()).hexdigest())
+            except OSError:
+                digests.append(None)
+        return tuple(digests)
+
+    if manage_plugins:
+        _base_entries = list(
+            getattr(profile, "plugins", None) or [])
+        plugin_state["entries"] = _base_entries
+        plugin_state["sig"] = _plugin_file_sig(_base_entries)
+
+    def check_plugin_reload() -> None:
+        """Re-apply the plugin inputs when they changed (v1.0.4).
+
+        Runs at every poll top, right after the profile check, so
+        it judges the LIVE profile's plugin list. The stat
+        signature is the cheap pre-filter — most polls end there.
+        When the list or any plugin file's stat moved, the full
+        load re-runs with the startup load's validation and
+        containment; the new set is swapped in only when its
+        digest differs from the active set's (a touched-but-
+        identical plugin reloads silently). A failed load keeps
+        the last-good set and is reported once per distinct
+        failure — keyed on the entries, the plugin files' content
+        digests, and the error, so re-saving the same bad bytes
+        stays silent while a different bad edit reports again —
+        and is not retried until the inputs move again; fixing
+        the file moves them, so recovery is automatic."""
+        nonlocal plugin_reloads
+        if not manage_plugins:
+            return
+        from . import plugins as _plugins_mod
+        eff = live["profile"]
+        entries = list(getattr(eff, "plugins", None) or []) \
+            if eff is not None else []
+        sig = _plugin_file_sig(entries)
+        if entries == plugin_state["entries"] \
+                and sig == plugin_state["sig"]:
+            return
+        plugin_state["entries"] = entries
+        plugin_state["sig"] = sig
+        try:
+            new_set = _plugins_mod.load_for_project(
+                root, profile=eff, extra_paths=plugin_extra_paths,
+                allow_override=plugin_allow_override)
+        except _plugins_mod.PluginError as exc:
+            key = (tuple(entries), _plugin_content_digests(entries),
+                   str(exc))
+            if plugin_state["bad_key"] != key:
+                plugin_state["bad_key"] = key
+                say(f"[watch] plugin reload failed ({exc}); "
+                    "keeping the previous plugins")
+            return
+        recovered = plugin_state["bad_key"] is not None
+        plugin_state["bad_key"] = None
+        if new_set.digest == _plugins_mod.active_digest():
+            return  # inputs moved but the loaded set is identical
+        _plugins_mod.activate(new_set)
+        plugin_reloads += 1
+        say("[watch] plugins reloaded"
+            + (" (recovered from a failed plugin load)" if recovered
+               else "")
+            + ":")
+        if new_set.plugins:
+            _plugins_mod.report_loaded(new_set, stream)
+        else:
+            say("[watch] no plugins are active now")
+
     if scan_fn is None:
         def scan_fn(p):  # noqa: F811 - intentional default scanner
             prof = live["profile"]
@@ -339,7 +477,7 @@ def run_watch(root: str | Path,
     if initial is None:
         say("[watch] initial scan failed; nothing to watch")
         return {"duration_s": 0.0, "events": 0, "exports": 0, "polls": 0,
-                "profile_reloads": 0,
+                "profile_reloads": 0, "plugin_reloads": 0,
                 "initial_files": 0, "initial_tokens": 0}
     initial_files = len(visible_files(initial, bundle_rel))
     initial_tokens = _tokens_of(initial, bundle_rel)
@@ -404,6 +542,7 @@ def run_watch(root: str | Path,
             sleep(interval)
             polls += 1
             check_profile_reload()
+            check_plugin_reload()
             cur = poll()
             if cur is not None and snapshot_of(cur, bundle_rel) != settled_snap:
                 settle(cur)
@@ -417,6 +556,7 @@ def run_watch(root: str | Path,
                 sleep(interval)
                 polls += 1
                 check_profile_reload()
+                check_plugin_reload()
                 cur = poll()
                 if cur is None:
                     continue
@@ -445,5 +585,6 @@ def run_watch(root: str | Path,
         f"{events} change event(s), {exports} export(s) written")
     return {"duration_s": duration, "events": events, "exports": exports,
             "polls": polls, "profile_reloads": profile_reloads,
+            "plugin_reloads": plugin_reloads,
             "initial_files": initial_files,
             "initial_tokens": initial_tokens}

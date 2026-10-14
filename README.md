@@ -722,12 +722,19 @@ body; "Collapse" = what a non-selected symbol becomes.
 
 Declaration types are surface: selecting a *method of* an
 interface/trait/protocol ships the whole type, exactly as
-signatures mode treats it. Lite limits, stated plainly: nested
-functions are outlined only for Python (lite outlines are
-top-level definitions plus class members); constructors are not
-selectable in lite languages; C# namespaces do not prefix
-qualified names; Go grouped `type ( ... )` declarations are not
-outlined; a C++ out-of-line definition (`int Store::total() { }`)
+signatures mode treats it. Go and Rust generics are handled:
+generic functions, methods on generic receivers (attributed to
+the base type, e.g. `Stack.Push` for `*Stack[T]`), generic
+interfaces, impl blocks with nested generic bounds, and impl
+blocks whose brace follows a multi-line `where` clause (v1.0.4).
+Lite limits, stated plainly: nested functions are outlined only
+for Python (lite outlines are top-level definitions plus class
+members); constructors are not selectable in lite languages; C#
+namespaces do not prefix qualified names; Go grouped
+`type ( ... )` declarations are not outlined; a Rust *type*
+declaration with a multi-line `where` clause is named but its
+methods are not enumerated (impl blocks with `where` clauses
+are); a C++ out-of-line definition (`int Store::total() { }`)
 is its own symbol, spelled as written, separate from the in-class
 declaration it implements.
 
@@ -979,9 +986,14 @@ validated and applied to subsequent scans and exports without a
 restart — including a profile created mid-watch. An invalid edit
 keeps the last-good profile and is reported once per distinct bad
 content; fixing the file recovers automatically, and deleting it
-reverts to the built-in defaults. One limit: the profile's
-`plugins` list is process state loaded once at startup, so
-changing it still needs a restart. `--max-events N` exits after N
+reverts to the built-in defaults. Plugin changes apply the same
+way (v1.0.4): editing the profile's `plugins` list, or a plugin
+file's bytes, re-runs the plugin load at the next poll and swaps
+the active set when it differs — announced on the watch stream
+with the trust warning, since loading executes the plugin. A
+failed load keeps the last-good plugin set, is reported once per
+distinct bad content, and recovers when fixed; the session
+summary counts `plugin_reloads`. `--max-events N` exits after N
 settled events. Ctrl-C exits 0 with a session summary (duration,
 polls, events, exports).
 

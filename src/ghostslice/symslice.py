@@ -399,20 +399,51 @@ def _ts_outline(lines: list[str]) -> list[Symbol]:
 # Go / Rust / Java / C# outlines (parser-lite spans)
 # ---------------------------------------------------------------------------
 
+def _go_receiver_type(recv: str) -> str:
+    """Base type name of a Go receiver string: 's *Stack[T]' ->
+    'Stack', 'p Pair[K, V]' -> 'Pair', 'Stack[T]' -> 'Stack'
+    (v1.0.4). The receiver is '<name> <type>' or a bare '<type>';
+    the type's own type arguments may contain spaces (gofmt
+    writes `Pair[K, V]`), so split only on whitespace that sits
+    outside the brackets — a naive split()[-1] named the parent
+    of Pair[K, V]'s methods 'V]'."""
+    parts: list[str] = []
+    depth = 0
+    buf: list[str] = []
+    for ch in recv.strip():
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth = max(0, depth - 1)
+        if ch.isspace() and depth == 0:
+            if buf:
+                parts.append("".join(buf))
+                buf = []
+        else:
+            buf.append(ch)
+    if buf:
+        parts.append("".join(buf))
+    if not parts:
+        return ""
+    rtype = parts[0] if len(parts) == 1 else " ".join(parts[1:])
+    return rtype.lstrip("*").split("[")[0].strip()
+
+
 def _go_outline(lines: list[str]) -> list[Symbol]:
     out: list[Symbol] = []
     i = 0
     n = len(lines)
     while i < n:
         line = lines[i]
-        m = re.match(r"^\s*func\s+(?:\(([^)]*)\)\s*)?([A-Za-z_]\w*)\s*\(",
+        m = re.match(r"^\s*func\s+(?:\(([^)]*)\)\s*)?([A-Za-z_]\w*)\s*"
+                     r"(?:\[(?:[^\[\]]|\[[^\[\]]*\])*\]\s*)?\(",
                      line)
         if m:
             recv, name = m.group(1), m.group(2)
             end = _block_end(lines, i, "go") if "{" in line \
                 else _paren_end(lines, i, n)
             if recv:
-                rtype = recv.strip().split()[-1].lstrip("*").split("[")[0]
+                rtype = _go_receiver_type(recv)
                 out.append(Symbol(name, f"{rtype}.{name}", "method", i, end,
                                   _paren_end(lines, i, n), i, parent=rtype))
             else:
@@ -446,9 +477,35 @@ def _go_outline(lines: list[str]) -> list[Symbol]:
     return out
 
 
+def _strip_generic_spans(s: str) -> str:
+    """Remove <...> spans from a declaration fragment, nesting-aware
+    (v1.0.4). An associated-type binding like Iterator<Item = u8>
+    closes with '>>' — a flat <[^>]*> strip stops at the first '>'
+    and leaves the second behind as the 'type name'. A '->' inside
+    a span is an arrow (Fn-trait bounds), never a span close."""
+    out: list[str] = []
+    depth = 0
+    i = 0
+    while i < len(s):
+        ch = s[i]
+        if ch == "-" and s[i + 1:i + 2] == ">":
+            if depth == 0:
+                out.append("->")
+            i += 2
+            continue
+        if ch == "<":
+            depth += 1
+        elif ch == ">":
+            depth = max(0, depth - 1)
+        elif depth == 0:
+            out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def _rust_impl_type(line: str) -> str:
     s = re.sub(r"^\s*(unsafe\s+)?impl\b", "", line).strip()
-    s = re.sub(r"<[^>]*>", "", s)
+    s = _strip_generic_spans(s)
     if " for " in s:
         s = s.split(" for ")[-1]
     parts = s.split()
@@ -460,15 +517,25 @@ def _rust_region(lines: list[str], i0: int, end: int,
     i = i0
     while i < end:
         line = lines[i]
-        if _RS_IMPL_RE.match(line) and "{" in line:
-            bend = _block_end(lines, i, "rust")
-            tname = _rust_impl_type(line)
-            if tname:
-                out.append(Symbol(tname, tname, "impl", i, bend, i, i,
-                                  parent=parent_q, selectable=False))
-                _rust_region(lines, i + 1, bend, tname, out)
-            i = bend + 1
-            continue
+        if _RS_IMPL_RE.match(line):
+            # The opening brace is usually on the impl line, but a
+            # multi-line `where` clause puts it lines later (v1.0.4):
+            # find it the same way the slicer finds block braces
+            # (paren-depth 0, a ';' first means no block). Without
+            # this, a where-clause impl was not a region at all and
+            # its methods outlined as parentless free functions.
+            brace_at = _find_block_brace(lines, i, limit=8)
+            if brace_at is not None:
+                brace_line = brace_at[0]
+                bend = _block_end(lines, brace_line, "rust")
+                tname = _rust_impl_type(line)
+                if tname:
+                    out.append(Symbol(tname, tname, "impl", i, bend,
+                                      brace_line, i,
+                                      parent=parent_q, selectable=False))
+                    _rust_region(lines, brace_line + 1, bend, tname, out)
+                i = bend + 1
+                continue
         tm = _RS_TYPE_RE.match(line)
         if tm:
             km = re.search(r"\b(struct|enum|trait|union)\s+([A-Za-z_]\w*)",
