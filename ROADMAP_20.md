@@ -33,7 +33,7 @@ Baseline: v0.5.0, 149 tests passed.
 | G15 | Performance: scan caching (.ghostslice-cache), parallel scan, benchmark proof, identical totals | v0.20.0 | done |
 | G16 | Fuzz/robustness: malformed-input fuzzing for every slicer + encoding handling (BOM, UTF-16, latin-1) | v0.21.0 | done |
 | G17 | Dashboard v2: side-by-side slice preview (original vs slice, per Ryan's mockups, Oct 13) with diff highlighting + budget slider with live auto-fit preview | v0.22.0 | done |
-| G18 | Plugin system: user slicers from .ghostslice-plugins/*.py, documented API, example plugin | v0.23.0 | pending |
+| G18 | Plugin system: user slicers via a documented contract (profile "plugins" + --plugin, no auto-discovery), example Lua plugin | v0.23.0 | done |
 | G19 | CI pack: `ghostslice ci` one-shot (budget + secrets + lint) with PR markdown summary + sample GitHub Action | v0.24.0 | pending |
 | G20 | v1.0.0: `doctor` self-check, shell completions, docs restructure, full release-readiness audit + mockup polish (Ryan approved Oct 13): scan CLI top-N with heat bars + % of total + token/cost summary box, export --fit report table in the mockup style | v1.0.0 | pending |
 
@@ -492,3 +492,34 @@ the audit findings that drove the two improvement rounds.
   Standing limitation: the dashboard is a startup snapshot (no
   rescan), and the pre-existing file table still renders paths
   via innerHTML (flagged, out of scope).
+- G18 (v0.23.0) DONE Oct 13, 2026: plugin system for user slicers
+  shipped (src/ghostslice/plugins.py) — two contract styles
+  (module attributes LANGUAGE/EXTENSIONS/slice_text/optional
+  outline, or register(api) with api.register_slicer /
+  api.estimate_tokens / api.MODES); loading is explicit only:
+  profile "plugins" entries (relative to the project root,
+  resolved inside it, symlinks followed) or --plugin on
+  export/slice/task/watch; no auto-discovery anywhere; the CLI
+  announces each loaded plugin plus the full-privileges warning.
+  Plugin languages join scanning, modes, symbols (optional
+  outline), fit, task selection, lint, dashboard, and MCP;
+  built-in overrides refused without --allow-plugin-override;
+  load failure is exit 2 before writes, per-file failure falls
+  back to full text with a manifest plugin_errors entry; cache
+  keys are namespaced by a hash of plugin file bytes. Shipped
+  example: examples/plugins/lua_slicer.py (parser-lite Lua
+  signatures + outline) with an end-to-end integration test.
+  Tests 679 -> 728 (49 new). Audit rounds (audits/G18_audit.md):
+  round 1 headline fixes — a plugin raising SystemExit no longer
+  escapes the failure discipline (load: clear PluginError exit
+  2; per-file: recorded fallback), recorded plugin errors are
+  surfaced on the slice/symbols/explain surfaces instead of
+  falling back silently, cross-plugin extension re-claims now
+  record a load note, and "--plugin <directory>" reports "not a
+  file". Round 2 headline fixes — the dashboard /api/export
+  response and the MCP slice_file/lint_project results now
+  surface plugin_errors like the CLI and the manifest do, and
+  init's overwrite warning names an existing profile's plugins.
+  Standing limitation: no sandbox (documented trust
+  model: plugins are user code with full privileges), and
+  registrations are per-process (each CLI run reloads).

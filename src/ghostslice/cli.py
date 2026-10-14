@@ -33,9 +33,10 @@ import time
 from pathlib import Path
 
 from . import __version__
+from . import plugins as _plugins
 from .cache import cached_slice_text, clear_cache, open_cache
 from .cache import cache_stats as _cache_stats
-from .exporter import SLICABLE, build_bundle, estimate_context_tokens, validate_bundle
+from .exporter import build_bundle, estimate_context_tokens, is_slicable, validate_bundle
 from .graph import build_graph, importers_of, recommendations
 from .ledger import analytics as ledger_analytics
 from .ledger import summary as ledger_summary
@@ -134,6 +135,21 @@ def _print_redaction(manifest, exclude_secrets_on: bool = False) -> None:
         print("Note: --exclude-secrets is also on: files flagged by the secret "
               "guard were excluded entirely (exclusion wins); redaction covered "
               "the remaining files.")
+
+
+def _print_plugin_errors(manifest) -> None:
+    """Print the v0.23 plugin failure summary from the manifest:
+    each file a plugin failed on shipped its FULL text instead of
+    a slice — that must never be silent."""
+    for err in manifest.get("plugin_errors") or ():
+        where = err.get("path") or "(unknown file)"
+        mode = f" mode {err['mode']}" if err.get("mode") else ""
+        fallback = ("treated as no outline"
+                    if str(err.get("kind", "")).startswith("outline")
+                    else "full text used instead")
+        print(f"plugins: warning: {err.get('kind')} failed for {where} "
+              f"({err.get('language')}{mode}): {err.get('error')} — "
+              f"{fallback}", file=sys.stderr)
 
 
 def _print_symbols(manifest) -> None:
@@ -418,6 +434,18 @@ def _main_impl(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", action="version", version=f"ghostslice {__version__}")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
+    def _plugin_args(p) -> None:
+        # v0.23: user slicer plugins, named explicitly per run
+        # (the profile's "plugins" entries load without these).
+        p.add_argument("--plugin", action="append", default=None,
+                       metavar="PATH",
+                       help="load a user slicer plugin file (repeatable; "
+                            "plugins are user code and run with your full "
+                            "privileges — only load ones you trust)")
+        p.add_argument("--allow-plugin-override", action="store_true",
+                       help="allow plugins to replace a BUILT-IN language "
+                            "slicer (default: refused)")
+
     p_scan = sub.add_parser("scan", help="scan a project and rank files by estimated token cost")
     p_scan.add_argument("path")
     p_scan.add_argument("--json", action="store_true")
@@ -438,6 +466,7 @@ def _main_impl(argv: list[str] | None = None) -> int:
     p_slice.add_argument("--no-cache", action="store_true",
                          help="do not consult or fill the .ghostslice-cache content cache "
                               "(tree slices only; a single file is never cached)")
+    _plugin_args(p_slice)
 
     p_task = sub.add_parser("task", help="task-focused context: keyword or git-diff selection, exported as a bundle")
     p_task.add_argument("path")
@@ -455,6 +484,7 @@ def _main_impl(argv: list[str] | None = None) -> int:
                              "[REDACTED:...] placeholders instead of shipping them "
                              "(--no-redact overrides a profile's \"redact\": true; "
                              "default: the profile setting)")
+    _plugin_args(p_task)
 
     p_export = sub.add_parser("export", help="write an agent context bundle")
     p_export.add_argument("path")
@@ -494,6 +524,7 @@ def _main_impl(argv: list[str] | None = None) -> int:
                           help="slice files on N threads (default: 1; measured no "
                                "faster for this workload under the GIL — see "
                                "BENCHMARKS.md — but output is identical for any N)")
+    _plugin_args(p_export)
 
     p_symbols = sub.add_parser("symbols", help="list a project's symbols (name, kind, lines, estimated tokens) for symbol-level slicing")
     p_symbols.add_argument("path")
@@ -558,6 +589,7 @@ def _main_impl(argv: list[str] | None = None) -> int:
                               "files, as in export --auto-shrink")
     p_watch.add_argument("--fit", type=int, default=None, metavar="N",
                          help="with --export: auto-fit the bundle to N estimated tokens, as in export --fit")
+    _plugin_args(p_watch)
 
     p_init = sub.add_parser("init", help="analyze a project and generate a tuned .ghostslice.json profile")
     p_init.add_argument("path")
@@ -750,6 +782,27 @@ def _main_impl(argv: list[str] | None = None) -> int:
                       "(see `ghostslice prices`)", file=sys.stderr)
                 return 2
 
+    # v0.23: plugins load HERE, once, before any command handler —
+    # from the profile's "plugins" entries plus --plugin flags, and
+    # never from anywhere else (no auto-discovery: loading a plugin
+    # executes it). A load failure is exit 2 before anything runs or
+    # is written. The set (possibly empty) stays active for the
+    # whole command, so the scanner, slicers, outlines, lint, and
+    # the content cache all see the same plugin world.
+    if args.cmd not in ("check", "history"):
+        from . import plugins as _plugins_mod
+        try:
+            _pset = _plugins_mod.load_for_project(
+                target, profile=profile,
+                extra_paths=getattr(args, "plugin", None) or (),
+                allow_override=bool(
+                    getattr(args, "allow_plugin_override", False)))
+        except _plugins_mod.PluginError as exc:
+            print(f"{args.cmd}: {exc}", file=sys.stderr)
+            return 2
+        _plugins_mod.activate(_pset)
+        _plugins_mod.report_loaded(_pset, sys.stderr)
+
     if args.cmd == "lint":
         from .lint import lint_exit_code, lint_project
         try:
@@ -839,7 +892,7 @@ def _main_impl(argv: list[str] | None = None) -> int:
                     why = "default: test file -> strip-tests"
                 elif entry.is_lockfile:
                     why = "default: lockfile -> exclude"
-                elif entry.language in SLICABLE:
+                elif is_slicable(entry.language):
                     why = f"default: {entry.language} code -> signatures"
                 else:
                     why = "default: non-code file stays full"
@@ -876,12 +929,13 @@ def _main_impl(argv: list[str] | None = None) -> int:
                 print(f"    line {f['line']}  {f['type']}  ({f['redacted']})")
         else:
             print("  secrets: none")
+        _plugins.report_errors(_plugins.active_set(), sys.stderr)
         return 0
 
     if args.cmd == "scan":
         from .duplicates import find_duplicates
         _t0 = time.perf_counter()
-        _scan_cache = None if args.no_cache else open_cache(args.path)
+        _scan_cache = None if args.no_cache else open_cache(args.path, namespace=_plugins.active_digest())
         result = _scan_with_profile(args.path, profile, cache=_scan_cache)
         _t1 = time.perf_counter()
         graph = build_graph(result)
@@ -957,13 +1011,14 @@ def _main_impl(argv: list[str] | None = None) -> int:
             r = slice_text(src.name, text, args.mode)
             (out / src.name).write_text(r.text, encoding="utf-8")
             print(f"{src.name}: {r.original_tokens:,} -> {r.sliced_tokens:,} estimated tokens ({args.mode})")
+            _plugins.report_errors(_plugins.active_set(), sys.stderr)
             return 0
-        _slice_cache = None if args.no_cache else open_cache(src)
+        _slice_cache = None if args.no_cache else open_cache(src, namespace=_plugins.active_digest())
         result = _scan_with_profile(src, profile, cache=_slice_cache)
         before = after = 0
         for entry in result.files:
             text = _gs_read_text(entry.abspath)
-            mode = args.mode if entry.language in SLICABLE or entry.language == "markdown" \
+            mode = args.mode if is_slicable(entry.language) or entry.language == "markdown" \
                 or entry.language in CONFIG_LANGUAGES else "full"
             r = cached_slice_text(_slice_cache, entry.path, text, mode)
             before += r.original_tokens
@@ -974,6 +1029,7 @@ def _main_impl(argv: list[str] | None = None) -> int:
                 dest.write_text(r.text, encoding="utf-8")
         print(f"Sliced {len(result.files)} files ({args.mode} for code): {before:,} -> {after:,} estimated tokens")
         print(f"Output: {out}")
+        _plugins.report_errors(_plugins.active_set(), sys.stderr)
         return 0
 
     if args.cmd == "symbols":
@@ -997,7 +1053,8 @@ def _main_impl(argv: list[str] | None = None) -> int:
         no_outline: list[str] = []
         total_symbols = 0
         for e in entries:
-            if e.language not in OUTLINE_LANGUAGES:
+            if e.language not in OUTLINE_LANGUAGES \
+                    and not _plugins.has_outline(e.language):
                 no_outline.append(e.path)
                 files_payload.append({"path": e.path, "language": e.language,
                                       "symbols": None})
@@ -1046,6 +1103,7 @@ def _main_impl(argv: list[str] | None = None) -> int:
         if no_outline and not single:
             print(f"{len(no_outline)} file(s) have no symbol outline "
                   "(notebook, markdown, config/data, or plain text).")
+        _plugins.report_errors(_plugins.active_set(), sys.stderr)
         return 0
 
     if args.cmd == "calls":
@@ -1117,6 +1175,7 @@ def _main_impl(argv: list[str] | None = None) -> int:
         print(f"Estimated tokens (whole project -> selection): {pf['before_tokens']:,} -> {pf['after_tokens']:,}")
         _print_wrapper(manifest)
         _print_redaction(manifest)
+        _print_plugin_errors(manifest)
         fitted = _print_fit(manifest.get("fit"))
         check = validate_bundle(args.out)
         print(f"Validation: {'OK' if check['ok'] else 'FAILED: ' + '; '.join(check['errors'])}")
@@ -1125,7 +1184,7 @@ def _main_impl(argv: list[str] | None = None) -> int:
     if args.cmd == "export":
         _export_scan = _scan_with_profile(
             args.path, profile,
-            cache=None if args.no_cache else open_cache(args.path))
+            cache=None if args.no_cache else open_cache(args.path, namespace=_plugins.active_digest()))
         _warn_secrets(scan_scan_result(_export_scan))
         model_id = args.model or profile.model or "claude-sonnet"
         _timing: dict = {}
@@ -1158,6 +1217,7 @@ def _main_impl(argv: list[str] | None = None) -> int:
         print(f"Estimated tokens: {pf['before_tokens']:,} -> {pf['after_tokens']:,} (saved {pf['saved_tokens']:,})")
         _print_wrapper(manifest)
         _print_redaction(manifest, exclude_secrets_on=args.exclude_secrets)
+        _print_plugin_errors(manifest)
         _print_symbols(manifest)
         print(f"Pre-flight input cost at {pf['model_name']} (prices as of {pf['prices_as_of']}, local, not live): "
               f"~${pf['before_cost_usd']:.4f} -> ~${pf['after_cost_usd']:.4f}")
@@ -1210,7 +1270,7 @@ def _main_impl(argv: list[str] | None = None) -> int:
             return 2
         before, after = estimate_context_tokens(
             args.path, profile=profile, default_mode=args.mode,
-            cache=open_cache(args.path))
+            cache=open_cache(args.path, namespace=_plugins.active_digest()))
         status = "OK" if after <= budget else "OVER BUDGET"
         print(f"Selected context: {after:,} sliced estimated tokens (full project {before:,}); budget {budget:,}: {status}")
         return 0 if after <= budget else 1

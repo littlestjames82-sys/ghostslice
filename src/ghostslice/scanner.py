@@ -7,6 +7,7 @@ import stat
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from . import plugins as _plugins
 from .detect import detect_all, head_of
 from .textio import UTF16_32_LABELS, decode_bytes
 from .tokens import estimate_tokens
@@ -74,7 +75,14 @@ LANGUAGE_BY_EXT = {
 
 
 def language_for(path: str) -> str:
-    return LANGUAGE_BY_EXT.get(Path(path).suffix.lower(), "text")
+    ext = Path(path).suffix.lower()
+    # v0.23: a loaded plugin's extension claim wins over the
+    # built-in table (plugins.py validates that a claim never
+    # silently steals a built-in extension — see load rules there).
+    plugin_lang = _plugins.language_for_ext(ext)
+    if plugin_lang is not None:
+        return plugin_lang
+    return LANGUAGE_BY_EXT.get(ext, "text")
 
 
 def is_test_file(rel: str) -> bool:
@@ -350,8 +358,11 @@ def _add_file(result: ScanResult, abspath: Path, rel_posix: str,
         # Unknown extension: skip unless it decodes cleanly as the
         # UTF-8 family or carries a wide BOM. A "latin-1" verdict
         # means the bytes were NOT valid UTF-8, which is exactly
-        # what this gate has always rejected.
-        if encoding == "latin-1":
+        # what this gate has always rejected. v0.23: an extension a
+        # loaded plugin claims is text by the user's explicit act,
+        # so the Latin-1 rejection does not apply to it.
+        if encoding == "latin-1" \
+                and _plugins.language_for_ext(suffix) is None:
             return
     lang = language_for(rel_posix)
     if cache is not None:

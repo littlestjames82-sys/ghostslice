@@ -213,8 +213,13 @@ def run_watch(root: str | Path,
         if manifest.get("redaction"):
             redact_note = (f", redacted "
                            f"{manifest['redaction']['values_redacted']} secret value(s)")
+        plugin_note = ""
+        if manifest.get("plugin_errors"):
+            plugin_note = (f", WARNING: {len(manifest['plugin_errors'])} "
+                           "plugin failure(s); those files shipped full text "
+                           "(see the bundle's plugin_errors)")
         say(f"[watch] bundle rewritten: {out} "
-            f"({manifest['total_sliced_tokens']:,} estimated sliced tokens, {valid_note}{fit_note}{redact_note})")
+            f"({manifest['total_sliced_tokens']:,} estimated sliced tokens, {valid_note}{fit_note}{redact_note}{plugin_note})")
 
     start = clock()
     events = 0

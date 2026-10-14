@@ -3,6 +3,53 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [0.23.0] - 2026-10-13
+### Added
+- Plugin system for user slicers (G18): teach GhostSlice a new
+  language, or replace a built-in slicer, with a single Python
+  file. Two contract styles: module attributes (`LANGUAGE`,
+  `EXTENSIONS`, `slice_text(path, text, mode)`, optional
+  `outline(path, text)`) or `register(api)` with
+  `api.register_slicer(...)`, `api.estimate_tokens`, and
+  `api.MODES`. One file may register several languages.
+- Loading is explicit only, never ambient: the profile's
+  `"plugins"` list (paths relative to the project root and
+  required to resolve inside it, symlinks followed) or `--plugin
+  PATH` (repeatable) on export/slice/task/watch. No directory
+  scanning, no entry points, no environment variable. The CLI
+  prints every loaded plugin plus a plain warning that plugins
+  are user code run with full privileges. The profile route also
+  drives the dashboard and the MCP tools.
+- Plugin languages are first-class: the scanner maps their
+  extensions, token estimation is the standard estimator, the
+  modes pipeline hands them resolved modes (`full`/`exclude`
+  stay with the core), outlines join `ghostslice symbols` and
+  `export --symbols` (no outline means an honest "no outline"),
+  and the fit ladder, task selection, lint, and the dashboard
+  what-if all treat them like built-ins.
+- Failure discipline: a plugin load failure (syntax error, broken
+  contract) fails the command with exit 2 before anything is
+  written. A plugin failing on one file falls back to that file's
+  full text, records a `plugin_errors` entry in the manifest, and
+  prints a CLI warning. Bytes returns are decoded as UTF-8; other
+  non-string returns follow the same fallback. Overriding a
+  built-in language or claiming its extension is refused without
+  `--allow-plugin-override`; duplicate claims on a new language
+  resolve last-loaded-wins with a printed note.
+- Cache safety: when plugins are loaded, every content-cache key
+  is namespaced by a hash of the loaded plugins' file bytes, so
+  editing a plugin invalidates its cached slices, outlines, and
+  scans automatically. The manifest gains a `plugins` block
+  (name, language, extensions, source path, sha256) whenever a
+  bundle was built with plugins.
+- Example plugin: `examples/plugins/lua_slicer.py`, a parser-lite
+  Lua signatures slicer (function/end block matching over a
+  string/comment-masked view, long brackets handled) with a basic
+  outline, plus `examples/plugins/README.md`. An integration test
+  runs the full pipeline (scan, export, symbols, symbol slicing,
+  MCP) on a Lua fixture using only the example.
+- 49 new tests (679 -> 728) in tests/test_v23_plugins.py.
+
 ## [0.22.0] - 2026-10-13
 ### Added
 - Dashboard side-by-side slice preview (G17): clicking a file shows

@@ -36,7 +36,7 @@ from pathlib import Path
 
 from .detect import GENERATED_HEADER_LINES, detect_generated, head_of, line_stats
 from .duplicates import find_duplicates
-from .exporter import SLICABLE, resolve_modes
+from .exporter import is_slicable, resolve_modes
 from .graph import build_graph, recommendations
 from .profile import load_profile
 from .scanner import scan
@@ -112,7 +112,7 @@ class _Ctx:
     def slice_saving(self, entry) -> int:
         """Tokens recovered by slicing this file the default way:
         signatures when slicable, otherwise only exclusion saves."""
-        if entry.language in SLICABLE:
+        if is_slicable(entry.language):
             return entry.tokens - self.sliced_tokens(entry, "signatures")
         return entry.tokens
 
@@ -149,7 +149,7 @@ def _rule_l002(ctx, opts):
     min_frac = opts["min_savings_fraction"]
     out = []
     for e in ctx.result.files:
-        if ctx.modes[e.path] != "full" or e.language not in SLICABLE:
+        if ctx.modes[e.path] != "full" or not is_slicable(e.language):
             continue
         saving = e.tokens - ctx.sliced_tokens(e, "signatures")
         if saving >= min_tokens and e.tokens > 0 and saving >= min_frac * e.tokens:

@@ -7,7 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from .exporter import SLICABLE, build_bundle, resolve_modes_detailed
+from .exporter import is_slicable, build_bundle, resolve_modes_detailed
 from .fit import fit_modes
 from .graph import build_graph, recommendations
 from .ledger import analytics as ledger_analytics
@@ -41,7 +41,7 @@ def _default_mode(entry) -> str:
         return "strip-tests"
     if entry.is_lockfile:
         return "exclude"
-    if entry.language in SLICABLE:
+    if is_slicable(entry.language):
         return "signatures"
     return "full"
 
@@ -67,6 +67,16 @@ class _State:
     def __init__(self, root: str):
         self.root = Path(root).resolve()
         self.profile = load_profile(self.root)
+        # v0.23: the dashboard honours the profile's plugins, like
+        # every other surface: they load at startup (silently — the
+        # profile is the user's standing opt-in) and stay active for
+        # the server's life, so scans, previews, and exports all see
+        # the plugin languages. A broken plugin raises here and
+        # `serve` reports it as a startup failure (exit 2), the same
+        # fast-fail rule as the CLI.
+        from . import plugins as _plugins_mod
+        _plugins_mod.activate(_plugins_mod.load_for_project(
+            self.root, profile=self.profile))
         matcher = self.profile.is_ignored if self.profile.path else None
         self.scan = scan(self.root, ignore_matcher=matcher)
         self.graph = build_graph(self.scan)
@@ -470,6 +480,10 @@ def make_server(root: str, port: int = 8765, host: str = "127.0.0.1"):
                     resp["fit"] = manifest["fit"]
                 if manifest.get("redaction") is not None:
                     resp["redaction"] = manifest["redaction"]
+                if manifest.get("plugins") is not None:
+                    resp["plugins"] = manifest["plugins"]
+                if manifest.get("plugin_errors") is not None:
+                    resp["plugin_errors"] = manifest["plugin_errors"]
                 self._json(200, resp)
             else:
                 self._json(404, {"error": "not found"})
