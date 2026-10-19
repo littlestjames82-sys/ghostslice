@@ -374,27 +374,35 @@ class TestBigTreeSpeedup:
         # wall degrading 3.5x while its CPU stayed flat — I/O
         # contention the cache cannot control). Paired CPU
         # measurement during the G15 build, taken under load:
-        # cold-off ~2.26s CPU vs warm ~0.45s CPU (~5x); the 3x
-        # threshold keeps a wide margin on the resource actually
-        # being saved. Warm side is the min of 2 runs.
+        # cold-off ~2.26s CPU vs warm ~0.45s CPU (~5x) locally.
+        # On GitHub's shared runners the same pair measures only
+        # ~2.7x (runner diag, Oct 2026: warm 0.32-0.36s vs cold
+        # 0.89-0.98s) — fixed startup costs dominate the cold side
+        # there and do not shrink. The asserted bar is therefore
+        # 2x: it still proves the cache removes most of the CPU
+        # work, without flaking on runner hardware. Both sides
+        # take the min of repeated runs to damp one-off jitter.
         import shutil
         out = tmp_path / "bundle"
         clear_cache(big_tree)
-        c0 = time.process_time()
-        _export(big_tree, out, use_cache=False)
-        cold = time.process_time() - c0
+        cold_runs = []
+        for _ in range(2):
+            c0 = time.process_time()
+            _export(big_tree, out, use_cache=False)
+            cold_runs.append(time.process_time() - c0)
+        cold = min(cold_runs)
         cold_tree = _norm(_tree(out))
         shutil.rmtree(out)
         _export(big_tree, out)  # fills the cache
         warm_runs = []
-        for _ in range(2):
+        for _ in range(3):
             c0 = time.process_time()
             m = _export(big_tree, out)
             warm_runs.append(time.process_time() - c0)
         warm = min(warm_runs)
         assert m["total_sliced_tokens"] > 0
-        assert warm * 3 < cold, \
-            f"warm {warm:.2f}s CPU not >=3x faster than cold-off {cold:.2f}s CPU"
+        assert warm * 2 < cold, \
+            f"warm {warm:.2f}s CPU not >=2x faster than cold-off {cold:.2f}s CPU"
         # and the warm bundle is the same bundle
         assert cold_tree == _norm(_tree(out))
 
