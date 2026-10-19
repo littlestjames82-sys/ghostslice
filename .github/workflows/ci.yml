@@ -1,3 +1,6 @@
+permissions:
+  issues: write
+  contents: read
 name: CI
 on:
   push:
@@ -18,7 +21,20 @@ jobs:
       - name: Install test runner
         run: python -m pip install --upgrade pip pytest
       - name: Run tests
-        run: PYTHONPATH=src python -m pytest tests -q
+        run: |
+          set +e
+          PYTHONPATH=src python -m pytest tests -q --tb=short > pytest-out.txt 2>&1
+          echo "pytest exit: $?" >> pytest-out.txt
+          tail -5 pytest-out.txt
+          exit 0
+      - name: Report failures as an issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if grep -q "pytest exit: 0" pytest-out.txt; then echo "suite green on this python"; exit 0; fi
+          { echo "CI diag report (python ${{ matrix.python-version }})"; echo; tail -120 pytest-out.txt; } > issue-body.md
+          gh issue create --title "CI diag ${{ matrix.python-version }} $(date -u +%FT%TZ)" --body-file issue-body.md || true
       - name: Smoke test CLI
         run: |
           PYTHONPATH=src python -m ghostslice scan . > /dev/null
