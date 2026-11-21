@@ -1,7 +1,11 @@
 """Pre-flight cost estimator backed by a local, dated prices.json.
 
-Prices are never fetched and never claimed live. Edit prices.json to
-update them; the file carries its own `as_of` date.
+Prices are never fetched and never claimed live. There is exactly
+one price table: the copy inside the package
+(`src/ghostslice/prices.json`, shipped as package data). Edit that
+file to update rates; it carries its own `as_of` date. A
+`prices.json` in the current directory overrides it for that run
+(the documented way to keep a private table).
 """
 from __future__ import annotations
 
@@ -16,8 +20,6 @@ def find_prices_file(explicit: str | Path | None = None) -> Path:
     if explicit:
         candidates.append(Path(explicit))
     candidates.append(Path.cwd() / "prices.json")
-    # project root when running from a source checkout: src/ghostslice -> ../../
-    candidates.append(Path(__file__).resolve().parents[2] / "prices.json")
     candidates.append(_PACKAGE_PRICES)
     for c in candidates:
         if c.is_file():

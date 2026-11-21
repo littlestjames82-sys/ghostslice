@@ -36,7 +36,7 @@ _ghostslice() {
             return 0
             ;;
         calls)
-            COMPREPLY=( $(compgen -W "-h --help --json --dead" -- "$cur") )
+            COMPREPLY=( $(compgen -W "-h --help --json --dead --no-cache" -- "$cur") )
             return 0
             ;;
         check)
@@ -72,11 +72,11 @@ _ghostslice() {
             return 0
             ;;
         graph)
-            COMPREPLY=( $(compgen -W "-h --help --json" -- "$cur") )
+            COMPREPLY=( $(compgen -W "-h --help --json --no-cache" -- "$cur") )
             return 0
             ;;
         history)
-            COMPREPLY=( $(compgen -W "-h --help --json --trend --model" -- "$cur") )
+            COMPREPLY=( $(compgen -W "-h --help --json --trend --model --top --since" -- "$cur") )
             return 0
             ;;
         init)
@@ -84,7 +84,7 @@ _ghostslice() {
             return 0
             ;;
         lint)
-            COMPREPLY=( $(compgen -W "-h --help --json --strict" -- "$cur") )
+            COMPREPLY=( $(compgen -W "-h --help --json --strict --no-cache" -- "$cur") )
             return 0
             ;;
         mcp)

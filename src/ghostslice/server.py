@@ -51,6 +51,25 @@ def _default_mode(entry) -> str:
 # displayed text is cut, and the response says so (truncated flag).
 SLICE_PREVIEW_CAP = 200_000
 
+# v1.0.2: caps for the /api/graph "calls" payload. Symbols ship in
+# full (the dashboard's per-file call view needs every symbol of
+# the file being previewed, and symbol rows are small), but the
+# edge list of a large project is not bounded by anything, so it
+# is cut at CALL_EDGE_CAP entries (the payload reports the true
+# total and a truncated flag, and the UI repeats the caveat where
+# the lists render). Dead candidates are capped the same way.
+CALL_EDGE_CAP = 2000
+CALL_DEAD_CAP = 200
+
+# v1.0.6: per-list cap for the /api/calls per-symbol endpoint. The
+# bulk payload above is cut for size, so on a large project most
+# symbols' relationships fall past it; the per-symbol endpoint
+# serves ONE symbol's complete lists from the same memoised build.
+# The cap is generous (a symbol with more than 500 distinct callers
+# is vanishingly rare) but bounded, and like the bulk caps it is
+# reported with true totals and a truncated flag.
+CALL_LIST_CAP = 500
+
 
 def _cap_text(text: str) -> tuple[str, bool]:
     """(text, was_truncated): cut at SLICE_PREVIEW_CAP characters
@@ -81,8 +100,9 @@ class _State:
         self.scan = scan(self.root, ignore_matcher=matcher)
         self.graph = build_graph(self.scan)
         self.recommendations = recommendations(self.scan, self.graph, self.profile)
-        from .duplicates import find_duplicates
-        self.duplicates = find_duplicates(self.scan)
+        from .duplicates import find_duplicates, near_min_chars_for
+        self.duplicates = find_duplicates(
+            self.scan, near_min_chars=near_min_chars_for(self.profile))
         self.secrets = scan_scan_result(self.scan)
         from .lint import lint_project
         self.lint = lint_project(self.root, profile=self.profile,
@@ -93,6 +113,22 @@ class _State:
         self._mode_tokens_cache: dict[tuple[str, str], int] = {}
         self._slice_cache: dict[tuple[str, str], object] = {}
         self._slice_lock = threading.Lock()
+        # v1.0.2: the call-graph payload is built lazily on the
+        # first /api/graph request and kept for the server's life —
+        # the state is a startup snapshot, so a per-run memo matches
+        # its semantics (same rule as the slice memo above).
+        # v1.0.3: serve() additionally warms the build on a daemon
+        # thread at startup (start_calls_warmup), so the first graph
+        # request usually finds it ready; the lazy path remains the
+        # fallback and the two produce identical payloads.
+        self._calls_payload: dict | None = None
+        # v1.0.6: the UNCAPPED build result, kept alongside the
+        # capped bulk payload so /api/calls can serve one symbol's
+        # complete lists from the same single build (no re-scan).
+        self._calls_full: dict | None = None
+        self._calls_error: BaseException | None = None
+        self._calls_lock = threading.Lock()
+        self._calls_thread: threading.Thread | None = None
 
     def slice_result(self, entry, mode: str):
         """Memoised slice_text for the preview endpoints (v0.22).
@@ -151,6 +187,194 @@ class _State:
                 source = _gs_read_text(entry.abspath)
                 self._mode_tokens_cache[key] = slice_text(entry.path, source, mode).sliced_tokens
         return self._mode_tokens_cache[key]
+
+    def _build_calls_payload(self) -> dict:
+        from .callgraph import build_call_graph
+        full = build_call_graph(self.scan, self.profile, self.graph)
+        self._calls_full = full
+        edges = full["edges"]
+        dead = full["dead"]
+        return {
+            "symbols": full["symbols"],
+            "edges": edges[:CALL_EDGE_CAP],
+            "edges_total": len(edges),
+            "edges_truncated": len(edges) > CALL_EDGE_CAP,
+            "dead": dead[:CALL_DEAD_CAP],
+            "dead_total": len(dead),
+            "dead_truncated": len(dead) > CALL_DEAD_CAP,
+            "counts": full["counts"],
+            "skipped_files": full["skipped_files"],
+            "note": full["note"],
+            "scope": ("call analysis covers Python files "
+                      "only; other files have no call data"),
+        }
+
+    def calls_payload(self) -> dict:
+        """Call relationships for the served project (v1.0.2):
+        Python symbols with their call edges from
+        callgraph.build_call_graph over the state's startup scan.
+
+        Computed once — by the startup warm-up thread when serve()
+        ran one, otherwise lazily here — then memoised for the
+        server run. A request that arrives while the build is in
+        flight waits on the build lock and receives the same final
+        payload object as every other request; the payload contract
+        has no "building" state. Non-Python files honestly have no
+        call data: they simply contribute no symbols or edges, and
+        the payload's "scope" line says the analysis is Python-only.
+        Edge and dead lists are capped (CALL_EDGE_CAP /
+        CALL_DEAD_CAP) with the true totals and truncation flags
+        reported alongside.
+
+        A build failure is stored and re-raised on every call: the
+        build runs over the fixed startup scan snapshot, so it is
+        deterministic and a silent retry could not succeed — the
+        failure surfaces on the graph request exactly as the lazy
+        build's would, instead of being swallowed by the warm-up
+        thread."""
+        if self._calls_payload is not None:
+            return self._calls_payload
+        if self._calls_error is not None:
+            raise self._calls_error
+        with self._calls_lock:
+            if self._calls_payload is not None:
+                return self._calls_payload
+            if self._calls_error is not None:
+                raise self._calls_error
+            try:
+                self._calls_payload = self._build_calls_payload()
+            except BaseException as exc:
+                self._calls_error = exc
+                raise
+        return self._calls_payload
+
+    def symbol_calls(self, query: str) -> tuple[int, dict]:
+        """One symbol's complete call lists (v1.0.6): the bulk
+        /api/graph payload caps its edge list (CALL_EDGE_CAP), so
+        past the cap a symbol's relationships are invisible in the
+        UI. This serves a single symbol's callers / callees /
+        referenced-by from the SAME memoised build the bulk
+        payload was cut from — `calls_payload()` runs first (and
+        is the only build trigger), so the warm-up/lazy interplay
+        and the stored-failure semantics are exactly /api/graph's.
+
+        `query` is a symbol id ("path:Qualified.name", what the
+        panel holds) or a bare qualified name. An id always wins;
+        a qualified name matching several files' symbols is
+        answered honestly with the candidate list instead of a
+        silent pick. Returns (status, payload): 404 with an error
+        object for an unknown symbol, matching the content
+        endpoints' error style."""
+        self.calls_payload()
+        full = self._calls_full
+        symbols = full["symbols"]
+        by_id = {s["id"]: s for s in symbols}
+        target = by_id.get(query)
+        if target is None:
+            matches = [s for s in symbols if s["qualified"] == query]
+            if len(matches) == 1:
+                target = matches[0]
+            elif matches:
+                return 200, {
+                    "ambiguous": True,
+                    "query": query,
+                    "matches": [{"id": s["id"],
+                                 "qualified": s["qualified"],
+                                 "path": s["path"],
+                                 "kind": s["kind"]}
+                                for s in matches],
+                    "note": ("the qualified name matches symbols in "
+                             "several files; ask by symbol id "
+                             "(\"path:Qualified.name\") to pick one"),
+                }
+        if target is None:
+            return 404, {"error": f"no such symbol: {query}"}
+        sid = target["id"]
+
+        def row(other_id: str, kind: str, sites: int) -> dict:
+            other = by_id.get(other_id)
+            if other is not None:
+                qualified, path = other["qualified"], other["path"]
+            elif other_id.endswith(":<module>"):
+                qualified = "<module>"
+                path = other_id[:-len(":<module>")]
+            else:  # pragma: no cover - edges carry resolved ids
+                qualified, path = other_id, ""
+            return {"id": other_id, "qualified": qualified,
+                    "path": path, "kind": kind, "sites": sites}
+
+        def collect(key: str, want_kind: str | None) -> list[dict]:
+            rows = []
+            for e in full["edges"]:
+                if want_kind is None and e["kind"] == "reference":
+                    continue
+                if want_kind is not None and e["kind"] != want_kind:
+                    continue
+                if key == "callee" and e["callee"] == sid:
+                    rows.append(row(e["caller"], e["kind"], e["sites"]))
+                elif key == "caller" and e["caller"] == sid:
+                    rows.append(row(e["callee"], e["kind"], e["sites"]))
+            rows.sort(key=lambda r: (-r["sites"], r["id"]))
+            return rows
+
+        callers = collect("callee", None)
+        callees = collect("caller", None)
+        referenced_by = collect("callee", "reference")
+
+        def capped(rows: list[dict]) -> tuple[list[dict], int, bool]:
+            return rows[:CALL_LIST_CAP], len(rows), \
+                len(rows) > CALL_LIST_CAP
+
+        c_rows, c_total, c_trunc = capped(callers)
+        e_rows, e_total, e_trunc = capped(callees)
+        r_rows, r_total, r_trunc = capped(referenced_by)
+        return 200, {
+            "symbol": target,
+            "callers": c_rows, "callers_total": c_total,
+            "callers_truncated": c_trunc,
+            "callees": e_rows, "callees_total": e_total,
+            "callees_truncated": e_trunc,
+            "referenced_by": r_rows, "referenced_by_total": r_total,
+            "referenced_by_truncated": r_trunc,
+            "list_cap": CALL_LIST_CAP,
+            "dead": sid in {d["id"] for d in full["dead"]},
+            "scope": ("call analysis covers Python files "
+                      "only; other files have no call data"),
+            "note": ("complete lists for this symbol from the "
+                     "project call graph (the bulk /api/graph "
+                     "payload is capped; this endpoint is not, up "
+                     f"to {CALL_LIST_CAP} entries per list)"),
+        }
+
+    def start_calls_warmup(self) -> None:
+        """Begin building the call-graph payload on a daemon thread
+        (v1.0.3). Called by serve() once the server exists, so the
+        ~seconds the build costs are spent while the user is still
+        opening the page instead of on the first /api/graph request.
+
+        Idempotent (repeat calls are no-ops) and never fatal: the
+        thread is a daemon, so it cannot hold the process open past
+        shutdown, and a build failure is recorded on the state by
+        calls_payload() and reported by the next graph request —
+        the server keeps serving every other endpoint meanwhile."""
+        with self._calls_lock:
+            if self._calls_thread is not None \
+                    or self._calls_payload is not None \
+                    or self._calls_error is not None:
+                return
+            self._calls_thread = threading.Thread(
+                target=self._warm_calls, name="ghostslice-calls-warmup",
+                daemon=True)
+        self._calls_thread.start()
+
+    def _warm_calls(self) -> None:
+        try:
+            self.calls_payload()
+        except BaseException:
+            # Already recorded on the state; the next /api/graph
+            # request re-raises it there. This thread's only job is
+            # to have the result (or the failure) ready early.
+            pass
 
     def scan_payload(self) -> dict:
         files = []
@@ -340,7 +564,19 @@ def make_server(root: str, port: int = 8765, host: str = "127.0.0.1"):
             elif parsed.path == "/api/graph":
                 self._json(200, {"graph": state.graph,
                                  "recommendations": state.recommendations,
-                                 "duplicates": state.duplicates})
+                                 "duplicates": state.duplicates,
+                                 "calls": state.calls_payload()})
+            elif parsed.path == "/api/calls":
+                # v1.0.6: one symbol's complete call lists — the
+                # bulk graph payload's edge cap hides most of a
+                # large project's relationships; this serves them
+                # per symbol from the same memoised build.
+                query = (qs.get("symbol") or [""])[0]
+                if not query:
+                    self._json(400, {"error": "missing symbol"})
+                    return
+                status, payload = state.symbol_calls(query)
+                self._json(status, payload)
             elif parsed.path == "/api/secrets":
                 self._json(200, {"findings": state.secrets, "count": len(state.secrets),
                                  "note": "values redacted to first 4 characters"})
@@ -492,7 +728,11 @@ def make_server(root: str, port: int = 8765, host: str = "127.0.0.1"):
 
 
 def serve(root: str, port: int = 8765, host: str = "127.0.0.1") -> None:
-    server, _state = make_server(root, port=port, host=host)
+    server, state = make_server(root, port=port, host=host)
+    # v1.0.3: warm the call-graph payload in the background while
+    # the user opens the page, instead of charging the first
+    # /api/graph request for the whole build.
+    state.start_calls_warmup()
     print(f"GhostSlice dashboard: http://{host}:{server.server_address[1]}/  (project: {root})")
     print("Token counts are estimates. Prices come from local prices.json (not live). Ctrl+C to stop.")
     try:

@@ -406,7 +406,18 @@ class SizeGuardTests(unittest.TestCase):
             slice_text("x.py", deep_py, mode)  # must not raise
         deep_json = '{"a": ' * 1200 + "1" + "}" * 1200
         r = slice_text("x.json", deep_json, "structure")
-        json.loads(r.text)  # shaped with the depth-cap placeholder
+        # Shaped with the depth-cap placeholder. The check is that the
+        # output is well-formed JSON; Python <= 3.11's json C scanner
+        # spends more stack per nesting level than 3.12's, so verify
+        # under a temporarily raised recursion limit rather than the
+        # ambient one (the product's own handling is what MODES and
+        # the fallback assertion below exercise).
+        _limit = sys.getrecursionlimit()
+        sys.setrecursionlimit(max(_limit, 20000))
+        try:
+            json.loads(r.text)
+        finally:
+            sys.setrecursionlimit(_limit)
         huge_json = '{"a": ' * 20000 + "1" + "}" * 20000
         r = slice_text("x.json", huge_json, "structure")
         self.assertEqual(r.text, huge_json)  # loads fails -> full fallback

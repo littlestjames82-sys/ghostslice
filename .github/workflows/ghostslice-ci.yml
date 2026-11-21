@@ -11,6 +11,10 @@
 # check proves the ladder can always get back under it.
 # (v1.0.0 re-measurement, G20 readiness audit: sliced total
 # 150,024 = 83% of the budget; headroom still sane, no bump.)
+# (v1.0.5 re-measurement, polish round 5 audit: sliced total
+# 179,785 = 99.9% of the budget once the manual became the
+# docs/ tree; bumped to 230,000 to restore the ~30% headroom
+# rule above.)
 name: GhostSlice CI (dogfood)
 
 on:
@@ -29,7 +33,7 @@ jobs:
       - name: Run GhostSlice CI on GhostSlice
         run: |
           set +e
-          PYTHONPATH=src python -m ghostslice ci . --budget 180000 --json --out ghostslice-report.html > ghostslice-ci.json
+          PYTHONPATH=src python -m ghostslice ci . --budget 230000 --json --out ghostslice-report.html > ghostslice-ci.json
           code=$?
           cat ghostslice-ci.json
           exit $code

@@ -60,7 +60,7 @@ class DashboardCase(unittest.TestCase):
         (self.base / "outside.txt").write_text(OUTSIDE_MARKER + "\n")
         self.server, self.state = make_server(str(self.root), port=0)
         self.port = self.server.server_address[1]
-        self.thread = threading.Thread(target=self.server.serve_forever,
+        self.thread = threading.Thread(target=lambda: self.server.serve_forever(poll_interval=0.02),
                                        daemon=True)
         self.thread.start()
 
@@ -154,7 +154,7 @@ class TraversalTests(DashboardCase):
         self.server.server_close()
         self.server, self.state = make_server(str(self.root), port=0)
         self.port = self.server.server_address[1]
-        self.thread = threading.Thread(target=self.server.serve_forever,
+        self.thread = threading.Thread(target=lambda: self.server.serve_forever(poll_interval=0.02),
                                        daemon=True)
         self.thread.start()
 
@@ -495,7 +495,7 @@ class ProfileWhatIfTests(unittest.TestCase):
         }))
         self.server, self.state = make_server(str(self.root), port=0)
         self.port = self.server.server_address[1]
-        self.thread = threading.Thread(target=self.server.serve_forever,
+        self.thread = threading.Thread(target=lambda: self.server.serve_forever(poll_interval=0.02),
                                        daemon=True)
         self.thread.start()
 
@@ -564,7 +564,7 @@ class ProfileDefaultsWhatIfTests(unittest.TestCase):
             {"redact": True, "auto_shrink": True}))
         self.server, self.state = make_server(str(self.root), port=0)
         self.port = self.server.server_address[1]
-        self.thread = threading.Thread(target=self.server.serve_forever,
+        self.thread = threading.Thread(target=lambda: self.server.serve_forever(poll_interval=0.02),
                                        daemon=True)
         self.thread.start()
 
@@ -605,7 +605,7 @@ class EmptyProjectTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.server, self.state = make_server(str(self.root), port=0)
         self.port = self.server.server_address[1]
-        self.thread = threading.Thread(target=self.server.serve_forever,
+        self.thread = threading.Thread(target=lambda: self.server.serve_forever(poll_interval=0.02),
                                        daemon=True)
         self.thread.start()
 

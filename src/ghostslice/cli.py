@@ -2,21 +2,21 @@
 
 Commands:
   ghostslice scan         <path> [--json] [--top N] [--model ID] [--timing] [--no-cache]
-  ghostslice graph        <path> [--json]
+  ghostslice graph        <path> [--json] [--no-cache]
   ghostslice slice        <path> --mode MODE -o <dir> [--no-cache]
   ghostslice task         <path> (--task "words" | --diff) [--budget N] [--fit N] -o <bundle> [--preset P]
   ghostslice export       <path> -o <bundle> [--mode MODE] [--model ID] [--preset P] [--fit N] [--exclude-secrets] [--redact] [--auto-shrink] [--symbols SPEC] [--timing] [--no-cache] [--workers N]
   ghostslice symbols      <path> [file] [--json]
-  ghostslice calls        <path> [file] [--json] [--dead]
+  ghostslice calls        <path> [file] [--json] [--dead] [--no-cache]
   ghostslice watch        <path> [--export] [-o <bundle>] [--interval S] [--debounce S] [--once] [--max-events N] [--fit N] [--redact] [--auto-shrink]
   ghostslice check-budget <path> [--max-tokens N]
   ghostslice ci           <path> [--budget N] [--strict] [--allow-secrets] [--json | --pr-comment] [--out report.html]
-  ghostslice lint         <path> [--json] [--strict]
+  ghostslice lint         <path> [--json] [--strict] [--no-cache]
   ghostslice init         <path> [--yes] [--force] [--dry-run] [--budget N] [--model ID]
   ghostslice cache        stats|clear <path>
   ghostslice check        <bundle>
   ghostslice diff         <bundleA> <bundleB> [--json]
-  ghostslice history      <path> [--json] [--trend] [--model ID]
+  ghostslice history      <path> [--json] [--trend] [--model ID] [--top N] [--since WHEN]
   ghostslice doctor       <path> [--json]
   ghostslice completions  bash|zsh
   ghostslice mcp                              (stdio MCP server, see mcp_server.py)
@@ -54,16 +54,28 @@ from .textio import read_text as _gs_read_text
 from .tokens import METHOD as TOKEN_METHOD
 
 
+def _fmt_stat_value(v) -> str:
+    """A percentile value for the trend stats: thousands-grouped,
+    no decimals when the interpolation landed on a whole token."""
+    return f"{v:,.0f}" if float(v).is_integer() else f"{v:,.1f}"
+
+
 def _print_history_trend(data) -> None:
     """--trend block for `ghostslice history`: per-run table with
     deltas, aggregates, ASCII charts. $ figures use the payload's
     model block (input rates; prices labelled as of their snapshot)."""
     runs = data["runs_detail"]
     if not runs:
-        print("\nNo recorded runs yet — nothing to trend.")
+        if data.get("filter"):
+            print("\nNo runs match the active filter — nothing to trend.")
+        else:
+            print("\nNo recorded runs yet — nothing to trend.")
         return
     model = data.get("model") or {}
-    print(f"\nTrend ({len(runs)} run(s), oldest first; $ at "
+    order = ("largest savings first"
+             if (data.get("filter") or {}).get("top") is not None
+             else "oldest first")
+    print(f"\nTrend ({len(runs)} run(s), {order}; $ at "
           f"{model.get('name', model.get('id'))}, {model.get('prices_note', '')}):")
     header = (f"{'#':>3}  {'at (UTC)':<19}  {'kind':<7}  {'before':>9} -> "
               f"{'after':>9}  {'saved':>9}  {'saved%':>6}  {'Δafter':>8}  "
@@ -80,6 +92,14 @@ def _print_history_trend(data) -> None:
     agg = data["aggregates"]
     print(f"\nSaved % per run: mean {agg['mean_saved_pct']:.2f}%, "
           f"median {agg['median_saved_pct']:.2f}%")
+    pct = agg.get("percentiles") or {}
+    if pct.get("saved_tokens") and pct.get("after_tokens"):
+        print(f"Per-run percentiles (estimated tokens): saved "
+              f"p50 {_fmt_stat_value(pct['saved_tokens']['p50'])}, "
+              f"p90 {_fmt_stat_value(pct['saved_tokens']['p90'])}; "
+              f"export total (after) "
+              f"p50 {_fmt_stat_value(pct['after_tokens']['p50'])}, "
+              f"p90 {_fmt_stat_value(pct['after_tokens']['p90'])}")
     if agg["best_run"] and agg["worst_run"]:
         b, w = agg["best_run"], agg["worst_run"]
         print(f"Best run: #{b['index'] + 1} saved {b['saved_tokens']:,} "
@@ -216,15 +236,23 @@ def _print_scan_timing(t0, t1, cache, stream=None) -> None:
               f"{c['stores']} store(s), {c['corrupt']} corrupt", file=stream)
 
 
-def _with_dead_symbol_recs(result, graph, profile, recs):
+def _with_dead_symbol_recs(result, graph, profile, recs, cache=None):
     """Append v0.19 dead-symbol candidates to a recommendation list
     (the `scan` / `graph` surfaces). graph.recommendations itself is
     unchanged — lint consumes it and gains nothing this round. A
     call-graph failure must never break a scan, so this is guarded
-    the same way graph.recommendations guards its duplicate pass."""
+    the same way graph.recommendations guards its duplicate pass.
+
+    `cache` (v1.0.2): the scan command passes the content cache it
+    already opened for its scan records, so the dead-symbol pass
+    reuses the outline kind instead of re-outlining every Python
+    file. v1.0.3: the graph command opens and passes its cache the
+    same way; the remaining no-cache callers are surfaces that
+    never open one (dashboard, MCP)."""
     try:
         from .callgraph import dead_symbol_recommendations
-        extra = dead_symbol_recommendations(result, profile, graph)
+        extra = dead_symbol_recommendations(result, profile, graph,
+                                            cache=cache)
     except Exception:
         return recs
     if not extra:
@@ -551,6 +579,8 @@ def _main_impl(argv: list[str] | None = None) -> int:
     p_graph = sub.add_parser("graph", help="import graph + prune recommendations")
     p_graph.add_argument("path")
     p_graph.add_argument("--json", action="store_true")
+    p_graph.add_argument("--no-cache", action="store_true",
+                         help="do not consult or fill the .ghostslice-cache content cache")
 
     p_slice = sub.add_parser("slice", help="slice one file or a whole tree into an output dir")
     p_slice.add_argument("path")
@@ -632,6 +662,8 @@ def _main_impl(argv: list[str] | None = None) -> int:
     p_calls.add_argument("--json", action="store_true")
     p_calls.add_argument("--dead", action="store_true",
                          help="list dead-function candidates (symbols no caller or reference reaches)")
+    p_calls.add_argument("--no-cache", action="store_true",
+                         help="do not consult or fill the .ghostslice-cache content cache")
 
     p_diff = sub.add_parser("diff", help="diff two bundles: mode changes, token deltas, added/removed files")
     p_diff.add_argument("bundle_a")
@@ -702,6 +734,8 @@ def _main_impl(argv: list[str] | None = None) -> int:
     p_lint.add_argument("--json", action="store_true")
     p_lint.add_argument("--strict", action="store_true",
                         help="exit 1 on warnings too (default: exit 1 only on error-severity findings)")
+    p_lint.add_argument("--no-cache", action="store_true",
+                        help="do not consult or fill the .ghostslice-cache content cache")
 
     p_budget = sub.add_parser("check-budget", help="exit non-zero if the selected context exceeds a token budget (CI gate)")
     p_budget.add_argument("path")
@@ -743,6 +777,14 @@ def _main_impl(argv: list[str] | None = None) -> int:
     p_hist.add_argument("--model", default=None,
                         help="model id from prices.json for estimated $ saved "
                              "(default: profile model or claude-sonnet)")
+    p_hist.add_argument("--top", type=int, default=None, metavar="N",
+                        help="show only the N runs with the largest savings "
+                             "(largest first); totals and stats describe "
+                             "the runs shown")
+    p_hist.add_argument("--since", default=None, metavar="WHEN",
+                        help="show only runs at or after WHEN: an ISO date "
+                             "(2026-10-01), an ISO datetime, or a relative "
+                             "form like 7d (N days ago)")
 
     p_cal = sub.add_parser("calibrate", help="per-language-family token calibration report (raw vs calibrated estimates)")
     p_cal.add_argument("path")
@@ -955,8 +997,11 @@ def _main_impl(argv: list[str] | None = None) -> int:
 
     if args.cmd == "lint":
         from .lint import lint_exit_code, lint_project
+        _lint_cache = None if args.no_cache else open_cache(
+            args.path, namespace=_plugins.active_digest())
         try:
-            payload = lint_project(args.path, profile=profile)
+            payload = lint_project(args.path, profile=profile,
+                                   cache=_lint_cache)
         except FileNotFoundError:
             print(f"lint: no such project: {args.path}", file=sys.stderr)
             return 2
@@ -1010,7 +1055,7 @@ def _main_impl(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "explain":
-        from .duplicates import find_duplicates
+        from .duplicates import find_duplicates, near_min_chars_for
         from .exporter import default_mode_for
         from .graph import importers_of as _imp_of
         result = _scan_with_profile(args.path, profile)
@@ -1050,7 +1095,7 @@ def _main_impl(argv: list[str] | None = None) -> int:
         sliced = slice_text(rel, source, mode)
         graph = build_graph(result)
         rev = _imp_of(graph)
-        dups = find_duplicates(result)
+        dups = find_duplicates(result, near_min_chars=near_min_chars_for(profile))
         dup_notes = []
         for g in dups["exact"]:
             if rel in g["files"]:
@@ -1086,16 +1131,17 @@ def _main_impl(argv: list[str] | None = None) -> int:
         if args.top < 1:
             print("scan: --top must be >= 1", file=sys.stderr)
             return 2
-        from .duplicates import find_duplicates
+        from .duplicates import find_duplicates, near_min_chars_for
         _t0 = time.perf_counter()
         _scan_cache = None if args.no_cache else open_cache(args.path, namespace=_plugins.active_digest())
         result = _scan_with_profile(args.path, profile, cache=_scan_cache)
         _t1 = time.perf_counter()
         graph = build_graph(result)
         recs = _with_dead_symbol_recs(result, graph, profile,
-                                      recommendations(result, graph, profile))
+                                      recommendations(result, graph, profile),
+                                      cache=_scan_cache)
         findings = scan_scan_result(result)
-        dups = find_duplicates(result)
+        dups = find_duplicates(result, near_min_chars=near_min_chars_for(profile))
         if args.json:
             payload = result.to_dict()
             payload["token_method"] = TOKEN_METHOD
@@ -1121,17 +1167,26 @@ def _main_impl(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "graph":
-        result = _scan_with_profile(args.path, profile)
+        # v1.0.3: the same cache treatment scan got in v1.0.2 — the
+        # scan records and the dead-symbol pass's outlines route
+        # through the content cache under the plugin digest. The
+        # import-graph walk itself reads file text directly (not a
+        # cache kind, exactly like the call graph's ast walk).
+        _graph_cache = None if args.no_cache else open_cache(
+            args.path, namespace=_plugins.active_digest())
+        result = _scan_with_profile(args.path, profile,
+                                    cache=_graph_cache)
         graph = build_graph(result)
         recs = _with_dead_symbol_recs(result, graph, profile,
-                                      recommendations(result, graph, profile))
+                                      recommendations(result, graph, profile),
+                                      cache=_graph_cache)
         if args.json:
-            from .duplicates import find_duplicates
+            from .duplicates import find_duplicates, near_min_chars_for
             print(json.dumps({
                 "graph": graph,
                 "importers": importers_of(graph),
                 "recommendations": recs,
-                "duplicates": find_duplicates(result),
+                "duplicates": find_duplicates(result, near_min_chars=near_min_chars_for(profile)),
             }, indent=2))
             return 0
         print(f"Import graph for {result.root} ({len(graph)} files)")
@@ -1146,8 +1201,8 @@ def _main_impl(argv: list[str] | None = None) -> int:
                 print(f"  {r['tokens']:>9,}  {r['path']}  ({r['reason']}; {r['detail']})")
         else:
             print("\nNo prune recommendations.")
-        from .duplicates import find_duplicates
-        dups = find_duplicates(result)
+        from .duplicates import find_duplicates, near_min_chars_for
+        dups = find_duplicates(result, near_min_chars=near_min_chars_for(profile))
         if dups["exact"] or dups["near"]:
             print("\nDuplicates:")
             for g in dups["exact"]:
@@ -1262,13 +1317,17 @@ def _main_impl(argv: list[str] | None = None) -> int:
 
     if args.cmd == "calls":
         from .callgraph import build_call_graph
+        _calls_cache = None if args.no_cache else open_cache(
+            args.path, namespace=_plugins.active_digest())
         try:
-            result = _scan_with_profile(args.path, profile)
+            result = _scan_with_profile(args.path, profile,
+                                        cache=_calls_cache)
         except FileNotFoundError:
             print(f"calls: no such project: {args.path}", file=sys.stderr)
             return 2
         graph = build_graph(result)
-        payload = build_call_graph(result, profile, graph)
+        payload = build_call_graph(result, profile, graph,
+                                   cache=_calls_cache)
         single = None
         if args.file:
             single = args.file.replace("\\", "/").lstrip("./")
@@ -1406,7 +1465,12 @@ def _main_impl(argv: list[str] | None = None) -> int:
                       exclude_secrets=args.exclude_secrets,
                       redact=args.redact,
                       auto_shrink=args.auto_shrink,
-                      profile=profile)
+                      profile=profile,
+                      plugin_extra_paths=tuple(
+                          getattr(args, "plugin", None) or ()),
+                      plugin_allow_override=bool(
+                          getattr(args, "allow_plugin_override", False)),
+                      manage_plugins=True)
         except FileNotFoundError:
             print(f"watch: no such project: {args.path}", file=sys.stderr)
             return 2
@@ -1478,19 +1542,46 @@ def _main_impl(argv: list[str] | None = None) -> int:
         return 0 if check["ok"] else 1
 
     if args.cmd == "history":
+        if args.top is not None and args.top < 1:
+            print("history: --top must be >= 1", file=sys.stderr)
+            return 2
+        since_ts = None
+        if args.since is not None:
+            from .ledger import parse_since
+            try:
+                since_ts = parse_since(args.since)
+            except ValueError as exc:
+                print(f"history: {exc}", file=sys.stderr)
+                return 2
         try:
             model = get_model(prices, args.model or profile.model or "claude-sonnet")
         except KeyError as exc:
             print(f"history: {exc}", file=sys.stderr)
             return 2
-        data = ledger_analytics(args.path, model=model, prices=prices)
+        data = ledger_analytics(args.path, model=model, prices=prices,
+                                since=since_ts, top=args.top)
         if args.json:
             print(json.dumps(data, indent=2))
             return 0
-        # Default block: the plain summary, unchanged in shape.
+        # Default block: the plain summary, unchanged in shape (with
+        # filters, the totals describe the shown subset and the
+        # filter line below says exactly that).
         print(f"Savings ledger for {args.path}: {data['runs']} recorded run(s)")
         print(f"  Total before: {data['total_before_tokens']:,}  after: {data['total_after_tokens']:,}  "
               f"saved: {data['total_saved_tokens']:,} estimated tokens")
+        if data.get("filter"):
+            f = data["filter"]
+            parts = []
+            if f["since"] is not None:
+                parts.append(f"since {args.since}")
+            if f["top"] is not None:
+                parts.append(f"top {f['top']} by tokens saved")
+            print(f"  Filter: {', '.join(parts)} — showing "
+                  f"{f['runs_shown']} of {f['runs_total']} recorded "
+                  "run(s); totals and stats cover the runs shown.")
+            if f["undated_excluded"]:
+                print(f"  Note: {f['undated_excluded']} run(s) without a "
+                      "parseable timestamp were excluded by --since.")
         if data["corrupt_lines"]:
             print(f"  Warning: skipped {data['corrupt_lines']} corrupt ledger line(s) "
                   "in .ghostslice-history.jsonl (not counted).")

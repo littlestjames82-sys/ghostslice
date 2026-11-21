@@ -49,7 +49,13 @@ set and have no attribute-name call/reference anywhere:
          named `main` is rooted — app.py is half the world's
          Flask apps and most of its functions are not entry
          points), [project.scripts] targets from pyproject.toml,
-         names exported via a module's `__all__`, functions in
+         names exported via a module's `__all__` (plus the direct
+         methods of classes so exported: a public class's methods
+         are the API surface its consumers call), the contract
+         entry points of a plugin module (a top-level `register`,
+         or the attribute style — LANGUAGE/EXTENSIONS assignments
+         plus a `slice_text` def; the plugin loader invokes them,
+         so the loader is their caller), functions in
          test files and conftest.py, functions carrying a
          framework-style decorator (an attribute/call decorator,
          or one imported into the module — route handlers, pytest
@@ -69,6 +75,15 @@ stored in a dict/list, assigned, or named in a default argument is
 alive. Attribute loads count by name for methods, which keeps
 properties and protocol attributes alive when they are accessed
 but never called.
+
+Caching (v1.0.2): CallGraph accepts the optional content cache
+(cache.py) the export path uses. The per-file symbol outlines —
+the derivation cache.py keys as "outline" — go through it with
+the same discipline (content-hash keys, plugin-digest
+namespacing, corrupt-never-fails), so a warm `calls` skips
+re-outlining every Python file. The ast parse and the walk itself
+are not cache kinds and still run per call; output is identical
+either way.
 """
 from __future__ import annotations
 
@@ -78,7 +93,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 from .graph import _py_module_base
-from .symslice import outline_source
+from .symslice import Symbol, outline_source
 from .tokens import METHOD as TOKEN_METHOD
 from .tokens import estimate_tokens
 from .textio import read_text as _gs_read_text
@@ -136,6 +151,7 @@ class _File:
     all_names: set = field(default_factory=set)        # __all__ contents
     framework_roots: set = field(default_factory=set)  # qualified names
     lambda_names: set = field(default_factory=set)     # qualified names
+    plugin_roots: set = field(default_factory=set)     # qualified names
 
 
 def _dotted(node) -> str | None:
@@ -207,7 +223,37 @@ def _collect_file_facts(fi: _File) -> None:
             for elt in value.elts:
                 if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
                     fi.all_names.add(elt.value)
+    _collect_plugin_roots(fi, tree.body)
     _collect_classes(fi, tree.body, "")
+
+
+# The plugin contract's entry points (plugins.py): a plugin module
+# is invoked by the loader, never by project code, so its contract
+# functions are roots — the loader is their caller. Detection is
+# the contract itself, exactly what the loader accepts: a top-level
+# `register` function, or the attribute style (module-level LANGUAGE
+# and EXTENSIONS assignments plus a top-level `slice_text` def).
+# Only the contract names are rooted; everything they call or
+# reference becomes reachable through them as usual, and a helper
+# they never touch still flags — presenting the contract makes a
+# module loadable as a plugin, it does not bless its dead code.
+_PLUGIN_ENTRY_POINTS = ("register", "slice_text", "outline")
+
+
+def _collect_plugin_roots(fi: _File, body) -> None:
+    assigned: set = set()
+    defs: set = set()
+    for node in body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    assigned.add(target.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            defs.add(node.name)
+    if "register" in defs or (
+            {"LANGUAGE", "EXTENSIONS"} <= assigned
+            and "slice_text" in defs):
+        fi.plugin_roots = defs & set(_PLUGIN_ENTRY_POINTS)
 
 
 def _collect_classes(fi: _File, body, prefix: str) -> None:
@@ -668,9 +714,12 @@ def _collect_globals(func) -> set:
 # ---------------------------------------------------------------------------
 
 class CallGraph:
-    def __init__(self, scan_result, profile=None, graph=None):
+    def __init__(self, scan_result, profile=None, graph=None, cache=None):
         self.scan_result = scan_result
         self.profile = profile
+        # v1.0.2: optional cache.ProjectCache for the per-file
+        # outlines (see module docstring); None = always recompute.
+        self.cache = cache
         self.root_files = {f.path for f in scan_result.files}
         self.files: dict[str, _File] = {}
         self.symbols: dict[str, _Sym] = {}
@@ -732,7 +781,7 @@ class CallGraph:
         except Exception:
             self.skipped_files.append(entry.path)
             return None
-        outline = outline_source(source, "python", entry.path) or []
+        outline = self._outline(entry, source)
         for sym in outline:
             if not sym.selectable:
                 continue
@@ -751,6 +800,26 @@ class CallGraph:
             fi.symbols[sym.qualified] = rec
         _collect_file_facts(fi)
         return fi
+
+    def _outline(self, entry, source: str) -> list:
+        """The file's symbol outline, through the content cache
+        when one is attached: the same get/put seam
+        symslice.resolve_symbol_selection uses (rows are the
+        Symbol dataclass as dicts; a shape drift on read falls
+        back to recompute, never to a wrong outline)."""
+        if self.cache is not None:
+            rows = self.cache.get_outline(entry.path, source)
+            if rows is not None:
+                try:
+                    return [Symbol(**row) for row in rows]
+                except TypeError:
+                    pass  # shape drift: recompute below
+        syms = outline_source(source, "python", entry.path)
+        if self.cache is not None and syms is not None:
+            from dataclasses import asdict
+            self.cache.put_outline(entry.path, source,
+                                   [asdict(s) for s in syms])
+        return syms or []
 
     # -- cross-file resolution helpers --------------------------------------
 
@@ -980,11 +1049,26 @@ class CallGraph:
             entry = by_path.get(fi.path)
             is_test = bool(entry and entry.is_test) or \
                 PurePosixPath(fi.path).name == "conftest.py"
+            exported_classes = {
+                sym.qualified for sym in fi.symbols.values()
+                if sym.kind == "class" and sym.name in fi.all_names
+                and "." not in sym.qualified}
             for sym in fi.symbols.values():
                 if sym.qualified in fi.framework_roots:
                     roots.add(sym.id)
+                if sym.qualified in fi.plugin_roots:
+                    roots.add(sym.id)
                 if sym.name in fi.all_names and "." not in sym.qualified:
                     roots.add(sym.id)
+                if sym.kind == "method" and "." in sym.qualified:
+                    # A class named in __all__ is public API: its
+                    # direct methods are the surface consumers call
+                    # (the PluginAPI a plugin's register() receives
+                    # is the canonical case), so they are roots,
+                    # not dead code.
+                    parent = sym.qualified.rsplit(".", 1)[0]
+                    if parent in exported_classes:
+                        roots.add(sym.id)
                 if is_test and sym.kind in ("function", "method"):
                     roots.add(sym.id)
             # A class extending a base outside the project (an
@@ -1105,19 +1189,23 @@ class CallGraph:
 # Public API
 # ---------------------------------------------------------------------------
 
-def build_call_graph(scan_result, profile=None, graph=None) -> dict:
-    """Full call-graph payload for a scan (Python files only)."""
-    return CallGraph(scan_result, profile, graph).payload(graph)
+def build_call_graph(scan_result, profile=None, graph=None,
+                     cache=None) -> dict:
+    """Full call-graph payload for a scan (Python files only).
+
+    `cache` (v1.0.2): an optional cache.ProjectCache for the
+    per-file outlines; output is identical either way."""
+    return CallGraph(scan_result, profile, graph, cache).payload(graph)
 
 
 def dead_symbol_recommendations(scan_result, profile=None,
-                                graph=None) -> list[dict]:
+                                graph=None, cache=None) -> list[dict]:
     """Prune-recommendation-shaped dead-symbol candidates.
 
     Merged into the `scan` / `graph` command surfaces by the CLI;
     graph.recommendations itself (and lint, which consumes it) is
     unchanged."""
-    cg = CallGraph(scan_result, profile, graph)
+    cg = CallGraph(scan_result, profile, graph, cache)
     out = []
     for d in cg.dead_candidates(graph):
         out.append({

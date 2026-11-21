@@ -432,7 +432,7 @@ class TestExplainAndDashboard(DetectCase):
         write(self.root, "gen.py", GEN_HEADER + "def f():\n    return 1\n")
         server, _ = make_server(str(self.root), port=0)
         port = server.server_address[1]
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.02), daemon=True)
         thread.start()
         try:
             with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/scan",

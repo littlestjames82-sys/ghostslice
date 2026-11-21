@@ -607,7 +607,7 @@ class TestDashboardTreemap(unittest.TestCase):
         (self.root / "api.ts").write_text("export function go(): void {\n  const h = 1;\n}\n")
         self.server, _ = make_server(str(self.root), port=0)
         self.port = self.server.server_address[1]
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread = threading.Thread(target=lambda: self.server.serve_forever(poll_interval=0.02), daemon=True)
         self.thread.start()
 
     def tearDown(self):

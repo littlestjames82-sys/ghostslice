@@ -10,6 +10,11 @@ at least 200 normalized characters are compared (size floor, to avoid
 flagging every tiny boilerplate file), and pairs at similarity
 >= 0.85 (documented threshold) are reported. Exact-duplicate pairs
 are not repeated in the near list.
+
+The 200-character floor is the profile's "duplicates" section key
+"near_min_chars" when a project sets it (v1.0.2; see profile.py) —
+find_duplicates takes it as a parameter and every surface that has
+the project profile passes its value, so all surfaces agree.
 """
 from __future__ import annotations
 from .textio import read_text as _gs_read_text
@@ -34,8 +39,24 @@ def line_shingles(text: str) -> set[str]:
     return {ln.strip() for ln in normalize(text).splitlines() if ln.strip()}
 
 
-def find_duplicates(scan_result) -> dict:
-    """Return {"exact": [...], "near": [...]} for a ScanResult."""
+def near_min_chars_for(profile) -> int:
+    """The effective near-duplicate size floor for a profile: its
+    "duplicates" section's "near_min_chars" when set, else the
+    documented default NEAR_MIN_CHARS (zero behaviour change)."""
+    cfg = getattr(profile, "duplicates", None) or {}
+    val = cfg.get("near_min_chars")
+    return NEAR_MIN_CHARS if val is None else val
+
+
+def find_duplicates(scan_result, near_min_chars: int | None = None) -> dict:
+    """Return {"exact": [...], "near": [...]} for a ScanResult.
+
+    `near_min_chars` is the normalized-character size floor for the
+    near comparison (None = NEAR_MIN_CHARS, the historical
+    behaviour). The exact comparison has no size floor beyond its
+    noise minimum and is unaffected."""
+    if near_min_chars is None:
+        near_min_chars = NEAR_MIN_CHARS
     by_path = {f.path: f for f in scan_result.files}
     texts: dict[str, str] = {}
     for entry in scan_result.files:
@@ -73,7 +94,7 @@ def find_duplicates(scan_result) -> dict:
 
     # Near (pairwise over files above the size floor)
     candidates = [p for p, norm in texts.items()
-                  if len(norm) >= NEAR_MIN_CHARS and len(line_shingles(norm)) >= NEAR_MIN_LINES]
+                  if len(norm) >= near_min_chars and len(line_shingles(norm)) >= NEAR_MIN_LINES]
     shingles = {p: line_shingles(texts[p]) for p in candidates}
     near: list[dict] = []
     for i, a in enumerate(sorted(candidates)):

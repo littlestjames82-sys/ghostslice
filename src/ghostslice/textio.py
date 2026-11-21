@@ -38,6 +38,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+# The module's public surface, declared so consumers (and the
+# call-graph analyzer, which roots __all__ names) can see what is
+# API: read_text / read_text_with_encoding are the two read
+# conveniences, decode_bytes / sniff_bom the byte-level core.
+__all__ = [
+    "sniff_bom", "decode_bytes", "read_text", "read_text_with_encoding",
+    "UTF16_32_LABELS",
+]
+
 # (bom, codec, label) — longest BOMs first: FF FE 00 00 (UTF-32 LE)
 # must win over FF FE (UTF-16 LE).
 _BOMS: tuple[tuple[bytes, str, str], ...] = (
