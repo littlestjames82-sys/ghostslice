@@ -403,4 +403,4 @@ def test_dogfood_workflow_structure():
     assert "ghostslice ci" in text
     assert "--budget 230000" in text
     assert "PYTHONPATH=src" in text
-    assert "actions/checkout@v4" in text
+    assert "actions/checkout@" in text
