@@ -39,8 +39,10 @@ Python (lite outlines are top-level plus class members); methods
 of declaration types (interfaces, traits, protocols) are listed
 and selectable, but selecting one ships the whole type —
 declaration types are surface, exactly as in signatures mode.
-Constructors are not selectable symbols in lite languages; C#
-namespaces do not prefix qualified names; Go grouped
+Constructors are not selectable symbols in lite languages —
+except Kotlin primary-constructor properties, which are members
+by the language's own rule and are symbols of their class
+(v1.0.6). C# namespaces do not prefix qualified names; Go grouped
 `type ( ... )` declarations are not outlined; Kotlin/Swift
 single-expression function bodies that continue on more-indented
 lines are part of the symbol only on their first line; and a C++
@@ -62,7 +64,9 @@ from .slicer import (
     _ACCESS_RE, _ARROW_RE, _CLASS_RE, _CPP_CLASS_RE, _CPP_ENUM_RE,
     _CPP_NS_RE, _C_TYPE_RE, _ENUM_RE,
     _EXTRA_CFG, _FUNCTION_RE, _GO_TYPE_RE, _IMPORT_LINE_RES, _IMPORT_RE,
-    _INTERFACE_RE, _JV_TYPE_RE, _METHOD_RE, _PREPROC_RE, _RB_ATTR_RE,
+    _INTERFACE_RE, _JV_METHOD_HEAD_RE, _JV_TYPE_RE, _METHOD_RE,
+    _PREPROC_RE, _RB_ATTR_RE, _declaration_stop, _kt_ctor_head,
+    _kt_ctor_params,
     _RB_CONST_RE, _RB_DEF_RE, _RB_REQUIRE_RE, _RB_TYPE_RE, _RS_FN_RE,
     _RS_IMPL_RE, _RS_TYPE_RE, _SC_ALIAS_RE, _SC_IMPORT_RE,
     _SC_TYPE_RE, _SC_VAL_RE, _TYPE_RE, _block_end, _body_brace_col,
@@ -399,20 +403,51 @@ def _ts_outline(lines: list[str]) -> list[Symbol]:
 # Go / Rust / Java / C# outlines (parser-lite spans)
 # ---------------------------------------------------------------------------
 
+def _go_receiver_type(recv: str) -> str:
+    """Base type name of a Go receiver string: 's *Stack[T]' ->
+    'Stack', 'p Pair[K, V]' -> 'Pair', 'Stack[T]' -> 'Stack'
+    (v1.0.4). The receiver is '<name> <type>' or a bare '<type>';
+    the type's own type arguments may contain spaces (gofmt
+    writes `Pair[K, V]`), so split only on whitespace that sits
+    outside the brackets — a naive split()[-1] named the parent
+    of Pair[K, V]'s methods 'V]'."""
+    parts: list[str] = []
+    depth = 0
+    buf: list[str] = []
+    for ch in recv.strip():
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth = max(0, depth - 1)
+        if ch.isspace() and depth == 0:
+            if buf:
+                parts.append("".join(buf))
+                buf = []
+        else:
+            buf.append(ch)
+    if buf:
+        parts.append("".join(buf))
+    if not parts:
+        return ""
+    rtype = parts[0] if len(parts) == 1 else " ".join(parts[1:])
+    return rtype.lstrip("*").split("[")[0].strip()
+
+
 def _go_outline(lines: list[str]) -> list[Symbol]:
     out: list[Symbol] = []
     i = 0
     n = len(lines)
     while i < n:
         line = lines[i]
-        m = re.match(r"^\s*func\s+(?:\(([^)]*)\)\s*)?([A-Za-z_]\w*)\s*\(",
+        m = re.match(r"^\s*func\s+(?:\(([^)]*)\)\s*)?([A-Za-z_]\w*)\s*"
+                     r"(?:\[(?:[^\[\]]|\[[^\[\]]*\])*\]\s*)?\(",
                      line)
         if m:
             recv, name = m.group(1), m.group(2)
             end = _block_end(lines, i, "go") if "{" in line \
                 else _paren_end(lines, i, n)
             if recv:
-                rtype = recv.strip().split()[-1].lstrip("*").split("[")[0]
+                rtype = _go_receiver_type(recv)
                 out.append(Symbol(name, f"{rtype}.{name}", "method", i, end,
                                   _paren_end(lines, i, n), i, parent=rtype))
             else:
@@ -446,9 +481,35 @@ def _go_outline(lines: list[str]) -> list[Symbol]:
     return out
 
 
+def _strip_generic_spans(s: str) -> str:
+    """Remove <...> spans from a declaration fragment, nesting-aware
+    (v1.0.4). An associated-type binding like Iterator<Item = u8>
+    closes with '>>' — a flat <[^>]*> strip stops at the first '>'
+    and leaves the second behind as the 'type name'. A '->' inside
+    a span is an arrow (Fn-trait bounds), never a span close."""
+    out: list[str] = []
+    depth = 0
+    i = 0
+    while i < len(s):
+        ch = s[i]
+        if ch == "-" and s[i + 1:i + 2] == ">":
+            if depth == 0:
+                out.append("->")
+            i += 2
+            continue
+        if ch == "<":
+            depth += 1
+        elif ch == ">":
+            depth = max(0, depth - 1)
+        elif depth == 0:
+            out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def _rust_impl_type(line: str) -> str:
     s = re.sub(r"^\s*(unsafe\s+)?impl\b", "", line).strip()
-    s = re.sub(r"<[^>]*>", "", s)
+    s = _strip_generic_spans(s)
     if " for " in s:
         s = s.split(" for ")[-1]
     parts = s.split()
@@ -460,24 +521,52 @@ def _rust_region(lines: list[str], i0: int, end: int,
     i = i0
     while i < end:
         line = lines[i]
-        if _RS_IMPL_RE.match(line) and "{" in line:
-            bend = _block_end(lines, i, "rust")
-            tname = _rust_impl_type(line)
-            if tname:
-                out.append(Symbol(tname, tname, "impl", i, bend, i, i,
-                                  parent=parent_q, selectable=False))
-                _rust_region(lines, i + 1, bend, tname, out)
-            i = bend + 1
-            continue
+        if _RS_IMPL_RE.match(line):
+            # The opening brace is usually on the impl line, but a
+            # multi-line `where` clause puts it lines later (v1.0.4):
+            # find it the same way the slicer finds block braces
+            # (paren-depth 0, a ';' first means no block). Without
+            # this, a where-clause impl was not a region at all and
+            # its methods outlined as parentless free functions.
+            brace_at = _find_block_brace(lines, i, limit=8)
+            if brace_at is not None:
+                brace_line = brace_at[0]
+                bend = _block_end(lines, brace_line, "rust")
+                tname = _rust_impl_type(line)
+                if tname:
+                    out.append(Symbol(tname, tname, "impl", i, bend,
+                                      brace_line, i,
+                                      parent=parent_q, selectable=False))
+                    _rust_region(lines, brace_line + 1, bend, tname, out)
+                i = bend + 1
+                continue
         tm = _RS_TYPE_RE.match(line)
         if tm:
             km = re.search(r"\b(struct|enum|trait|union)\s+([A-Za-z_]\w*)",
                            line)
             if km:
-                bend = _block_end(lines, i, "rust") if "{" in line \
-                    else _stmt_end(lines, i, end)
+                if "{" in line:
+                    bend = _block_end(lines, i, "rust")
+                    head = i
+                else:
+                    # A multi-line `where` clause puts the brace
+                    # lines later (v1.0.5, the type-side twin of the
+                    # v1.0.4 impl fix): find it the same way, or the
+                    # span ends at the first `;` inside the body —
+                    # a trait's methods never enumerate and a
+                    # struct's body falls outside its span. A `;`
+                    # first (unit/tuple struct) keeps the statement
+                    # span, exactly as before.
+                    fb = _find_block_brace(lines, i, limit=8)
+                    if fb is not None:
+                        bend = _brace_end(lines, fb[0], body_col=fb[1],
+                                          lang="rust")
+                        head = fb[0]
+                    else:
+                        bend = _stmt_end(lines, i, end)
+                        head = i
                 out.append(Symbol(km.group(2), km.group(2), "type",
-                                  _decl_start(lines, i), bend, i, i,
+                                  _decl_start(lines, i), bend, head, i,
                                   parent=parent_q))
                 if km.group(1) == "trait" and bend > i:
                     # Trait method declarations/default bodies are
@@ -509,35 +598,85 @@ def _jv_region(lines: list[str], i0: int, end: int, lang: str,
         tm = _JV_TYPE_RE.match(line)
         if tm:
             kind_word = tm.group(2)
-            nm = re.search(r"\b(?:class|interface|enum|record|struct)\s+"
+            # `record class` / `record struct` are two-word kinds:
+            # the name follows BOTH words (v1.0.5 — the bare
+            # alternation used to capture "class"/"struct" itself
+            # as the record's name).
+            nm = re.search(r"\b(?:record\s+(?:class|struct)\s+|"
+                           r"(?:class|interface|enum|record|struct)\s+)"
                            r"([A-Za-z_]\w*)", line)
             if nm:
                 name = nm.group(1)
                 is_decl = kind_word in ("interface", "enum", "record")
-                bend = _block_end(lines, i, lang) if "{" in line \
-                    else _stmt_end(lines, i, end)
+                if "{" in line:
+                    bend = _block_end(lines, i, lang)
+                else:
+                    # Allman declarations (the C# default) put the
+                    # brace on a following line; without the
+                    # lookahead the span ended at the first member's
+                    # `;` and no member ever enumerated (v1.0.5).
+                    # A `;` first (positional record, unit decl)
+                    # keeps the statement span.
+                    fb = _find_block_brace(lines, i, limit=8)
+                    bend = _brace_end(lines, fb[0], body_col=fb[1],
+                                      lang=lang) if fb is not None \
+                        else _stmt_end(lines, i, end)
                 q = f"{parent_q}.{name}" if parent_q else name
                 out.append(Symbol(name, q, "type" if is_decl else "class",
                                   _decl_start(lines, i), bend,
                                   _brace_line_in(lines, i, bend), i,
                                   parent=parent_q))
-                if bend > i and (not is_decl or kind_word == "interface"):
-                    # Interface method declarations are symbols too
-                    # (the interface itself renders whole).
+                if bend > i and (not is_decl
+                                 or kind_word in ("interface", "record")):
+                    # Interface and record members are symbols too
+                    # (the type itself renders whole). Records join
+                    # interfaces here (v1.0.5): a record body is a
+                    # container like a class body, and its methods
+                    # were previously unreachable by name.
                     _jv_region(lines, i + 1, bend, lang, q, out)
                 i = bend + 1
                 continue
         if parent_q and _lite_is_func(line, lang):
             name = _method_name(line)
             if name and name != parent_q.split(".")[-1]:  # not a constructor
-                bend = _block_end(lines, i, lang) if "{" in line \
-                    else _stmt_end(lines, i, end)
+                arrow = line.find("=>")
+                if lang in ("java", "csharp") and arrow != -1 \
+                        and (line.find("{") == -1
+                             or arrow < line.find("{")):
+                    # Expression-bodied member (v1.0.5): single
+                    # statement span; a `{` after the arrow is
+                    # expression content, not a body brace.
+                    bend = _stmt_end(lines, i, end)
+                elif "{" in line:
+                    bend = _block_end(lines, i, lang)
+                else:
+                    bend = _stmt_end(lines, i, end)
                 out.append(Symbol(name, f"{parent_q}.{name}", "method",
                                   _decl_start(lines, i), bend,
                                   _paren_end(lines, i, end), i,
                                   parent=parent_q))
                 i = bend + 1
                 continue
+        if parent_q and lang in ("java", "csharp") \
+                and _JV_METHOD_HEAD_RE.match(line) \
+                and not _JV_TYPE_RE.match(line):
+            # Allman method head (v1.0.5): the declaration line ends
+            # after the parameter list; only a block brace ahead —
+            # before any `;` — makes it a method (the head shape
+            # alone could be a stray call-shaped line).
+            name = _method_name(line)
+            if name and name != parent_q.split(".")[-1]:
+                fb = _find_block_brace(lines, i, limit=8)
+                if fb is not None:
+                    bend = _brace_end(lines, fb[0], body_col=fb[1],
+                                      lang=lang)
+                    out.append(Symbol(name, f"{parent_q}.{name}",
+                                      "method",
+                                      _decl_start(lines, i), bend,
+                                      _paren_end(lines, i, end), i,
+                                      parent=parent_q))
+                    i = bend + 1
+                    continue
         i += 1
 
 
@@ -574,8 +713,17 @@ def _indent_continuation(lines: list[str], i: int, end: int) -> int:
     return j
 
 
+# A PHP enum case: `case Hearts;` or `case Hearts = 'H';`. Only
+# ever matched directly inside an enum body (see _extra_region's
+# parent_kind), where it cannot be a switch label — switch bodies
+# live inside method spans the walker has already consumed.
+_PHP_CASE_RE = re.compile(
+    r"^\s*case\s+(\w+)\s*(?:=.*)?;\s*(?://.*|#.*)?$")
+
+
 def _extra_region(lines: list[str], i0: int, end: int, lang: str,
-                  parent_q: str | None, out: list[Symbol]) -> None:
+                  parent_q: str | None, out: list[Symbol],
+                  parent_kind: str | None = None) -> None:
     cfg = _EXTRA_CFG[lang]
     i = i0
     while i < end:
@@ -587,25 +735,72 @@ def _extra_region(lines: list[str], i0: int, end: int, lang: str,
             if nm:
                 name = nm.group(1)
                 is_decl = kind_word in cfg["full_kinds"]
-                found = _find_block_brace(lines, i, limit=3)
-                if found:
-                    bl, bcol = found
+                # Kotlin primary constructors (v1.0.6): the head may
+                # span lines, and its val/var parameters are member
+                # properties living ON the head lines.
+                kt = _kt_ctor_head(lines, i, nm.end()) \
+                    if lang == "kotlin" else None
+                if kt is not None:
+                    ctor, brace, head_end = kt
+                else:
+                    ctor, brace = None, None
+                    # Kotlin body-less heads must not steal the
+                    # next declaration's brace (v1.0.6, audit F-A2).
+                    found = _find_block_brace(
+                        lines, i, limit=3,
+                        stop=_declaration_stop(cfg)
+                        if lang == "kotlin" else None)
+                    if found:
+                        brace = found
+                        head_end = found[0]
+                    else:
+                        head_end = i
+                if brace:
+                    bl, bcol = brace
                     bend = _brace_end(lines, bl, body_col=bcol, lang=lang)
                     head_end = bl
                 else:
-                    bend = i
-                    head_end = i
+                    bend = head_end
                 q = f"{parent_q}.{name}" if parent_q else name
                 out.append(Symbol(name, q, "type" if is_decl else "class",
                                   _decl_start(lines, i), bend, head_end, i,
                                   parent=parent_q))
-                if bend > i:
+                if ctor is not None:
+                    # Spans sit inside the head (start <= head_end),
+                    # so the renderer never emits them separately:
+                    # the head ships them exactly once, like the
+                    # always-context a body property gets — but the
+                    # names now resolve, list, and select.
+                    for pname, pstart, pend, pdecl in \
+                            _kt_ctor_params(lines, ctor):
+                        out.append(Symbol(pname, f"{q}.{pname}",
+                                          "attribute", pstart, pend,
+                                          pstart, pdecl, parent=q))
+                if brace and bend > head_end:
                     # Classes/objects recurse for members; declaration
                     # types (interface/trait/protocol) recurse too —
                     # their method declarations are symbols (the type
-                    # itself renders whole).
-                    _extra_region(lines, i + 1, bend, lang, q, out)
+                    # itself renders whole). Member walking starts
+                    # after the head: a constructor head's lines are
+                    # not body members.
+                    _extra_region(lines,
+                                  head_end + 1 if ctor else i + 1,
+                                  bend, lang, q, out,
+                                  parent_kind=kind_word)
                 i = bend + 1
+                continue
+        if lang == "php" and parent_kind == "enum":
+            cm = _PHP_CASE_RE.match(line)
+            if cm:
+                # Enum cases are the enum's value surface (v1.0.5):
+                # named constants of the enum, so `Suit.Hearts`
+                # resolves like any other member. They render
+                # verbatim (constants are always-context).
+                name = cm.group(1)
+                out.append(Symbol(name, f"{parent_q}.{name}",
+                                  "constant", i, i, i, i,
+                                  parent=parent_q))
+                i += 1
                 continue
         if cfg["func"].match(line):
             fm = cfg["func_name"].search(line)

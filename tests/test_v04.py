@@ -170,7 +170,7 @@ class TestSecretsIntegration(unittest.TestCase):
             root = Path(td); make_secret_project(root)
             server, _state = make_server(str(root), port=0)
             port = server.server_address[1]
-            t = threading.Thread(target=server.serve_forever, daemon=True); t.start()
+            t = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.02), daemon=True); t.start()
             try:
                 with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/secrets", timeout=10) as r:
                     data = json.loads(r.read().decode())

@@ -14,7 +14,7 @@ the only code it runs beyond GhostSlice's own parsers is the
 plugin load — deliberately, because "will this project's plugins
 load?" is only answerable by loading them exactly the way every
 other command does (plugins are user code; see the trust warning
-in README "Plugins"). Exit semantics: 0 = no failed check,
+in docs/plugins.md). Exit semantics: 0 = no failed check,
 1 = at least one fail, 2 = usage errors (handled by the CLI).
 """
 from __future__ import annotations

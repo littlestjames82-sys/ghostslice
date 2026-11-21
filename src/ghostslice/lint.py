@@ -25,6 +25,16 @@ flagged file's tokens once no matter how many rules flagged it, and
 `potential_savings` takes the best (max) saving per flagged file,
 so two rules pointing at the same file never double-count it.
 
+Caching (v1.0.2): lint_project accepts the same optional content
+cache the export path uses (cache.py). The scan it runs and the
+per-file slices the rules price go through it — content-hash keys,
+plugin-digest namespacing, corrupt-never-fails — so a warm `lint`
+re-derives nothing the cache already holds, with byte-identical
+output. Duplicate detection is NOT cached: cache.py has no kind
+for normalized text, and inventing one is a separate design.
+Callers that pass precomputed inputs (the dashboard) pass no cache
+and keep the in-run memo only.
+
 Exit-code contract (cli / MCP `exit_code` field): 1 when any
 error-severity finding exists; --strict also fails on warnings;
 2 is config/usage errors, handled by the caller. Token counts are
@@ -34,14 +44,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .cache import cached_slice_text
 from .detect import GENERATED_HEADER_LINES, detect_generated, head_of, line_stats
-from .duplicates import find_duplicates
+from .duplicates import find_duplicates, near_min_chars_for
 from .exporter import is_slicable, resolve_modes
 from .graph import build_graph, recommendations
 from .profile import load_profile
 from .scanner import scan
 from .secrets_scan import scan_scan_result
-from .slicer import slice_text
 from .tokens import METHOD
 from .textio import read_text as _gs_read_text
 
@@ -77,7 +87,8 @@ RULES: dict[str, dict] = {
 class _Ctx:
     """Shared inputs + lazy per-file text/slice caches for the rules."""
 
-    def __init__(self, result, modes, profile, graph, recs, dups, secrets):
+    def __init__(self, result, modes, profile, graph, recs, dups, secrets,
+                 cache=None):
         self.result = result
         self.modes = modes
         self.profile = profile
@@ -85,6 +96,9 @@ class _Ctx:
         self.recs = recs
         self.dups = dups
         self.secrets = secrets
+        # v1.0.2: optional persistent content cache (cache.py) for
+        # the slice derivations; None keeps the in-run memo only.
+        self.cache = cache
         self.by_path = {f.path: f for f in result.files}
         self._texts: dict[str, str] = {}
         self._sliced: dict[tuple[str, str], int] = {}
@@ -105,8 +119,9 @@ class _Ctx:
             elif mode == "exclude":
                 self._sliced[key] = 0
             else:
-                self._sliced[key] = slice_text(
-                    entry.path, self.text(entry), mode).sliced_tokens
+                self._sliced[key] = cached_slice_text(
+                    self.cache, entry.path, self.text(entry),
+                    mode).sliced_tokens
         return self._sliced[key]
 
     def slice_saving(self, entry) -> int:
@@ -360,27 +375,35 @@ def effective_config(profile) -> dict:
 
 
 def lint_project(root, profile=None, scan_result=None, graph=None,
-                 recs=None, dups=None, secrets=None) -> dict:
+                 recs=None, dups=None, secrets=None, cache=None) -> dict:
     """Run every enabled rule over a project and return the payload
     shared by the CLI (--json), the dashboard (/api/lint) and the MCP
     lint_project tool. Precomputed scan/graph/recs/dups/secrets may
-    be passed in (the dashboard does) to avoid recomputation."""
+    be passed in (the dashboard does) to avoid recomputation.
+
+    `cache` (v1.0.2): an optional cache.ProjectCache. When given,
+    the scan lint runs itself and the rules' slice derivations go
+    through it (the export path's keys and discipline); output is
+    byte-identical either way. When a precomputed scan_result is
+    passed, the cache still serves the slice derivations."""
     if profile is None:
         profile = load_profile(root)
     config = effective_config(profile)
     if scan_result is None:
         matcher = profile.is_ignored if profile.path else None
-        scan_result = scan(root, ignore_matcher=matcher)
+        scan_result = scan(root, ignore_matcher=matcher, cache=cache)
     modes = resolve_modes(scan_result, profile=profile)
     if graph is None:
         graph = build_graph(scan_result)
     if recs is None:
         recs = recommendations(scan_result, graph, profile)
     if dups is None:
-        dups = find_duplicates(scan_result)
+        dups = find_duplicates(
+            scan_result, near_min_chars=near_min_chars_for(profile))
     if secrets is None:
         secrets = scan_scan_result(scan_result)
-    ctx = _Ctx(scan_result, modes, profile, graph, recs, dups, secrets)
+    ctx = _Ctx(scan_result, modes, profile, graph, recs, dups, secrets,
+               cache=cache)
 
     findings: list[dict] = []
     for rule_id in sorted(_RULE_FUNCS):

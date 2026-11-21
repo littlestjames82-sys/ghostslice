@@ -360,7 +360,7 @@ def test_api_history_shape(project):
     write_ledger(project, RUNS)
     server, _ = make_server(str(project), port=0)
     port = server.server_address[1]
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.02), daemon=True)
     thread.start()
     try:
         with urllib.request.urlopen(

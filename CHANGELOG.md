@@ -3,6 +3,325 @@
 All notable changes to GhostSlice. Versions follow the build waves;
 token counts are estimates everywhere (see README).
 
+## [1.0.6] - 2026-10-14
+Polish round 6: Kotlin constructor properties become symbols, the
+dashboard gains per-symbol call lists, and the test suite gets
+~40% faster without changing a single assertion. Audit:
+`audits/POLISH_106_audit.md`.
+
+### Fixed
+- **Kotlin primary-constructor properties are nameable symbols.**
+  `data class User(val name: String, var age: Int)` now outlines
+  `User.name` / `User.age` as attribute symbols of the class —
+  for plain classes too (`Repo.db`), because `val`/`var` in a
+  primary constructor is a member by Kotlin's rule; a parameter
+  without `val`/`var` is not a member and stays unlisted. Spans
+  sit on the class head, so sliced output ships each property
+  exactly once, with the head. Multi-line constructor heads are
+  fixed with them: the class span used to truncate to the
+  declaration line, its parameters leaked into the outline as
+  parentless top-level constants (an annotated parameter vanished
+  entirely), its methods lost their parent, and signatures mode
+  dropped the declaration line altogether. Wrapped defaults,
+  string templates with `${...}`, lambda defaults, generic types
+  with commas, annotations (including use-site targets), enum
+  classes, and supertype lists after the constructor are all
+  handled; selection, signatures, and task selection see the
+  properties like any other member.
+
+### Added
+- **`GET /api/calls?symbol=` — one symbol's complete call lists.**
+  The bulk `/api/graph` payload caps edges at 2,000, which on a
+  large project hides most symbols' relationships. The new
+  endpoint serves a single symbol's callers / callees /
+  referenced-by from the same memoised call graph (no second
+  build; a request during the startup warm-up waits for the same
+  build, and a build failure surfaces exactly as `/api/graph`'s
+  does). Query by symbol id (`util.py:helper`) or qualified name;
+  a name matching several files answers with the candidate list,
+  an unknown symbol is a 404. Per-list cap 500 with true totals
+  and truncation flags. The dashboard's Call graph panel grows a
+  "complete lists" button per symbol whenever the bulk payload is
+  truncated, swapping in the fetched lists and saying whether
+  they are complete or were themselves capped.
+
+### Changed
+- **Test suite wall time cut ~40%** (84.3s -> 50.7s measured on
+  the build machine; 925 tests before and after, no assertion
+  changed, nothing skipped). Two infrastructure fixes: HTTP-server
+  tests now serve with a 0.02s poll interval, so `shutdown()` no
+  longer waits out the 0.5s default on every boot (measured
+  0.506s -> 0.025s per boot+shutdown), and the perf suite's
+  synthetic big tree is halved to 1,000 files (the warm/cold CPU
+  ratio it pins re-measured at 4.7x against the 3x threshold).
+
+## [1.0.5] - 2026-10-14
+Polish round 5: lite-language depth pass 2, MCP parity for the
+read-only insights, and the manual's restructure into a landing
+page plus `docs/`. Audit: `audits/POLISH_105_audit.md`.
+
+### Fixed
+- **Rust type declarations with multi-line `where` clauses.**
+  The type-side twin of the v1.0.4 impl fix: a trait or struct
+  whose block brace follows a `where` clause got a span ending
+  at the first `;` inside its body, so trait methods never
+  enumerated (one leaked out as a parentless free function) and
+  struct bodies fell outside their spans. Outlines now find the
+  block brace the same way impls do; signatures mode renders
+  such types whole instead of dropping the header (or, for
+  structs, the type entirely). `;`-terminated declarations
+  (unit/tuple structs) keep their statement spans and are kept
+  verbatim in signatures mode like their braced siblings.
+- **C# records are real containers.** `record struct` /
+  `record class` were outlined under the names "struct" /
+  "class" (the name capture took the second kind word); record
+  bodies never enumerated their members at all. Records now
+  name correctly and enumerate methods like classes (the type
+  itself still renders whole, the declaration-type rule).
+- **Allman braces in Java/C# outlines and signatures.** A
+  declaration whose brace sits on its own line (the C#
+  default style) got a span ending at its first member's `;`:
+  no member of any Allman class, interface, or record ever
+  enumerated, and signatures mode dropped the type whole.
+  Declaration and method-head spans now locate the block brace
+  before judging a declaration a statement.
+- **Expression-bodied methods (C#) are recognised.** A method
+  shaped `public double Perimeter() => 4.0;` matched no method
+  pattern: invisible to outlines and dropped by signatures
+  mode. The method pattern now accepts the `=> ...;` ending;
+  expression braces (string interpolation, lambdas) are never
+  mistaken for a body brace.
+- **PHP 8 enums keep their cases.** An enum's cases — its
+  whole value surface — were dropped by signatures and
+  interfaces modes (the enum was members-reduced like a class)
+  and could not be named for symbol selection. Enums are
+  declaration types now (rendered whole, like interfaces and
+  traits), and their cases are named constants in the outline.
+
+### Added
+- **MCP tools for the read-only insights that had no route:**
+  `project_graph` (import/entry graph summary: entry points,
+  per-file imports/importers/external dependencies, unreachable
+  files; adjacency capped at 100 files with totals and
+  truncation flags), `project_history` (the savings-ledger
+  analytics with the v1.0.3 `since`/`top` filters and p50/p90
+  percentiles; the raw ledger records are omitted and per-run
+  detail capped at the 50 most recent runs), and `doctor` (the
+  ten health checks as data — doctor never writes, so it fits
+  the read-only surface). The tool surface is now nine tools;
+  stateful/writing operations stay CLI-only.
+
+### Documentation
+- **The README is a landing page; the manual lives in `docs/`.**
+  The README carried everything at 75,491 bytes (25,279
+  estimated tokens by `ghostslice.tokens`) and tripped the
+  tool's own L001 oversize warning. It now keeps the pitch,
+  install, quickstart, the feature map, the flagship
+  scan/slice/export dives, troubleshooting (with the
+  known-warnings note, now four warnings — the L001 is fixed,
+  not explained), tests, and the layout map, at 15,638 bytes
+  (5,328 estimated tokens). The deep reference
+  moved verbatim into `docs/` (commands, profiles, history,
+  operations, dashboard, languages, plugins, reference); no
+  content was lost (heading inventory and body coverage are
+  verified mechanically, and every cross-reference link
+  resolves).
+
+## [1.0.4] - 2026-10-14
+Polish round 4: hardening and depth. The cyclic-symlink sweep
+reaches the surfaces the v0.21 fuzz round never covered, the
+Go/Rust lite parsers learn generics, and watch re-applies plugin
+changes. Audit: `audits/POLISH_104_audit.md`.
+
+### Fixed
+- **Workspace detection no longer follows directory symlinks.**
+  A declared member reached through a directory symlink — one
+  escaping the project root, or aliasing an ancestor of a real
+  member — was reported as a package even though the scanner
+  never descends into symlinked directories and it could never
+  own a file. Detection now accepts only real directories (the
+  same rule the walk uses), skips such members with a warning
+  naming each, and the manifest fallback no longer reports
+  phantom packages through symlinked children. The dashboard,
+  CI, watch, and the MCP server were swept with cyclic-symlink
+  fixtures and pinned safe: everything terminates, and the
+  dashboard still never serves file content from outside the
+  project root.
+- **Go generics in symbol outlines and signatures mode.**
+  Generic functions (`func Map[T any, U any](...)`) were
+  invisible to outlines, `slice --symbols`, task-selection name
+  extraction, and signatures mode. Methods on multi-parameter
+  generic receivers were attributed to a garbage parent
+  (`Pair[K, V]`'s methods to `V]`) because the receiver type was
+  split on whitespace; they now parent to the base type.
+  Generic type declarations (`type Stack[T any] struct`) render
+  in signatures mode, and generic interface methods are
+  enumerated as symbols.
+- **Rust impl headers with nested generics and `where`
+  clauses.** An impl whose generic bounds contain an
+  associated-type binding (`impl<I: Iterator<Item = u8>>
+  Wrapper<I>`) was named `>` and its methods parented to it;
+  generic spans are now stripped nesting-aware. An impl whose
+  opening brace follows a multi-line `where` clause was not a
+  region at all (its methods outlined as parentless free
+  functions); the impl's brace is now found, not assumed.
+
+### Added
+- **Watch plugin reload.** With the CLI's watch session, plugin
+  changes now take effect without a restart: editing the
+  profile's `plugins` list or a plugin file's bytes re-runs the
+  startup load (same validation and containment) at the next
+  poll, and the new set replaces the active one atomically when
+  its digest differs — so exports after the swap derive under
+  the new set's cache namespace. Swaps are announced on the
+  watch stream with the trust warning; a failed load keeps the
+  last-good set, reports once per distinct bad content, and
+  recovers when fixed. The session summary gains a
+  `plugin_reloads` count.
+
+## [1.0.3] - 2026-10-14
+Polish round 3: responsiveness and reach. The dashboard stops
+charging its first graph request for the call-graph build, the
+graph command joins the cache, history learns filters and
+percentiles, and watch stops ignoring profile edits. Audit:
+`audits/POLISH_103_audit.md`.
+
+### Added
+- **History filters and percentiles.** `ghostslice history`
+  gains `--top N` (the N runs with the largest savings, largest
+  first) and `--since WHEN` (an ISO date, an ISO datetime, or a
+  relative form like `7d`). The filters compose; totals, trend,
+  and stats then describe exactly the runs shown, the text
+  output says so on a `Filter:` line, and the JSON payload
+  gains a `filter` block (additive; absent without flags).
+  Records with unparseable timestamps are excluded by `--since`
+  and counted, never silently kept or dropped. The aggregates
+  gain a `percentiles` block (p50/p90 of per-run before / after
+  / saved estimated tokens, linear interpolation), printed in
+  the `--trend` stats; an empty history reports nulls, not
+  invented zeros.
+- **Watch profile reload.** `ghostslice watch` now notices
+  changes to the profile file (the project's `.ghostslice.json`,
+  or whatever file the session's profile was loaded from) and
+  applies a valid new profile to subsequent scans and exports
+  without a restart — including a profile created mid-watch.
+  Detection is by content hash, so a bare `touch` reloads
+  nothing. An invalid edit keeps the last-good profile, is
+  reported once per distinct bad content, and recovers
+  automatically when fixed; deleting the file reverts to the
+  built-in defaults. The session summary gains a
+  `profile_reloads` count. The profile's `plugins` list is not
+  re-applied (process state from startup; changing it still
+  needs a restart).
+
+### Changed
+- **Dashboard call-graph warm-up.** `serve` starts building the
+  `/api/graph` call payload on a background daemon thread at
+  startup, so the first graph request usually finds it ready
+  (on this repo the lazy build measured ~3.3s; a warm-started
+  first request is a memo hit). The payload is byte-identical
+  to the lazy one, requests that arrive mid-build receive the
+  same final payload, and a build failure is recorded and
+  surfaces on the graph request exactly as the lazy failure
+  did — never swallowed by the warm-up thread.
+- **Graph command uses the cache.** `ghostslice graph` opens
+  the persistent content cache under the active plugin digest
+  (scan records + the dead-symbol pass's outlines) and gains
+  `--no-cache`, matching scan/lint/calls. Output is
+  byte-identical cached or not (pinned on fixtures, on this
+  repo, and across a plugin edit). The import-graph walk
+  itself still reads file text directly, as the call graph's
+  ast walk does.
+
+## [1.0.2] - 2026-10-14
+Polish round 2: integration, performance, and config. The
+persistent cache reaches the two commands that never used it,
+the dashboard learns call relationships, and the duplicate
+floors become settings. Audit: `audits/POLISH_102_audit.md`.
+
+### Added
+- **Call data in the dashboard graph.** `GET /api/graph` now
+  carries a `"calls"` payload: Python symbols with their call
+  edges (callers/callees from the call graph), computed on the
+  first request and kept for the server run. A new Call graph
+  panel under the slice preview lists the selected file's
+  symbols with who calls each one, what each one calls, and a
+  "possibly dead" tag. Edges are capped at 2,000 and dead
+  candidates at 200 (true totals and truncation flags are
+  reported, and the panel repeats the caveat); non-Python files
+  honestly show no call data. Rendering stays textContent-only.
+- **Configurable duplicate floors.** Two `.ghostslice.json`
+  sections, validated as loudly as the `"lint"` section
+  (unknown keys and non-positive or fractional values are load
+  errors): `"duplicates": {"near_min_chars": N}` moves the
+  near-duplicate size floor (default 200 normalized
+  characters) and `"ci": {"duplicates_floor_tokens": N}` moves
+  the CI duplicates gate floor (default 500 recoverable
+  estimated tokens). Unset means the historical defaults on
+  every surface; the init wizard documents both keys and the
+  CI check reports the effective floor it used.
+
+### Changed
+- **`lint` and `calls` use the content cache.** Their scans,
+  the slices lint prices, and the call graph's per-file
+  outlines route through `.ghostslice-cache` with the export
+  path's discipline (content-hash keys, plugin-digest
+  namespacing, corrupt entries read as misses), and both
+  commands gain `--no-cache`. Output is byte-identical with
+  the cache off, cold, or warm (pinned on fixtures and on this
+  repo; on this repo warm lint runs ~27% faster and warm calls
+  ~18%). Duplicate detection is not cached (the cache has no
+  kind for normalized text). The `scan` command's dead-symbol
+  pass now reuses the cache scan already opens. The dashboard,
+  MCP, and `ci` keep their no-disk-cache behaviour.
+
+## [1.0.1] - 2026-10-13
+Polish release: no new features — the tool run on itself, and
+its own findings fixed. Audit: `audits/POLISH_101_audit.md`.
+
+### Fixed
+- **One price table.** `prices.json` existed twice (repo root and
+  inside the package), byte-identical and both exported (lint
+  L004). The repo-root copy is removed: `src/ghostslice/prices.json`
+  is the single source of truth (it is the copy shipped as package
+  data), the loader's checkout-root candidate is gone, and the
+  table is pretty-printed for hand-editing, which also removes
+  its giant-lines (L006) shape. A `prices.json` in the current
+  directory still overrides for that run, as before. Self-lint on
+  this repo: 7 warnings -> 5 (the two price-table warnings are
+  fixed; one new L001 appeared because this round's notes pushed
+  README.md just over the oversize threshold), the rest
+  explained in README "Known warnings on this repo".
+- **Call graph: plugin modules and public classes are roots.**
+  `calls --dead` flagged 10 false positives on this repo: the
+  example Lua plugin's functions (invoked by the plugin loader,
+  invisible to import reachability), the `PluginAPI` methods (the
+  surface a plugin's `register()` receives), and textio's public
+  `read_text_with_encoding`. The analyzer now roots the plugin
+  contract's entry points in any module presenting the contract
+  (a top-level `register`, or LANGUAGE/EXTENSIONS plus
+  `slice_text`) and the direct methods of classes named in a
+  module's `__all__`. Only the contract/public surface is rooted:
+  a genuinely dead helper inside a plugin file still flags.
+  textio also gained an explicit `__all__`. This repo now reports
+  0 dead candidates.
+- **Dashboard: no innerHTML anywhere.** The pre-existing file
+  table and prune recommendations rendered file paths through
+  `innerHTML` (the G17 preview/what-if surfaces already used
+  textContent). Rows, totals, recommendations, and treemap
+  labels are now built with createElement + textContent; a file
+  named with HTML metacharacters displays inertly. No visual
+  change.
+
+### Checked, no change
+- Consistency sweep: all 80 CLI help strings verified (verb
+  phrases, no trailing periods — the one capital start is the
+  acronym "CI"), README's feature map re-verified against
+  `--help` (25 commands, one line each), and probed error
+  messages (unknown model, missing project, bad budget, missing
+  cache) all exit 2 naming the problem and, where one exists,
+  the remedy.
+
 ## [1.0.0] - 2026-10-13
 The marathon release: GhostSlice 1.0 is the tool the twenty-goal
 run set out to build — a zero-dependency context optimizer that

@@ -368,7 +368,10 @@ def test_self_run_on_this_repo_exits_0():
 
 
 def test_dogfood_budget_passes_on_this_repo():
-    payload = run_ci(REPO, budget=180000)
+    # The budget value is the dogfood workflow's (180,000 through
+    # v1.0.4; re-measured and bumped to 230,000 in v1.0.5 when the
+    # sliced total reached 99.9% of it — see the workflow comment).
+    payload = run_ci(REPO, budget=230000)
     assert _status(payload, "budget") == "pass"
     assert _status(payload, "fit") == "pass"
     assert payload["exit_code"] == 0
@@ -398,6 +401,6 @@ def test_dogfood_workflow_structure():
     text = DOGFOOD.read_text(encoding="utf-8")
     assert "\t" not in text
     assert "ghostslice ci" in text
-    assert "--budget 180000" in text
+    assert "--budget 230000" in text
     assert "PYTHONPATH=src" in text
     assert "actions/checkout@v4" in text

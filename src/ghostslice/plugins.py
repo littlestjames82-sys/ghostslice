@@ -21,7 +21,7 @@ places:
 Every load is announced on stderr by the CLI, with the trust
 warning, so a plugin never loads silently.
 
-Contract — two styles, both documented in README "Plugins":
+Contract — two styles, both documented in docs/plugins.md:
 
   1. Module attributes:
        LANGUAGE = "lua"
