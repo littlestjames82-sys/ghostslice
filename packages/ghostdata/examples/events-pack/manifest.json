@@ -1,0 +1,113 @@
+{
+  "tool": "ghostdata",
+  "version": "0.1.0",
+  "generated_at": "2026-10-14T13:31:22Z",
+  "source": {
+    "file": "events.jsonl",
+    "format": "jsonl",
+    "bytes": 508,
+    "sha256": "d8eb0db32c0f2d42cd11117515ccab2a77fb1072830201b8d723d1c93835219c"
+  },
+  "counts": {
+    "rows_parsed": 5,
+    "rows_malformed": 0,
+    "rows_total": 5,
+    "blank_lines": 0,
+    "malformed_examples": [],
+    "truncated": false
+  },
+  "columns": [
+    {
+      "name": "ts",
+      "type": "date",
+      "types_seen": {
+        "date": 5
+      },
+      "null_count": 0,
+      "null_rate": 0.0,
+      "distinct_count": 5,
+      "distinct_capped": false,
+      "redacted": false,
+      "min_length": 19,
+      "max_length": 19
+    },
+    {
+      "name": "event",
+      "type": "string",
+      "types_seen": {
+        "string": 5
+      },
+      "null_count": 0,
+      "null_rate": 0.0,
+      "distinct_count": 3,
+      "distinct_capped": false,
+      "redacted": false,
+      "min_length": 5,
+      "max_length": 6
+    },
+    {
+      "name": "user_id",
+      "type": "integer",
+      "types_seen": {
+        "integer": 5
+      },
+      "null_count": 0,
+      "null_rate": 0.0,
+      "distinct_count": 4,
+      "distinct_capped": false,
+      "redacted": false,
+      "min": 101,
+      "max": 104
+    },
+    {
+      "name": "api_token",
+      "type": "string",
+      "types_seen": {
+        "string": 5
+      },
+      "null_count": 0,
+      "null_rate": 0.0,
+      "distinct_count": 4,
+      "distinct_capped": false,
+      "redacted": true,
+      "redaction_reason": "column name matches token",
+      "min": null,
+      "max": null
+    }
+  ],
+  "redaction": {
+    "enabled": true,
+    "columns": [
+      {
+        "name": "api_token",
+        "reason": "column name matches token"
+      }
+    ]
+  },
+  "sample": {
+    "file": "files/events.sample.jsonl",
+    "rows": 5,
+    "size_requested": 60,
+    "strategy": "all rows (file smaller than sample size)",
+    "strategy_counts": {
+      "head": 5,
+      "tail": 0,
+      "spaced": 0,
+      "all_rows": true
+    },
+    "row_indices": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "sha256": "64e82835e154db9e92bd23290d2b0fa89139c39e5c2abbcdb0725ff23a5df499"
+  },
+  "tokens": {
+    "sample_estimate": 240,
+    "full_file_estimate": 245,
+    "method": "estimates (BPE-like split v2, per-language calibrated, not exact tokenizer counts)",
+    "note": "estimates, not counts; full-file figure is a chunked sum over the streamed file"
+  }
+}

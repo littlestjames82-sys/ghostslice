@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ghostpacks"
+version = "0.1.0"
+description = "Shareable, data-only GhostSlice context profile packs: format, lint, and a local manager. No network, no code installation."
+readme = "PLAN.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+ghostpacks = "ghostpacks.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

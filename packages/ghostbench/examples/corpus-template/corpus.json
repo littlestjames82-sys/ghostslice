@@ -1,0 +1,25 @@
+{
+  "description": "Copy this folder, rename the corpus, point projects[0].path at your project (relative to this file, or absolute), and replace the example task. See the GhostBench README, Corpus format section. expected_files and expected_symbols are scoring hints: extra files touched by a real fix are not auto-failures. Delete this description and write your own.",
+  "name": "my-corpus",
+  "projects": [
+    {
+      "id": "my-project",
+      "path": "project",
+      "tasks": [
+        {
+          "expected_files": [
+            "src/example.py"
+          ],
+          "expected_symbols": [
+            "example_function"
+          ],
+          "id": "my-001-first-task",
+          "prompt": "Describe one real task an agent should complete on this project.",
+          "recorded_patch": null,
+          "test_command": "python3 -m pytest -q"
+        }
+      ]
+    }
+  ],
+  "version": "1"
+}

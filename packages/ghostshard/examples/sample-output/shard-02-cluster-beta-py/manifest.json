@@ -1,0 +1,17 @@
+{
+  "tool": "ghostshard-bundle",
+  "ghostshard_version": "0.1.0",
+  "shard_id": "shard-02-cluster-beta-py",
+  "files": [
+    {
+      "path": "beta/beta.py",
+      "mode": "full",
+      "original_tokens": 329,
+      "sliced_tokens": 329,
+      "sha256": "b5d07e9bcf4c9ba0f419e2a1671cd0fb179faaed1244ed376b4e76c2f0fa8f23"
+    }
+  ],
+  "total_original_tokens": 329,
+  "total_sliced_tokens": 329,
+  "estimator": "token counts are estimates (GhostSlice-style raw estimator), not exact tokenizer counts"
+}

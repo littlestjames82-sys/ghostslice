@@ -1,0 +1,23 @@
+{
+  "kind": "ghostbus-job-manifest",
+  "ghostshard_version": "0.1.0",
+  "note": "File only. GhostShard never sends this; hand it to GhostBus at a separate gate.",
+  "jobs": [
+    {
+      "job_id": "shard-01-cluster-alpha-py",
+      "bundle_path": "shard-01-cluster-alpha-py",
+      "task": "(generated) graph cluster owning: alpha/alpha.py",
+      "depends_on": [],
+      "approval_class": "placeholder-seatbelt-review",
+      "dispatch": false
+    },
+    {
+      "job_id": "shard-02-cluster-beta-py",
+      "bundle_path": "shard-02-cluster-beta-py",
+      "task": "(generated) graph cluster owning: beta/beta.py",
+      "depends_on": [],
+      "approval_class": "placeholder-seatbelt-review",
+      "dispatch": false
+    }
+  ]
+}

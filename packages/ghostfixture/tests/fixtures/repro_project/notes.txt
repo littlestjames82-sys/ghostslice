@@ -1,0 +1,3 @@
+Scratch notes for the fixture project. Not code, not referenced
+by the bundle, not imported by anything. Must not appear in a
+minimal repro project.

@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ghostlift"
+version = "0.1.0"
+description = "Lift compiled and minified artifacts back to readable source GhostSlice can slice. Static analysis only, zero dependencies."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Ghost Developer Studio" }]
+keywords = ["decompiler", "source-map", "pyc", "bytecode", "context-engineering", "llm"]
+
+[project.scripts]
+ghostlift = "ghostlift.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

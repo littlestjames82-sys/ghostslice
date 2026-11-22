@@ -1,0 +1,30 @@
+{
+  "tool": "ghostslice",
+  "version": "1.0.6",
+  "generated_at": "2026-10-14T00:00:00+00:00",
+  "root": "/home/hatch/workspace/ghostfixture/examples/demo_project",
+  "token_method": "example estimate (chars/4), demo bundle only",
+  "files": [
+    {
+      "path": "demo/pricing.py",
+      "mode": "full",
+      "language": "python",
+      "package": null,
+      "original_tokens": 66,
+      "sliced_tokens": 66,
+      "sha256": "423e4a44b3ba409f31d40e5314bcf9c140b33b114a6f63faf8a2aeb59a67a651"
+    },
+    {
+      "path": "demo/keys.py",
+      "mode": "full",
+      "language": "python",
+      "package": null,
+      "original_tokens": 69,
+      "sliced_tokens": 69,
+      "sha256": "11739e63cbeecbcd940b7b3fddecd842b423e35b4502bc12a07ffc22e7b0f8d3"
+    }
+  ],
+  "total_original_tokens": 135,
+  "total_sliced_tokens": 135,
+  "total_saved_tokens": 0
+}

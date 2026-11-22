@@ -1,0 +1,3 @@
+name,trade,town,phone,email,has_website,website_status,google_profile,rating,notes,source
+Impossible Stars Diner,Diner,Exampleton,423-555-0161,,false,none,unclaimed,7.5,FICTIONAL row with an out of range rating,fictional-example
+Valid Fictional Diner,Diner,Exampleton,423-555-0162,,false,none,unclaimed,4.1,FICTIONAL example business not a real business,fictional-example

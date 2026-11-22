@@ -1,0 +1,12 @@
+diff --git a/feature.py b/feature.py
+new file mode 100644
+index 0000000..9999999
+--- /dev/null
++++ b/feature.py
+@@ -0,0 +1,7 @@
++"""New feature module."""
++
++
++def greet(name):
++    """Return a greeting."""
++    return f"hello {name}"

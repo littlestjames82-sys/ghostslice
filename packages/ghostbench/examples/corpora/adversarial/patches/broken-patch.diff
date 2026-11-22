@@ -1,0 +1,10 @@
+--- a/shop/router.py
++++ b/shop/router.py
+@@ -8,11 +8,11 @@
+-from .helpers import dispatch, dispatch_table
++from .helpers import dispatch, dispatch_table, dispatch_v2
+ 
+ 
+ def route(route_name):
+-    return dispatch(route_name)
++    return dispatch_v2(route_name)

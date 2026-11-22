@@ -1,0 +1,14 @@
+diff --git a/pricing.py b/pricing.py
+index 1111111..2222222 100644
+--- a/pricing.py
++++ b/pricing.py
+@@ -1,9 +1,3 @@
+ """Pricing rules for the mini fixture project."""
+ 
+ TAX_RATE = 0.08
+-
+-
+-def compute_total(items):
+-    """Sum item prices and apply the tax rate."""
+-    subtotal = sum(items)
+-    return subtotal * (1 + TAX_RATE)

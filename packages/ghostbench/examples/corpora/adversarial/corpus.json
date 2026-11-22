@@ -1,0 +1,63 @@
+{
+  "description": "Small adversarial project built for GhostBench. Planted traps: pricing.py and pricing_copy.py are byte-identical duplicates; rates_old.py and rates_new.py are near-duplicates; shop/helpers.py is a small generic-looking file every routing call goes through; the recorded patch for adv-002 references a missing symbol and ships with a GhostVerify report predicting a hard gap, so it must surface as a visible failure; DECISIONS.md holds one SUPERSEDED and one CURRENT decision for Recall runs.",
+  "name": "adversarial",
+  "projects": [
+    {
+      "id": "adversarial",
+      "path": "project",
+      "tasks": [
+        {
+          "expected_files": [
+            "shop/helpers.py"
+          ],
+          "expected_symbols": [
+            "dispatch"
+          ],
+          "id": "adv-001-fix-missing-route",
+          "prompt": "Change the fallback handler name for an unknown route from render_missing to render_not_found.",
+          "recorded_patch": "patches/good-patch.diff",
+          "test_command": "python3 -m pytest project -q"
+        },
+        {
+          "expected_files": [
+            "shop/router.py",
+            "shop/helpers.py"
+          ],
+          "expected_symbols": [
+            "route",
+            "dispatch"
+          ],
+          "id": "adv-002-broken-patch-missing-symbol",
+          "prompt": "Route requests through a v2 dispatcher.",
+          "recorded_patch": "patches/broken-patch.diff",
+          "test_command": "python3 -m pytest project -q",
+          "verify_report": "verify/adv-002-gap.json"
+        },
+        {
+          "expected_files": [
+            "DECISIONS.md"
+          ],
+          "expected_symbols": [],
+          "id": "adv-003-recall-current-decision",
+          "prompt": "Where should the job queue be stored?",
+          "recorded_patch": null,
+          "suite_note": "Recall task: DECISIONS.md Decision 1 is SUPERSEDED by Decision 2 (CURRENT). Serving the superseded decision as current fails this task in a Recall run. Tier A cannot score it: expected status unknown.",
+          "test_command": null
+        },
+        {
+          "expected_files": [
+            "shop/pricing.py"
+          ],
+          "expected_symbols": [
+            "price_order"
+          ],
+          "id": "adv-004-dedupe-pricing",
+          "prompt": "Remove duplicated pricing logic so there is one pricing module.",
+          "recorded_patch": null,
+          "test_command": "python3 -m pytest project -q"
+        }
+      ]
+    }
+  ],
+  "version": "0.1.0"
+}

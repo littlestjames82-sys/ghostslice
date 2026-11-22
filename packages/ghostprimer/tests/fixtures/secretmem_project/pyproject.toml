@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "secretmem"
+version = "0.1.0"
+description = "Project whose agent instructions hide a planted secret."
+
+[project.scripts]
+secretmem = "secretmem.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

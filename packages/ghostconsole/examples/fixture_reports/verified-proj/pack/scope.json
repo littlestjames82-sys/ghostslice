@@ -1,0 +1,24 @@
+{
+  "base": "HEAD~1",
+  "head": "HEAD",
+  "files": [
+    {
+      "path": "shared.py",
+      "distance": 0,
+      "mode": "full",
+      "changed_symbols": [
+        "compute_total"
+      ],
+      "direct_callers": 6,
+      "risk": 50,
+      "risk_reasons": [
+        "exported API",
+        "6 callers"
+      ],
+      "covering_tests": [
+        "tests/test_shared.py"
+      ]
+    }
+  ],
+  "notes": []
+}

@@ -1,0 +1,6 @@
+id,name,age,score,active,joined,email,password_hash,contact,payment,ref
+1,Alice,30,91.5,true,2024-01-15,alice@canary.invalid,CANARY_PWHASH_ALICE,alice.work@canary.invalid,4111111111111111,078-05-1120
+2,Bob,25,88.0,true,2024-02-20,bob@canary.invalid,CANARY_PWHASH_BOB,bob.work@canary.invalid,4111111111111111,078-05-1120
+3,Carol,,77.25,false,2024-03-05,carol@canary.invalid,CANARY_PWHASH_CAROL,carol.work@canary.invalid,4111111111111111,078-05-1120
+4,Dave,41,,true,,dave@canary.invalid,CANARY_PWHASH_DAVE,dave.work@canary.invalid,4111111111111111,078-05-1120
+5,Eve,35,100.0,false,2024-05-30,eve@canary.invalid,CANARY_PWHASH_EVE,eve.work@canary.invalid,4111111111111111,078-05-1120

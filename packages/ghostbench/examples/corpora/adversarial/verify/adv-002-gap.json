@@ -1,0 +1,8 @@
+{
+  "verdict": "insufficient",
+  "hard_gaps": [
+    {"file": "shop/helpers.py", "symbol": "dispatch_v2", "severity": "hard",
+     "reason": "the recorded patch imports and calls dispatch_v2, which does not exist in shop/helpers.py"}
+  ],
+  "soft_gaps": []
+}

@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ghostrecipes"
+version = "0.1.0"
+description = "Versioned, data-only workflow recipes: create, list, show, validate, export/import packs, and render checklists. Local only; recipes are never executed by this tool."
+readme = "PLAN.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+ghostrecipes = "ghostrecipes.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,38 @@
+{
+  "root": "sample-project",
+  "generated_at": "2026-10-14T00:00:00Z",
+  "token_method": "fixture-estimate-chars4",
+  "total_original_tokens": 344,
+  "total_sliced_tokens": 344,
+  "total_saved_tokens": 0,
+  "files": [
+    {
+      "path": "src/app.py",
+      "mode": "full",
+      "original_tokens": 74,
+      "sliced_tokens": 74,
+      "sha256": "67ef599ee8078910c998a3e07a72c5571022a30c1a9379f43821c7fab509d955"
+    },
+    {
+      "path": "src/hot.py",
+      "mode": "full",
+      "original_tokens": 67,
+      "sliced_tokens": 67,
+      "sha256": "c34020ea87ec8d00165cd11c5af5fc652aff76ba977be365bccab4d1c7d2af20"
+    },
+    {
+      "path": "src/legacy.py",
+      "mode": "full",
+      "original_tokens": 86,
+      "sliced_tokens": 86,
+      "sha256": "e38ca5abb2218a8e5503c17ce365d827b820faf9246bb761cf632c3c68ff3861"
+    },
+    {
+      "path": "src/util.py",
+      "mode": "full",
+      "original_tokens": 117,
+      "sliced_tokens": 117,
+      "sha256": "c49941ca427fb5225afa9ec67130631b379bbdd53e7a22b68dd4e8229e7f11bf"
+    }
+  ]
+}

@@ -1,0 +1,200 @@
+{
+  "by_agent": {
+    "builder-a": {
+      "actual_tokens_with_estimate": 62770,
+      "cost_estimate_usd": 0.20031,
+      "entries": 3,
+      "entries_with_cost": 3,
+      "entries_with_estimate": 3,
+      "estimate_delta_tokens": 800,
+      "estimate_vs_actual_ratio": 1.0129,
+      "estimated_tokens": 61970,
+      "input_tokens": 60970,
+      "loop_warnings": 0,
+      "output_tokens": 1800,
+      "total_tokens": 62770
+    },
+    "builder-b": {
+      "actual_tokens_with_estimate": 18100,
+      "cost_estimate_usd": 0.0654,
+      "entries": 4,
+      "entries_with_cost": 3,
+      "entries_with_estimate": 4,
+      "estimate_delta_tokens": -1100,
+      "estimate_vs_actual_ratio": 0.9427,
+      "estimated_tokens": 19200,
+      "input_tokens": 16200,
+      "loop_warnings": 0,
+      "output_tokens": 1900,
+      "total_tokens": 18100
+    },
+    "loopy-agent": {
+      "actual_tokens_with_estimate": 3600,
+      "cost_estimate_usd": 0.0132,
+      "entries": 1,
+      "entries_with_cost": 1,
+      "entries_with_estimate": 1,
+      "estimate_delta_tokens": 2600,
+      "estimate_vs_actual_ratio": 3.6,
+      "estimated_tokens": 1000,
+      "input_tokens": 3400,
+      "loop_warnings": 1,
+      "output_tokens": 200,
+      "total_tokens": 3600
+    }
+  },
+  "by_day": {
+    "2026-10-13": {
+      "actual_tokens_with_estimate": 63570,
+      "cost_estimate_usd": 0.21531,
+      "entries": 4,
+      "entries_with_cost": 4,
+      "entries_with_estimate": 4,
+      "estimate_delta_tokens": -2400,
+      "estimate_vs_actual_ratio": 0.9636,
+      "estimated_tokens": 65970,
+      "input_tokens": 61270,
+      "loop_warnings": 0,
+      "output_tokens": 2300,
+      "total_tokens": 63570
+    },
+    "2026-10-14": {
+      "actual_tokens_with_estimate": 20900,
+      "cost_estimate_usd": 0.0636,
+      "entries": 4,
+      "entries_with_cost": 3,
+      "entries_with_estimate": 4,
+      "estimate_delta_tokens": 4700,
+      "estimate_vs_actual_ratio": 1.2901,
+      "estimated_tokens": 16200,
+      "input_tokens": 19300,
+      "loop_warnings": 1,
+      "output_tokens": 1600,
+      "total_tokens": 20900
+    }
+  },
+  "by_model": {
+    "claude-sonnet": {
+      "actual_tokens_with_estimate": 77370,
+      "cost_estimate_usd": 0.27891,
+      "entries": 5,
+      "entries_with_cost": 5,
+      "entries_with_estimate": 5,
+      "estimate_delta_tokens": 3600,
+      "estimate_vs_actual_ratio": 1.0488,
+      "estimated_tokens": 73770,
+      "input_tokens": 73470,
+      "loop_warnings": 1,
+      "output_tokens": 3900,
+      "total_tokens": 77370
+    },
+    "local": {
+      "actual_tokens_with_estimate": 4200,
+      "cost_estimate_usd": 0.0,
+      "entries": 2,
+      "entries_with_cost": 2,
+      "entries_with_estimate": 2,
+      "estimate_delta_tokens": -3200,
+      "estimate_vs_actual_ratio": 0.5676,
+      "estimated_tokens": 7400,
+      "input_tokens": 4200,
+      "loop_warnings": 0,
+      "output_tokens": 0,
+      "total_tokens": 4200
+    },
+    "mystery-model": {
+      "actual_tokens_with_estimate": 2900,
+      "cost_estimate_usd": 0,
+      "entries": 1,
+      "entries_with_cost": 0,
+      "entries_with_estimate": 1,
+      "estimate_delta_tokens": 1900,
+      "estimate_vs_actual_ratio": 2.9,
+      "estimated_tokens": 1000,
+      "input_tokens": 2900,
+      "loop_warnings": 0,
+      "output_tokens": 0,
+      "total_tokens": 2900
+    }
+  },
+  "by_project": {
+    "demo-shop": {
+      "actual_tokens_with_estimate": 10800,
+      "cost_estimate_usd": 0.0282,
+      "entries": 4,
+      "entries_with_cost": 4,
+      "entries_with_estimate": 4,
+      "estimate_delta_tokens": -600,
+      "estimate_vs_actual_ratio": 0.9474,
+      "estimated_tokens": 11400,
+      "input_tokens": 10100,
+      "loop_warnings": 1,
+      "output_tokens": 700,
+      "total_tokens": 10800
+    },
+    "ghostbus": {
+      "actual_tokens_with_estimate": 73670,
+      "cost_estimate_usd": 0.25071,
+      "entries": 4,
+      "entries_with_cost": 3,
+      "entries_with_estimate": 4,
+      "estimate_delta_tokens": 2900,
+      "estimate_vs_actual_ratio": 1.041,
+      "estimated_tokens": 70770,
+      "input_tokens": 70470,
+      "loop_warnings": 0,
+      "output_tokens": 3200,
+      "total_tokens": 73670
+    }
+  },
+  "cost_note": "Costs are ESTIMATES from a local dated price table (as of 2026-10-12), never billed amounts.",
+  "generated_from": "sample-history.jsonl",
+  "loop_threshold": 3.0,
+  "loop_warnings": [
+    {
+      "agent": "loopy-agent",
+      "at": "2026-10-14T10:47:00+00:00",
+      "cost_estimate_usd": 0.0132,
+      "day": "2026-10-14",
+      "estimated_tokens": 1000,
+      "id": "led-007",
+      "input_tokens": 3400,
+      "kind": "manual",
+      "loop_threshold": 3.0,
+      "loop_warning": true,
+      "model": "claude-sonnet",
+      "note": "Exceeded 3x its estimate (3.6x). A warning, not a verdict: legitimate retries happen.",
+      "output_tokens": 200,
+      "price_table_as_of": "2026-10-12",
+      "project": "demo-shop",
+      "ratio": 3.6,
+      "source": "manual",
+      "source_ref": "",
+      "task": "retry-heavy refactor attempt",
+      "total_tokens": 3600
+    }
+  ],
+  "price_table_as_of": "2026-10-12",
+  "price_table_source": "local snapshot, NOT live prices",
+  "sample": true,
+  "sample_note": "SAMPLE format example only. Generated by hand from examples/sample-history.jsonl in the core summarise() shape; numbers are illustrative and were NOT produced by a live ledger import. Do not quote as measured spend.",
+  "tool": "ghostledger",
+  "totals": {
+    "actual_tokens_with_estimate": 84470,
+    "cost_estimate_usd": 0.27891,
+    "entries": 8,
+    "entries_with_cost": 7,
+    "entries_with_estimate": 8,
+    "estimate_delta_tokens": 2300,
+    "estimate_vs_actual_ratio": 1.028,
+    "estimated_tokens": 82170,
+    "input_tokens": 80570,
+    "loop_warnings": 1,
+    "output_tokens": 3900,
+    "total_tokens": 84470
+  },
+  "unknown_models": [
+    "mystery-model"
+  ],
+  "version": "0.1.0"
+}

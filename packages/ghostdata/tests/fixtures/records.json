@@ -1,0 +1,1 @@
+[{"in_stock":true,"price":3.5,"sku":"A1","tags":["x","y"]},{"in_stock":false,"price":7.0,"sku":"A2","tags":["z"]},{"in_stock":true,"price":null,"sku":"A3","tags":[]}]

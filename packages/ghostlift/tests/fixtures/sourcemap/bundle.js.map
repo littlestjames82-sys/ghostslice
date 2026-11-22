@@ -1,0 +1,14 @@
+{
+  "version": 3,
+  "file": "bundle.js",
+  "sources": [
+    "src/greeting.js",
+    "src/math.js"
+  ],
+  "sourcesContent": [
+    "function greeting(name) {\n  return \"Hello, \" + name + \"!\";\n}\n\nfunction farewell(name) {\n  return \"Goodbye, \" + name + \".\";\n}\n",
+    "function add(a, b) {\n  return a + b;\n}\n\nfunction average(values) {\n  let total = 0;\n  for (const value of values) {\n    total += value;\n  }\n  return total / values.length;\n}\n"
+  ],
+  "names": [],
+  "mappings": ""
+}

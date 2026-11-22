@@ -1,0 +1,11 @@
+openapi: 3.0.3
+info:
+  title: Harbour Pets API (YAML form)
+  version: 1.4.0
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          description: A page of pets

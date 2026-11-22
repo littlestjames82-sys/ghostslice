@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "vscode-docs": {
+      "command": "python3",
+      "args": ["-m", "example_docs_server"],
+      "env": {}
+    }
+  }
+}

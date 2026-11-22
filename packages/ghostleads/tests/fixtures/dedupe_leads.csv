@@ -1,0 +1,5 @@
+name,trade,town,phone,email,has_website,website_status,google_profile,rating,notes,source
+Hilltop Quarry Hauling,Hauling,Exampleton,(423) 555-0142,,false,dead,unclaimed,3.7,FICTIONAL example business not a real business,fictional-example
+hilltop quarry hauling,Hauling,Sampleville,4235550142,owner@hilltopquarry.example,false,dead,unclaimed,3.7,FICTIONAL duplicate row with different phone formatting,fictional-example
+Solo Fictional Plumbing,Plumbing,Exampleton,423-555-0198,,false,none,unclaimed,,FICTIONAL example business not a real business,fictional-example
+,Plumbing,Exampleton,423-555-0100,,false,none,unclaimed,,FICTIONAL row with no name must be skipped,fictional-example

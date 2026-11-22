@@ -1,0 +1,4 @@
+{"ts": "2026-01-01T10:00:00", "user": "u1", "value": 10, "api_token": "CANARY_TOKEN_U1"}
+{"ts": "2026-01-01T10:01:00", "user": "u2", "value": 20, "api_token": "CANARY_TOKEN_U2"}
+{not json
+{"ts": "2026-01-01T10:03:00", "user": "u3", "value": 30, "api_token": "CANARY_TOKEN_U3"}

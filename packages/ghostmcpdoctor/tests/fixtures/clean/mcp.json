@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "docs-reader": {
+      "command": "python3",
+      "args": ["-m", "example_docs_server"],
+      "env": {
+        "EXAMPLE_MODE": "readonly"
+      }
+    }
+  }
+}

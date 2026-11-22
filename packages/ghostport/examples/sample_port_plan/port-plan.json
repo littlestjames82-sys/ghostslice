@@ -1,0 +1,42 @@
+{
+  "pack": "python-upgrade",
+  "project": "examples/demo_project",
+  "units": [
+    {
+      "id": "unit-legacy-storage",
+      "files": [
+        "legacy/storage.py"
+      ],
+      "patterns": [
+        "PYUP006"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": "unit-legacy-plugin-loader",
+      "files": [
+        "legacy/plugin_loader.py"
+      ],
+      "patterns": [
+        "PYUP004"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": "unit-legacy-report",
+      "files": [
+        "legacy/report.py"
+      ],
+      "patterns": [
+        "PYUP003"
+      ],
+      "depends_on": [
+        "unit-legacy-storage",
+        "unit-legacy-plugin-loader"
+      ]
+    }
+  ],
+  "blockers": [],
+  "not_covered_languages": [],
+  "_sample": "Illustrative sample of the plan format, not generated output."
+}

@@ -1,0 +1,48 @@
+{
+  "tool": "ghostbench",
+  "version": "0.1.0",
+  "run_id": "fixture-run-1",
+  "created_utc": "2026-10-14T08:10:00Z",
+  "tier": "A (static, no model, no spend)",
+  "tasks": [
+    {
+      "id": "task-1",
+      "project": "fixture",
+      "passed": true,
+      "status": "passed"
+    },
+    {
+      "id": "task-2",
+      "project": "fixture",
+      "passed": true,
+      "status": "passed"
+    },
+    {
+      "id": "task-3",
+      "project": "fixture",
+      "passed": true,
+      "status": "passed"
+    },
+    {
+      "id": "task-4",
+      "project": "fixture",
+      "passed": true,
+      "status": "passed"
+    },
+    {
+      "id": "task-5",
+      "project": "fixture",
+      "passed": true,
+      "status": "passed"
+    }
+  ],
+  "failures_visible": [
+    {
+      "project": "fixture",
+      "task": "task-1",
+      "failures": [
+        "verify predicted 1 hard gap"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+---
+description: GhostSlice context for src (converted by GhostConvert 0.1.0)
+globs: src/app.py, src/util.py
+alwaysApply: false
+---
+
+<!-- ghostconvert: target=cursor group=src -->
+
+# GhostSlice context: src
+
+Converted by GhostConvert 0.1.0 from a GhostSlice bundle (target: cursor). Do not edit the source bundle; regenerate from it instead.
+Project: sample_project
+Estimated tokens: 211 sliced (was 287, saved 76). Token counts are estimates from the source manifest (method: estimates (BPE-like split v2, per-language calibrated, not exact tokenizer counts)).
+Each file keeps its GhostSlice slice mode in its header. A file marked signatures, symbols, interfaces, or strip-tests is NOT the full source. See LOSSES.md in this output for what this format could not carry from the manifest.
+
+## File: src/app.py (mode: full)
+
+```python
+"""Demo application module."""
+
+
+def greet(name, punctuation="!"):
+    """Build a greeting for name."""
+    message = f"Hello, {name}{punctuation}"
+    return message
+
+
+def add(a, b):
+    return a + b
+
+
+class Pair:
+    def __init__(self, left, right):
+        self.left = left
+        self.right = right
+
+    def swap(self):
+        return Pair(self.right, self.left)
+```
+
+
+## File: src/util.py (mode: signatures)
+
+```python
+"""Utility helpers."""
+
+def clamp(value, low, high): ...
+```
+

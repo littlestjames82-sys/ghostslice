@@ -1,0 +1,38 @@
+{
+  "mcpServers": {
+    "filesystem-main": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/"],
+      "env": {}
+    },
+    "filesystem-copy": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/"],
+      "env": {}
+    },
+    "missing-tool": {
+      "command": "ghostmcp-nonexistent-binary-9f3k",
+      "args": ["--serve"],
+      "env": {}
+    },
+    "stale-script": {
+      "command": "python3",
+      "args": ["./definitely_missing_script_9f3k.py"],
+      "env": {}
+    },
+    "secret-server": {
+      "command": "python3",
+      "args": ["-m", "example_secret_server"],
+      "env": {
+        "FAKE_API_KEY": "FAKE-SECRET-CANARY-DOCTOR-7f3a9c-never-print",
+        "FAKE_TOKEN": "FAKE-TOKEN-CANARY-DOCTOR-51bd02-never-print",
+        "EXAMPLE_REGION": "example-region-1"
+      }
+    },
+    "shell-server": {
+      "command": "bash",
+      "args": ["-c", "echo example"],
+      "env": {}
+    }
+  }
+}

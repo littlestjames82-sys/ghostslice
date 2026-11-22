@@ -1,0 +1,73 @@
+{
+  "tool": "ghostshard",
+  "version": "0.1.0",
+  "mode": "auto-clustered",
+  "mode_label": "auto-clustered (heuristic graph clustering, not a designed split)",
+  "project": "shard-demo/project",
+  "partial": false,
+  "budget_tokens_per_shard": 60000,
+  "estimator": "token counts are estimates (GhostSlice-style raw estimator), not exact tokenizer counts",
+  "parallel_groups": [
+    [
+      "shard-01-cluster-alpha-py",
+      "shard-02-cluster-beta-py"
+    ]
+  ],
+  "max_parallelism": 2,
+  "conflicts": [],
+  "shards": [
+    {
+      "id": "shard-01-cluster-alpha-py",
+      "title": "cluster: alpha.py",
+      "task": "(generated) graph cluster owning: alpha/alpha.py",
+      "owns_files": [
+        "alpha/alpha.py"
+      ],
+      "owns_symbols": [
+        "alpha_summary",
+        "alpha_total",
+        "format_alpha_summary",
+        "parse_alpha_records"
+      ],
+      "shared_files_readonly": [],
+      "shared_symbols": [],
+      "depends_on": [],
+      "parallel_group": 0,
+      "rules_fired": [],
+      "seam_basis": "python-ast",
+      "bundle": "shard-01-cluster-alpha-py",
+      "estimated_tokens": 354,
+      "original_tokens": 354,
+      "unfittable": false
+    },
+    {
+      "id": "shard-02-cluster-beta-py",
+      "title": "cluster: beta.py",
+      "task": "(generated) graph cluster owning: beta/beta.py",
+      "owns_files": [
+        "beta/beta.py"
+      ],
+      "owns_symbols": [
+        "beta_export",
+        "beta_row_count",
+        "format_beta_csv",
+        "parse_beta_rows"
+      ],
+      "shared_files_readonly": [],
+      "shared_symbols": [],
+      "depends_on": [],
+      "parallel_group": 0,
+      "rules_fired": [],
+      "seam_basis": "python-ast",
+      "bundle": "shard-02-cluster-beta-py",
+      "estimated_tokens": 329,
+      "original_tokens": 329,
+      "unfittable": false
+    }
+  ],
+  "totals": {
+    "estimated_tokens": 683,
+    "original_tokens": 683,
+    "note": "totals are sums over per-shard bundle manifests; shared read-only files are counted once per shard that carries them"
+  }
+}

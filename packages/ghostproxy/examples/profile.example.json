@@ -1,0 +1,1 @@
+{"proxy":{"budget_tokens":20000,"enabled":true,"host":"127.0.0.1","port":8765,"upstream":"https://api.anthropic.com"}}

@@ -1,0 +1,69 @@
+{
+  "tool": "ghostshard",
+  "version": "0.1.0",
+  "mode": "user-split",
+  "mode_label": "user-split (heuristic assignment of user subtasks to files)",
+  "project": "cycle-fixture",
+  "partial": false,
+  "budget_tokens_per_shard": 60000,
+  "estimator": "token counts are estimates (GhostSlice-style raw estimator), not exact tokenizer counts",
+  "parallel_groups": [
+    [
+      "shard-a"
+    ],
+    [
+      "shard-b"
+    ]
+  ],
+  "max_parallelism": 1,
+  "conflicts": [],
+  "shards": [
+    {
+      "id": "shard-a",
+      "title": "Task A",
+      "task": "Task A",
+      "owns_files": [
+        "a.py"
+      ],
+      "owns_symbols": [],
+      "shared_files_readonly": [],
+      "shared_symbols": [],
+      "depends_on": [
+        "shard-b"
+      ],
+      "parallel_group": 0,
+      "rules_fired": [],
+      "seam_basis": "python-ast",
+      "bundle": "shard-a",
+      "estimated_tokens": 23,
+      "original_tokens": 23,
+      "unfittable": false
+    },
+    {
+      "id": "shard-b",
+      "title": "Task B",
+      "task": "Task B",
+      "owns_files": [
+        "b.py"
+      ],
+      "owns_symbols": [],
+      "shared_files_readonly": [],
+      "shared_symbols": [],
+      "depends_on": [
+        "shard-a"
+      ],
+      "parallel_group": 0,
+      "rules_fired": [],
+      "seam_basis": "python-ast",
+      "bundle": "shard-b",
+      "estimated_tokens": 23,
+      "original_tokens": 23,
+      "unfittable": false
+    }
+  ],
+  "totals": {
+    "estimated_tokens": 46,
+    "original_tokens": 46,
+    "note": "hand-built cycle fixture: shard-a and shard-b depend on each other"
+  }
+}

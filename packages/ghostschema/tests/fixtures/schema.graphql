@@ -1,0 +1,69 @@
+# Harbour Pets GraphQL schema (fixture for GhostSchema SDL outline tests)
+# Outline-grade input only: GhostSchema never emits a reduced SDL document.
+
+scalar DateTime
+
+type Query {
+  pet(id: ID!): Pet
+  pets(filter: PetFilter): [Pet!]!
+  order(id: ID!): Order
+  health: String
+}
+
+type Pet {
+  id: ID!
+  name: String!
+  status: PetStatus
+  tag: Tag
+  details: PetDetails
+}
+
+type PetDetails {
+  breed: String
+  weightKg: Float
+  primaryTag: Tag
+}
+
+type Tag {
+  id: ID!
+  label: String!
+}
+
+enum PetStatus {
+  AVAILABLE
+  PENDING
+  SOLD
+}
+
+input PetFilter {
+  status: PetStatus
+  tagLabel: String
+}
+
+type Order {
+  id: ID!
+  lines: [OrderLine!]!
+  status: OrderStatus
+}
+
+type OrderLine {
+  petId: ID!
+  quantity: Int!
+}
+
+enum OrderStatus {
+  PLACED
+  PAID
+  SHIPPED
+  COMPLETE
+}
+
+union SearchResult = Pet | Order
+
+# Planted waste: referenced by nothing in this schema.
+type AuditLog {
+  id: ID!
+  actor: String
+  action: String
+  at: DateTime
+}

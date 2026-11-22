@@ -1,0 +1,48 @@
+"""A bulky catalog module. Real bulk for full-vs-sliced contrast."""
+
+PRODUCTS = [
+    {"sku": "SKU-000", "name": "Fixture product 0", "price": 10},
+    {"sku": "SKU-001", "name": "Fixture product 1", "price": 11},
+    {"sku": "SKU-002", "name": "Fixture product 2", "price": 12},
+    {"sku": "SKU-003", "name": "Fixture product 3", "price": 13},
+    {"sku": "SKU-004", "name": "Fixture product 4", "price": 14},
+    {"sku": "SKU-005", "name": "Fixture product 5", "price": 15},
+    {"sku": "SKU-006", "name": "Fixture product 6", "price": 16},
+    {"sku": "SKU-007", "name": "Fixture product 7", "price": 17},
+    {"sku": "SKU-008", "name": "Fixture product 8", "price": 18},
+    {"sku": "SKU-009", "name": "Fixture product 9", "price": 19},
+    {"sku": "SKU-010", "name": "Fixture product 10", "price": 20},
+    {"sku": "SKU-011", "name": "Fixture product 11", "price": 21},
+    {"sku": "SKU-012", "name": "Fixture product 12", "price": 22},
+    {"sku": "SKU-013", "name": "Fixture product 13", "price": 23},
+    {"sku": "SKU-014", "name": "Fixture product 14", "price": 24},
+    {"sku": "SKU-015", "name": "Fixture product 15", "price": 25},
+    {"sku": "SKU-016", "name": "Fixture product 16", "price": 26},
+    {"sku": "SKU-017", "name": "Fixture product 17", "price": 27},
+    {"sku": "SKU-018", "name": "Fixture product 18", "price": 28},
+    {"sku": "SKU-019", "name": "Fixture product 19", "price": 29},
+    {"sku": "SKU-020", "name": "Fixture product 20", "price": 30},
+    {"sku": "SKU-021", "name": "Fixture product 21", "price": 31},
+    {"sku": "SKU-022", "name": "Fixture product 22", "price": 32},
+    {"sku": "SKU-023", "name": "Fixture product 23", "price": 33},
+    {"sku": "SKU-024", "name": "Fixture product 24", "price": 34},
+    {"sku": "SKU-025", "name": "Fixture product 25", "price": 35},
+    {"sku": "SKU-026", "name": "Fixture product 26", "price": 36},
+    {"sku": "SKU-027", "name": "Fixture product 27", "price": 37},
+    {"sku": "SKU-028", "name": "Fixture product 28", "price": 38},
+    {"sku": "SKU-029", "name": "Fixture product 29", "price": 39},
+    {"sku": "SKU-030", "name": "Fixture product 30", "price": 40},
+    {"sku": "SKU-031", "name": "Fixture product 31", "price": 41},
+    {"sku": "SKU-032", "name": "Fixture product 32", "price": 42},
+    {"sku": "SKU-033", "name": "Fixture product 33", "price": 43},
+    {"sku": "SKU-034", "name": "Fixture product 34", "price": 44},
+    {"sku": "SKU-035", "name": "Fixture product 35", "price": 45},
+    {"sku": "SKU-036", "name": "Fixture product 36", "price": 46},
+    {"sku": "SKU-037", "name": "Fixture product 37", "price": 47},
+    {"sku": "SKU-038", "name": "Fixture product 38", "price": 48},
+    {"sku": "SKU-039", "name": "Fixture product 39", "price": 49},
+]
+
+
+def product_count():
+    return len(PRODUCTS)

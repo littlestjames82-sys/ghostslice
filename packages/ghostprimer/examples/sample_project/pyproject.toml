@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "demoapp"
+version = "0.1.0"
+description = "A tiny demo application used in the GhostPrimer walkthrough."
+
+[project.scripts]
+demoapp = "demoapp.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

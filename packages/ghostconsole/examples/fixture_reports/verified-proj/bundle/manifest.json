@@ -1,0 +1,18 @@
+{
+  "tool": "ghostslice",
+  "version": "1.0.6",
+  "generated_at": "2026-10-14T08:00:00+00:00",
+  "root": "examples/fixture_reports/verified-proj",
+  "token_method": "ghostslice-estimator-v2",
+  "files": [
+    {
+      "path": "src/app.py",
+      "mode": "full",
+      "original_tokens": 123456,
+      "sliced_tokens": 45678
+    }
+  ],
+  "total_original_tokens": 123456,
+  "total_sliced_tokens": 45678,
+  "total_saved_tokens": 77778
+}

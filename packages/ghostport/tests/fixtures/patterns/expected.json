@@ -1,0 +1,125 @@
+{
+  "pack_id_assumption": "python-upgrade",
+  "pack_version_seen": "1.0.0",
+  "note": "Aligned Oct 14, 2026 to Agent A's authoritative pack file patterns/python-upgrade.json (12 patterns, IDs PYUP001-PYUP012, no hyphen). Slugs/files are this suite's fixture naming.",
+  "patterns": [
+    {
+      "slug": "collections_abc",
+      "pattern_id": "PYUP001",
+      "file": "collections_abc.py",
+      "description": "Import of an abstract base class from collections instead of collections.abc (aliases removed in Python 3.10).",
+      "reference": "Python 3.10 What's New, Removed: aliases to ABCs in collections removed",
+      "reference_date": "2021-10-04",
+      "reference_url": "https://docs.python.org/3/whatsnew/3.10.html"
+    },
+    {
+      "slug": "asyncio_coroutine",
+      "pattern_id": "PYUP002",
+      "file": "asyncio_coroutine.py",
+      "description": "Use of asyncio.coroutine decorator, removed in Python 3.11.",
+      "reference": "Python 3.11 What's New, Removed: asyncio.coroutine removed",
+      "reference_date": "2022-10-24",
+      "reference_url": "https://docs.python.org/3/whatsnew/3.11.html"
+    },
+    {
+      "slug": "inspect_getargspec",
+      "pattern_id": "PYUP003",
+      "file": "inspect_getargspec.py",
+      "description": "Call to inspect.getargspec or inspect.getargvalues format helpers removed in Python 3.11 (getargspec removed).",
+      "reference": "Python 3.11 What's New, Removed: inspect.getargspec removed",
+      "reference_date": "2022-10-24",
+      "reference_url": "https://docs.python.org/3/whatsnew/3.11.html"
+    },
+    {
+      "slug": "imp_module",
+      "pattern_id": "PYUP004",
+      "file": "imp_module.py",
+      "description": "Import of the imp module, removed in Python 3.12; use importlib instead.",
+      "reference": "PEP 594 / Python 3.12 What's New, Removed: imp module removed",
+      "reference_date": "2023-10-02",
+      "reference_url": "https://docs.python.org/3/whatsnew/3.12.html"
+    },
+    {
+      "slug": "distutils_use",
+      "pattern_id": "PYUP005",
+      "file": "distutils_use.py",
+      "description": "Import of distutils, removed in Python 3.12; use setuptools or stdlib equivalents.",
+      "reference": "PEP 632 / Python 3.12 What's New, Removed: distutils deprecated in 3.10 and removed in 3.12",
+      "reference_date": "2023-10-02",
+      "reference_url": "https://docs.python.org/3/whatsnew/3.12.html"
+    },
+    {
+      "slug": "safe_config_parser",
+      "pattern_id": "PYUP006",
+      "file": "safe_config_parser.py",
+      "description": "Use of configparser SafeConfigParser or readfp, removed in Python 3.12.",
+      "reference": "Python 3.12 What's New, Removed: configparser Legacy API removed (SafeConfigParser, readfp)",
+      "reference_date": "2023-10-02",
+      "reference_url": "https://docs.python.org/3/whatsnew/3.12.html"
+    },
+    {
+      "slug": "threading_camelcase",
+      "pattern_id": "PYUP007",
+      "file": "threading_camelcase.py",
+      "description": "Use of deprecated camelCase threading aliases such as currentThread, activeCount, or Thread.isDaemon, removed in Python 3.10/3.12 cleanups.",
+      "reference": "Python 3.10 What's New: threading camelCase aliases removed; Python 3.12 removals of remaining deprecated threading helpers",
+      "reference_date": "2021-10-04",
+      "reference_url": "https://docs.python.org/3/whatsnew/3.10.html"
+    },
+    {
+      "slug": "unittest_aliases",
+      "pattern_id": "PYUP008",
+      "file": "unittest_aliases.py",
+      "description": "Use of removed unittest aliases failUnless, failIf, assertEquals, assertNotEquals, assertAlmostEquals spelled without the modern names (removed in Python 3.12).",
+      "reference": "Python 3.12 What's New, Removed: unittest deprecated aliases removed",
+      "reference_date": "2023-10-02",
+      "reference_url": "https://docs.python.org/3/whatsnew/3.12.html"
+    },
+    {
+      "slug": "ssl_wrap_socket",
+      "pattern_id": "PYUP009",
+      "file": "ssl_wrap_socket.py",
+      "description": "Call to ssl.wrap_socket or ssl.match_hostname, removed in Python 3.12; use SSLContext.wrap_socket.",
+      "reference": "Python 3.12 What's New, Removed: ssl.wrap_socket and ssl.match_hostname removed",
+      "reference_date": "2023-10-02",
+      "reference_url": "https://docs.python.org/3/whatsnew/3.12.html"
+    },
+    {
+      "slug": "typing_pseudo_modules",
+      "pattern_id": "PYUP010",
+      "file": "typing_pseudo_modules.py",
+      "description": "Import of typing.io or typing.re pseudo-modules, removed in Python 3.12.",
+      "reference": "Python 3.12 What's New, Removed: typing.io and typing.re removed",
+      "reference_date": "2023-10-02",
+      "reference_url": "https://docs.python.org/3/whatsnew/3.12.html"
+    },
+    {
+      "slug": "locale_getdefaultlocale",
+      "pattern_id": "PYUP011",
+      "file": "locale_getdefaultlocale.py",
+      "description": "Call to locale.getdefaultlocale, deprecated since Python 3.11 and scheduled for removal; use getlocale or explicit locales.",
+      "reference": "Python 3.11 deprecations: locale.getdefaultlocale deprecated",
+      "reference_date": "2022-10-24",
+      "reference_url": "https://docs.python.org/3/whatsnew/3.11.html"
+    },
+    {
+      "slug": "datetime_utcnow",
+      "pattern_id": "PYUP012",
+      "file": "datetime_utcnow.py",
+      "description": "Use of datetime datetime.utcnow or datetime.utcfromtimestamp, deprecated in Python 3.12 in favour of timezone-aware calls.",
+      "reference": "Python 3.12 What's New, Deprecations: datetime.utcnow and utcfromtimestamp deprecated",
+      "reference_date": "2023-10-02",
+      "reference_url": "https://docs.python.org/3/whatsnew/3.12.html"
+    }
+  ],
+  "proposed_patterns": [
+    {
+      "slug": "fractions_gcd",
+      "pattern_id": "PROPOSED",
+      "file": "fractions_gcd.py",
+      "description": "fractions.gcd (removed in 3.9, use math.gcd). Fixture pair kept as a proposal: the v1.0.0 pack does NOT contain this pattern, so core scan tests do not expect a hit.",
+      "reference": "https://docs.python.org/3/whatsnew/3.9.html (fractions.gcd removed)",
+      "reference_date": "2020-10-05"
+    }
+  ]
+}

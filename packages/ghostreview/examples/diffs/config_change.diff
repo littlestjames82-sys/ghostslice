@@ -1,0 +1,19 @@
+diff --git a/pyproject.toml b/pyproject.toml
+index aaaaaaa..bbbbbbb 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -2,7 +2,7 @@
+ name = "demo"
+-version = "0.1.0"
++version = "0.2.0"
+ dependencies = []
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index ccccccc..ddddddd 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -5,4 +5,4 @@ jobs:
+   test:
+     runs-on: ubuntu-latest
+     steps:
+-      - run: pytest -q
++      - run: pytest -q -x

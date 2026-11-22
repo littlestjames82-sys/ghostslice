@@ -1,0 +1,48 @@
+# GhostSchema v0.1 - Agent A (core) implementation record
+Built Oct 14, 2026. Ownership: PLAN.md, src/**, pyproject.toml, this file. tests/**, README.md, examples/** untouched (Agent B).
+
+## Delivered
+- [PLAN.md](sandbox://workspace/ghostschema/PLAN.md) - written first, in the GhostVerify/GhostSlice plan format (why this name, problem, position in the Ghost stack, pairing, MVP, out of scope, build estimate, pricing draft marked not public and not decided, verification bar, risks, next gate). No em dashes.
+- [pyproject.toml](sandbox://workspace/ghostschema/pyproject.toml) - ghostschema 0.1.0, zero dependencies, `ghostschema` console script, src layout.
+- `src/ghostschema/loader.py` - read-only load + classification: OpenAPI 3.x JSON, standalone JSON Schema (any other JSON object), GraphQL SDL by extension or keyword sniff. YAML refused by extension and by content sniff with a clear message (stdlib has no YAML parser; none is faked). Swagger/OpenAPI 2.0 refused with a convert-first message. Non-UTF8 and non-object JSON refused. Exit 2 on every refusal.
+- `src/ghostschema/refs.py` - local $ref graph: pointer resolve/escape, ref iteration, transitive closure from seed subtrees, closure self-check. A ref is local only when it is `#` or starts with `#/`; everything else is external, never fetched, recorded unresolved with its referrer pointer.
+- `src/ghostschema/terms.py` - lexical task-term scoring (same class of heuristic as `ghostslice task`): identifier tokenisation (camelCase, snake, kebab, path segments, trailing-s singular), exact token = full weight, prefix match = half.
+- `src/ghostschema/jsreduce.py` - the full treatment for JSON specs:
+  - OpenAPI: selection by task terms (operationId, path, summary, tags, parameter names, referenced schema names) or explicit ids (operationId, `METHOD /path`, bare path, schema/component name, `#/` pointer; unknown ids fail loudly by name, exit 2). Reachability follows local $refs transitively, including refs in path-item-level subtrees (see bug fix below). Output keeps openapi/info/servers, filtered tags, kept path items with their path-level parameters, pruned components, securitySchemes named by kept operations, and root security only when its schemes survive.
+  - JSON Schema: root + `$defs`/`definitions` pruning by the same closure; selecting defs without the root emits a shell with a root `$ref` (one def) or `anyOf` of $refs (several). `root`/`#` selects the root.
+  - Self-check on every reduced document: every local $ref that resolved in the source must resolve in the output, otherwise the run fails with exit 2 and no bundle is shipped. Refs already broken in the source are carried through and named in manifest warnings instead.
+- `src/ghostschema/graphql.py` - SDL outline only: static parse (block strings, strings, and comments stripped; regex + brace matching) of type/interface/input/enum/union/scalar/schema definitions, extend blocks merged. Reachability by name over field return types, argument types, interfaces, and union members. Output is outline.json + OUTLINE.md, labelled with the outline label in the JSON (`treatment: outline`, `label`), in OUTLINE.md, in SCHEMA.md, and in the manifest. No .graphql file is ever emitted.
+- `src/ghostschema/bundle.py` - bundle writer: spec.json (JSON formats) or outline.json + OUTLINE.md (SDL), plus manifest.json (source sha256, format, treatment, token method + original/sliced/saved estimates, selection echo, kept/dropped lists, unresolved refs, warnings) and SCHEMA.md. Writes only inside the output directory; refuses to use the spec file itself as the output path.
+- `src/ghostschema/tokens.py` - delegates to GhostSlice's calibrated estimator when an install, `$GHOSTSCHEMA_GHOSTSLICE_SRC`, or a sibling checkout is reachable (on this machine the GhostSlice estimator was used, and the method string is stamped in every manifest); documented chars/4 fallback otherwise. All figures labelled estimates.
+- `src/ghostschema/mcp_server.py` + `cli.py` - `ghostschema slice|inspect|mcp`. MCP is stdio JSON-RPC with `schema_slice` / `schema_inspect`, capped summary payloads, no spec bodies. Exit codes: 0 success, 2 could-not-process.
+
+## Verification (all run Oct 14, 2026, against this core)
+- Agent B's independently written suite (landed in parallel): **45 passed, 0 failed** (`python3 -m pytest tests -q`, 18.55s), after two core fixes described below. First full run showed 12 failures; triage split them into one genuine core defect class (below), one SDL contract question that Agent B resolved in its own test (dropped names may appear in the outline's dropped listing; they must not appear among kept types - the core already satisfied that reading), and stale mid-flight state from the parallel build.
+- My smoke battery (fixtures in /tmp, including a hand-built petstore, an orders JSON Schema, and a shop SDL):
+  - OpenAPI by task ("show pet details and its category"): kept listPets/createPet/getPet + Pet/Category/Tag/ApiResponse, dropped getInventory/createUser + Inventory/User, 1,329 -> 935 estimated tokens. The https $ref inside Pet was listed unresolved with referrer `#/components/schemas/Pet/properties/friend`, kept visible in the output, never fetched.
+  - OpenAPI by `--select getPet` on Agent B's larger fixture (3,423 tokens): only `get` + path-level `parameters` survive on /pets/{petId}; PetId parameter and NotFound response kept; chain schemas Pet/PetDetails/PetStatus/Tag/Error kept; 3,423 -> 1,093.
+  - JSON Schema `--select Order`: root gains `$ref: #/$defs/Order`; defs kept Order/Customer/LineItem, Unused dropped; 306 -> 242.
+  - SDL `--select Pet`: outline keeps Pet/Category/PetStatus, drops DateTime/InventoryItem/Query/SearchResult/Store/Unused by name; no .graphql emitted.
+  - Ref cycle fixture (Node <-> Peer, self-ref): terminates, keeps Node + Peer, drops Alone.
+  - Broken-local-ref fixture ($ref to a schema that does not exist in the source): run succeeds, warning names the broken ref, manifest records it with `missing_local: true`. It is not silently "fixed" and not treated as a build failure.
+  - YAML by extension and YAML content in a .json file: both exit 2 with the YAML message. Swagger 2.0: exit 2 with the convert message. Unknown --select id: exit 2 naming the id.
+  - Input integrity: sha256 of every fixture identical before and after all runs.
+  - MCP: initialize / tools/list / tools/call (schema_inspect) round trip over stdio answers correctly.
+  - Fresh-venv `pip install .`: installs clean; installed CLI reports 0.1.0 and reproduces the getPet slice.
+  - Stdlib audit: imports are argparse, copy, hashlib, json, math, os, re, sys, datetime, pathlib only (plus the optional GhostSlice estimator delegation, itself stdlib-only). No urllib/socket/http/subprocess anywhere under src/.
+
+## Bugs caught during verification (both fixed in core, tests untouched)
+1. Path-item-level $refs were not followed. Selection seeds were operation subtrees only, but OpenAPI path items carry shared `parameters` (and servers) outside any operation, which the reducer copies into the output with any kept operation. A `--select getPet` slice dropped `#/components/parameters/PetId` and the closure self-check (correctly) failed the run. Fix: for each selected operation, the path item's non-operation subtrees are seeded too.
+2. Whole-path over-keep. The prefix rule that keeps a component entry when a deeper pointer targets inside it also fired for path items, so seeding the path-level parameters kept every sibling operation on the path (deletePet rode along with getPet). Fix: a path item is kept whole only when the item pointer itself is a ref target or a seed; deeper pointers no longer imply whole-item.
+
+## Known limits (honest)
+- Task-term selection is lexical. It will miss operations/schemas whose names share no words with the task; --select is the precise route. Singular/plural and prefix matching soften this, they do not solve it.
+- SDL parsing is outline-grade: regex + brace matching, not a full GraphQL grammar. Directive definitions are counted and named in warnings, not outlined. Field parsing is line-oriented, so several fields declared on one line inside braces can be missed; the outline lists what was parsed. This is why SDL never receives the full treatment in v0.1.
+- On tiny SDL files the outline bundle can be larger than the source (the labelled outline.json + OUTLINE.md carry fixed overhead; one smoke fixture measured 117 -> 550 estimated tokens). The manifest reports the true (negative) saving rather than hiding it. Savings appear on large SDLs with many unreachable types.
+- Token estimates use GhostSlice's estimator calibrated for code/prose when it is reachable; on JSON specs it is an estimate in the suite's common units, not a spec-specific calibration. The fallback is chars/4. Method is stamped per manifest.
+- JSON Schema support covers top-level `$defs`/`definitions`. A kept def is carried whole, including any nested `$defs` inside it; nested defs elsewhere in the tree are not separately sliceable in v0.1.
+- Remote $refs are left as-is in the reduced output (they still point outside it) and are listed as unresolved. A consumer that needs a self-contained document must resolve them with a tool that is allowed network access; GhostSchema never fetches.
+- `--all` is a baseline/escape hatch: it keeps everything and prunes nothing, but still runs the closure self-check and writes a manifest.
+
+## Gates held
+Python stdlib only, local only, no network code paths, input files never modified, no GitHub push, no PyPI/publish, no announcements, no spend.

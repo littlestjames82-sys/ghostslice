@@ -1,0 +1,5 @@
+{"at": "2026-10-13T09:15:00+00:00", "kind": "export", "bundle": ".claude_context", "before_tokens": 10000, "after_tokens": 4000, "saved_tokens": 6000, "estimator": "v2"}
+{"at": "2026-10-13T10:00:00+00:00", "kind": "export", "bundle": ".claude_context", "before_tokens": 5000, "after_tokens": 2000, "saved_tokens": 3000, "estimator": "v2"}
+this line is not json and must be counted skipped, never fatal
+{"at": "2026-10-14T09:10:00+00:00", "kind": "export", "bundle": ".claude_context", "before_tokens": 800, "saved_tokens": 800, "estimator": "v2"}
+{"at": "2026-10-14T11:00:00+00:00", "kind": "slice", "bundle": null, "before_tokens": 9000, "after_tokens": 3000, "saved_tokens": 6000, "estimator": "v2"}

@@ -1,0 +1,44 @@
+{
+  "description": "Starter corpus for GhostBus, the standing GhostSlice demo tree. This corpus does NOT copy GhostBus code into the GhostBench repo: projects[0].path is a relative path to the sibling GhostBus checkout in this workspace, and the loader stamps a tree hash when the corpus is loaded (Bench records repo state by commit or tree hash, it does not copy code in). Reference totals (GhostSlice G5-calibrated estimator, from the GhostSlice record; estimates, not billed amounts): 129555 tokens full, 45770 sliced. GhostBus package version observed: 0.5.10.",
+  "name": "ghostbus",
+  "projects": [
+    {
+      "id": "ghostbus",
+      "path": "../../../../ghostbus",
+      "tasks": [
+        {
+          "expected_files": [
+            "src/tools.mjs",
+            "src/core.mjs"
+          ],
+          "expected_symbols": [],
+          "id": "gb-001-add-board-tool",
+          "prompt": "Add a new board tool to the MCP tool surface and wire it through the core message handling.",
+          "recorded_patch": null,
+          "test_command": "node test.mjs"
+        },
+        {
+          "expected_files": [
+            "src/handler.mjs"
+          ],
+          "expected_symbols": [],
+          "id": "gb-002-relay-handler-route",
+          "prompt": "Fix how the relay handler routes an incoming message type it currently mishandles.",
+          "recorded_patch": null,
+          "test_command": "node test.mjs"
+        },
+        {
+          "expected_files": [
+            "src/cli.mjs"
+          ],
+          "expected_symbols": [],
+          "id": "gb-003-cli-surface",
+          "prompt": "Extend the command line surface with a new subcommand, keeping the existing bin entry points working.",
+          "recorded_patch": null,
+          "test_command": "node test.mjs"
+        }
+      ]
+    }
+  ],
+  "version": "0.1.0"
+}

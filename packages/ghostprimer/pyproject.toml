@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ghostprimer"
+version = "0.1.0"
+description = "First-session starter bundle for GhostSlice: minimal code slice plus project-memory primer, extractive facts only"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = []
+
+[project.scripts]
+ghostprimer = "ghostprimer.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

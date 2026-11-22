@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "project-docs": {
+      "command": "python3",
+      "args": ["-m", "example_docs_server"],
+      "env": {
+        "FAKE_API_KEY": "FAKE-EXAMPLE-KEY-not-a-real-secret",
+        "EXAMPLE_MODE": "readonly"
+      }
+    },
+    "project-search": {
+      "command": "node",
+      "args": ["example-search-server.js"],
+      "env": {}
+    }
+  }
+}

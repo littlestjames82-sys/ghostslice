@@ -1,0 +1,34 @@
+{
+  "tool": "ghostslice",
+  "version": "1.0.6",
+  "preset": "claude-code",
+  "generated_at": "2026-10-14T00:00:00+00:00",
+  "root": "../fixture-project",
+  "token_method": "estimate",
+  "total_original_tokens": 115,
+  "total_sliced_tokens": 96,
+  "total_saved_tokens": 0,
+  "files": [
+    {
+      "path": "src/app.py",
+      "mode": "full",
+      "language": "python",
+      "package": null,
+      "original_tokens": 82,
+      "sliced_tokens": 82,
+      "sha256": "14d7e3d9ecd3efca4bb0874ca793ba0ae7800f1fa7b6caee935eec8fadb68286"
+    },
+    {
+      "path": "src/util.py",
+      "mode": "signatures",
+      "language": "python",
+      "package": null,
+      "original_tokens": 33,
+      "sliced_tokens": 14,
+      "sha256": "4014ee9071aa7409e8b1ab112b10cbd9ddf70face48b12647e3541134c682249",
+      "symbols_included": [
+        "slugify"
+      ]
+    }
+  ]
+}

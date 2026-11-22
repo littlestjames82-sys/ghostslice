@@ -1,0 +1,13 @@
+diff --git a/pricing.py b/pricing.py
+index 1111111..2222222 100644
+--- a/pricing.py
++++ b/pricing.py
+@@ -5,6 +5,8 @@ TAX_RATE = 0.08
+ 
+ def compute_total(items):
+     """Sum item prices and apply the tax rate."""
+-    subtotal = sum(items)
++    subtotal = sum(items)
++    if subtotal < 0:
++        raise ValueError("total cannot be negative")
+     return subtotal * (1 + TAX_RATE)

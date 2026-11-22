@@ -1,0 +1,7 @@
+{
+  "modes": {
+    "src/app.py": "full",
+    "src/util.py": "signatures",
+    "vendor/**": "exclude"
+  }
+}

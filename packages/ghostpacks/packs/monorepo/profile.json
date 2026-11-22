@@ -1,0 +1,1 @@
+{"budget_tokens":100000,"ignore":["**/node_modules/**","**/dist/**","**/build/**","**/.turbo/**","**/.next/**","**/__pycache__/**","**/target/**","coverage/**"],"modes":{"**/*.test.*":"strip-tests","**/CHANGELOG.md":"headings","apps/*/src/**":"signatures","docs/**":"headings","packages/*/src/**":"signatures"},"preset":"claude-code"}

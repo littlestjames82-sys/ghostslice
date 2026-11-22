@@ -1,0 +1,125 @@
+Metadata-Version: 2.4
+Name: ghostfixture
+Version: 0.1.0
+Summary: Minimal repro project generator for GhostSlice: materialises a bundle as a small standalone tree, flagged secrets excluded
+Author: Ghost Developer Studio
+License: MIT
+Keywords: llm,context,ghostslice,fixture,repro,agents
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+
+# GhostFixture
+
+Minimal repro project generator for GhostSlice bundles.
+
+A GhostSlice bundle is reading material: sliced text, a
+manifest, a prompt file. It is not a project you can open, hand
+to a teammate, or attach to a bug report. GhostFixture turns a
+bundle back into a small, real directory tree: the files the
+bundle references, copied from the original project at full
+fidelity, plus the local files those files import, and nothing
+else. Flagged secrets are excluded by default, and everything
+left out is named with a reason.
+
+## Quick start
+
+```sh
+ghostfixture build <project> <bundle> -o <out-dir> [--task "..."]
+ghostfixture check <fixture-dir>
+```
+
+- `build` reads the bundle's manifest, takes every file listed
+  at a mode other than `exclude` as the seed set, resolves the
+  static local import closure of those files inside the
+  project, and copies the originals into a brand-new output
+  tree.
+- `check` re-verifies a fixture tree against its manifest:
+  every included file present with a matching sha256, no
+  unexplained extra files, no excluded file present. Exit 0
+  clean, 1 mismatch, 2 could not check.
+
+Build exit codes: 0 fixture built, 1 fixture would be empty,
+2 could not build.
+
+## The rules it keeps
+
+- **The source project is never modified.** It is only read.
+  The output directory must not be inside the project, the
+  project must not be inside the output, and an existing
+  non-empty output directory is refused.
+- **Secret-flagged files are excluded by default.** Before
+  copying, each candidate file is scanned for secret shapes
+  (provider token shapes, private key headers, password-bearing
+  URLs, sensitive-name assignments). A flagged file is left
+  out and recorded in the manifest by path and pattern type
+  only, never by value. `--include-flagged` overrides this,
+  and the manifest still records that the file was flagged and
+  included by override. There is no quiet path.
+- **A size cap is enforced and stated.** Total copied content
+  is capped (default 2 MiB, set with `--max-bytes N`). The cap
+  is printed in the CLI output and recorded in the manifest.
+  Bundle-referenced files are kept first, closure files after,
+  in deterministic order; files that do not fit are left out
+  with reason `size-cap`.
+- **Nothing unreferenced comes along.** No `.git`, no scratch
+  files, no bundle artifacts beyond the fixture's own manifest
+  and summary.
+- **Missing and escaping files are reported, not invented.**
+  A referenced file that is absent from the project is left
+  out with reason `missing-in-project`. Symlinks are never
+  followed out of the project root; an escaping path is left
+  out with its reason recorded.
+
+## What you get
+
+The output tree root holds two records next to the copied
+files:
+
+- `fixture-manifest.json` - the machine record: task, source
+  project, source bundle path and manifest sha256, the size
+  cap in force, totals, `included[]` (path, reason
+  `bundle-referenced` or `import-closure`, importer where
+  applicable, bytes, sha256), `excluded_flagged[]` (path and
+  pattern types only), `left_out[]` (path and reason), and
+  `external_references[]` for imports that point outside the
+  project.
+- `FIXTURE.md` - the same record in human form, plus how the
+  fixture was made and its limits.
+
+An MCP server (`ghostfixture mcp`, stdio, local only) exposes
+`build_fixture` and `check_fixture` with capped summary
+payloads and no file bodies.
+
+## Honest limits
+
+- **A fixture is not guaranteed to run.** The closure is
+  static and parse-level (Python via `ast`, JS/TS via import
+  patterns, other languages not computed in v0.1 and labelled
+  as such in the manifest). Dynamic imports, string-built
+  module paths, reflection, and plugin loaders are invisible
+  to it. A fixture may still need packages, data files, or
+  services the bundle never referenced. GhostFixture installs
+  nothing and runs nothing.
+- **Flagged is a conservative net, not a proof.** An
+  unflagged file can still contain a secret in a shape the
+  scanner does not know. The correct reading of a clean run is
+  "no flagged shapes found", never "secret-free".
+- **Copies are originals, at the project's current state.**
+  If the project changed after the bundle was exported, the
+  fixture holds the newer bytes. The manifest records the
+  bundle manifest hash so the pairing stays auditable.
+- **Fixture proves nothing about behaviour.** It materialises
+  the context a task ran against. Whether the slice was
+  sufficient is GhostVerify's question; whether a bug
+  reproduces is yours.
+
+## Examples
+
+See `examples/` for a walkthrough with a demo project and a
+demo bundle: closure pulling an unreferenced module in, a
+flagged file being excluded, and the check round trip.
+
+## License
+
+MIT. Part of the GhostSlice companion suite by Ghost Developer
+Studio.

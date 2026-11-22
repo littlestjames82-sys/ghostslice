@@ -1,0 +1,1 @@
+{"tool": "ghostrecall", "version": "0.1.0", "task": "storage", "totals": {"memory_original_tokens": 109, "memory_sliced_tokens": 109, "memory_items": 2, "code_items": 0, "prompt_tokens_estimate": 172}, "items": ["decision-d-001-2026-01-15", "decision-d-002-2026-02-01"]}

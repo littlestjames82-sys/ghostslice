@@ -1,0 +1,36 @@
+---
+description: GhostSlice context for root (converted by GhostConvert 0.1.0)
+globs: .ghostslice.json, README.md
+alwaysApply: false
+---
+
+<!-- ghostconvert: target=cursor group=root -->
+
+# GhostSlice context: root
+
+Converted by GhostConvert 0.1.0 from a GhostSlice bundle (target: cursor). Do not edit the source bundle; regenerate from it instead.
+Project: sample_project
+Estimated tokens: 211 sliced (was 287, saved 76). Token counts are estimates from the source manifest (method: estimates (BPE-like split v2, per-language calibrated, not exact tokenizer counts)).
+Each file keeps its GhostSlice slice mode in its header. A file marked signatures, symbols, interfaces, or strip-tests is NOT the full source. See LOSSES.md in this output for what this format could not carry from the manifest.
+
+## File: .ghostslice.json (mode: full)
+
+```json
+{
+  "modes": {
+    "src/app.py": "full",
+    "src/util.py": "signatures",
+    "vendor/**": "exclude"
+  }
+}
+```
+
+
+## File: README.md (mode: full)
+
+```markdown
+# Demo Project
+
+A tiny fixture project for conversion tests.
+```
+

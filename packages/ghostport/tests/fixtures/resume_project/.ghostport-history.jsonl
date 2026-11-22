@@ -1,0 +1,4 @@
+{"unit": "unit-pkg-leaf", "state": "planned", "state_kind": "event", "bundle_hash": "sha256:fixture-leaf-plan", "verify_report": null}
+{"unit": "unit-pkg-leaf", "state": "bundled", "state_kind": "event", "bundle_hash": "sha256:fixture-leaf-bundle", "verify_report": null}
+{"unit": "unit-pkg-leaf", "state": "ported-claimed", "state_kind": "claim", "bundle_hash": "sha256:fixture-leaf-bundle", "verify_report": null, "note": "A claim is not verification."}
+{"unit": "unit-pkg-app", "state": "planned", "state_kind": "event", "bundle_hash": "sha256:fixture-app-plan", "verify_report": null}

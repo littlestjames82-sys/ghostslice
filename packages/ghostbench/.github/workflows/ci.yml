@@ -1,0 +1,50 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    # Standalone: no GhostBus sibling tree; the corpus test that
+    # points at the real tree skips in this job.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install test runner
+        run: python -m pip install --upgrade pip pytest
+      - name: Run tests
+        run: PYTHONPATH=src python -m pytest tests -q
+      - name: Smoke test CLI
+        run: PYTHONPATH=src python -m ghostbench --help > /dev/null
+  integration:
+    # Integration: GhostBus checked out at the workspace root, where
+    # the example corpus path (../../../../ghostbus from the corpus
+    # dir, with this repo at path "ghostbench") resolves.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ghostbench
+      - uses: actions/checkout@v4
+        with:
+          repository: littlestjames82-sys/ghostbus
+          path: ghostbus
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install test runner
+        run: python -m pip install --upgrade pip pytest
+      - name: Run tests (GhostBus tree present)
+        working-directory: ghostbench
+        run: PYTHONPATH=src python -m pytest tests -q

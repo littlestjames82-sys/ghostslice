@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "shared-server": {
+      "command": "python3",
+      "args": ["-m", "example_shared_server"],
+      "env": {}
+    },
+    "generic-only": {
+      "command": "python3",
+      "args": ["-m", "example_generic_server"],
+      "env": {}
+    }
+  }
+}

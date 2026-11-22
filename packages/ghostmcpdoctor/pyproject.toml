@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ghostmcpdoctor"
+version = "0.1.0"
+description = "GhostMCP Doctor: read-only auditor for local MCP / agent-client configs. Reports duplicates, missing commands/files, broad permissions and stale entries. Findings are name + path + issue only; env values are never printed."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "Ghost Developer Studio" }]
+keywords = ["mcp", "agents", "config", "audit", "ghostslice"]
+dependencies = []
+
+[project.scripts]
+ghostmcpdoctor = "ghostmcpdoctor.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]

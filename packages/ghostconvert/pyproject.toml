@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ghostconvert"
+version = "0.1.0"
+description = "Convert a GhostSlice bundle into AGENTS.md, Cursor rules, Copilot instructions, or a generic prompt, with every conversion loss named."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = []
+
+[project.scripts]
+ghostconvert = "ghostconvert.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

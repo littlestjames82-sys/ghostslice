@@ -1,0 +1,17 @@
+{
+  "tool": "ghostshard-bundle",
+  "ghostshard_version": "0.1.0",
+  "shard_id": "shard-b",
+  "files": [
+    {
+      "path": "b.py",
+      "mode": "full",
+      "original_tokens": 23,
+      "sliced_tokens": 23,
+      "sha256": "3012f9fb78c61862e5a6267877fd171337497c60391cd250a833c124a7a2aa25"
+    }
+  ],
+  "total_original_tokens": 23,
+  "total_sliced_tokens": 23,
+  "estimator": "token counts are estimates (GhostSlice-style raw estimator), not exact tokenizer counts"
+}

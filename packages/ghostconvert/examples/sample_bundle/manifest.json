@@ -1,0 +1,89 @@
+{
+  "tool": "ghostslice",
+  "version": "1.0.6",
+  "preset": "claude-code",
+  "generated_at": "2026-10-14T13:33:23.326281+00:00",
+  "root": "/home/hatch/workspace/ghostconvert/examples/sample_project",
+  "token_method": "estimates (BPE-like split v2, per-language calibrated, not exact tokenizer counts)",
+  "total_original_tokens": 287,
+  "total_sliced_tokens": 211,
+  "total_saved_tokens": 76,
+  "files": [
+    {
+      "path": "src/app.py",
+      "mode": "full",
+      "language": "python",
+      "package": "",
+      "original_tokens": 106,
+      "sliced_tokens": 106,
+      "sha256": "93e67fef6747b3958a92167806872eb00a70c76fe6572fe68cd246b27afb5652"
+    },
+    {
+      "path": "tests/test_app.py",
+      "mode": "strip-tests",
+      "language": "python",
+      "package": "",
+      "original_tokens": 46,
+      "sliced_tokens": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": ".ghostslice.json",
+      "mode": "full",
+      "language": "json",
+      "package": "",
+      "original_tokens": 45,
+      "sliced_tokens": 45,
+      "sha256": "19fedd0f941728cf82c9160019cd80f88c9d598c2c9692ee61fe97ff81c1f1ad"
+    },
+    {
+      "path": "src/util.py",
+      "mode": "signatures",
+      "language": "python",
+      "package": "",
+      "original_tokens": 39,
+      "sliced_tokens": 22,
+      "sha256": "3640f67cd507e2cada03ce9a2e8d60811fcb1fa660eb0364578d18a8bcb9a0f9"
+    },
+    {
+      "path": "docs/guide.md",
+      "mode": "full",
+      "language": "markdown",
+      "package": "",
+      "original_tokens": 24,
+      "sliced_tokens": 24,
+      "sha256": "fd52c32fe0233c414da5f5d3f8d9c5154319b08613a3f7e99bf138a1c744de00"
+    },
+    {
+      "path": "README.md",
+      "mode": "full",
+      "language": "markdown",
+      "package": "",
+      "original_tokens": 14,
+      "sliced_tokens": 14,
+      "sha256": "d5850b2951f8285bdb23aca9301465f2300c1ea0f854ed7ff5c46a7fc2af564f"
+    },
+    {
+      "path": "vendor/blob.py",
+      "mode": "exclude",
+      "language": "python",
+      "package": "",
+      "original_tokens": 13,
+      "sliced_tokens": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "packages": [
+    {
+      "path": "",
+      "label": "(root)",
+      "kind": "root",
+      "source": "project root",
+      "files": 7,
+      "tokens": 287,
+      "share": 100.0,
+      "sliced_tokens": 211,
+      "sliced_share": 100.0
+    }
+  ]
+}

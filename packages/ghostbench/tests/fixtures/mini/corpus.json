@@ -1,0 +1,41 @@
+{
+  "description": "Tiny self-contained corpus used by the GhostBench test suite. Deterministic: a Tier A run on this corpus must produce the same per-task token numbers on re-run with the same GhostSlice and estimator versions.",
+  "name": "mini",
+  "projects": [
+    {
+      "id": "mini",
+      "path": "project",
+      "tasks": [
+        {
+          "expected_files": [
+            "mini/stats.py",
+            "mini/calc.py"
+          ],
+          "expected_symbols": [
+            "mean",
+            "add"
+          ],
+          "id": "mini-001-fix-mean",
+          "prompt": "Fix the mean calculation in the stats module.",
+          "recorded_patch": null,
+          "test_command": "python3 -m pytest project -q"
+        },
+        {
+          "expected_files": [
+            "mini/report.py",
+            "mini/stats.py"
+          ],
+          "expected_symbols": [
+            "summarise",
+            "mean"
+          ],
+          "id": "mini-002-summarise-report",
+          "prompt": "Summarise a list of values using the report module.",
+          "recorded_patch": null,
+          "test_command": "python3 -m pytest project -q"
+        }
+      ]
+    }
+  ],
+  "version": "0.1.0"
+}

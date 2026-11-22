@@ -1,0 +1,8 @@
+Metadata-Version: 2.4
+Name: ghostrecall
+Version: 0.1.0
+Summary: Project memory slicer paired with GhostSlice: decisions, docs and git history in a checkable bundle
+Author: Ghost Developer Studio
+License: MIT
+Keywords: llm,context,memory,agents,ghostslice
+Requires-Python: >=3.10

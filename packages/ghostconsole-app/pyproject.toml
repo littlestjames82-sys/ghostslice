@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ghostconsole-app"
+version = "0.1.0"
+description = "Local web front end for the Ghost ecosystem: register projects, run ghostworkflow, read its evidence."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+ghostconsole-app = "ghostconsole_app.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

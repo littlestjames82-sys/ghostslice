@@ -1,0 +1,45 @@
+diff --git a/pricing.py b/pricing.py
+index 1111111..2222222 100644
+--- a/pricing.py
++++ b/pricing.py
+@@ -5,5 +5,5 @@ TAX_RATE = 0.08
+ 
+ def compute_total(items):
+     """Sum item prices and apply the tax rate."""
+-    subtotal = sum(items)
+-    return subtotal * (1 + TAX_RATE)
++    return sum(items)
+diff --git a/tests/test_pricing.py b/tests/test_pricing.py
+index 3333333..4444444 100644
+--- a/tests/test_pricing.py
++++ b/tests/test_pricing.py
+@@ -4,4 +4,4 @@ from pricing import compute_total
+ 
+ 
+ def test_compute_total():
+-    assert compute_total([10.0]) == 10.8
++    assert compute_total([10.0]) == 10.0
+diff --git a/.env b/.env
+index 5555555..6666666 100644
+--- a/.env
++++ b/.env
+@@ -1,2 +1,2 @@
+ APP_NAME=demo
+-API_KEY=old-value
++API_KEY=FAKE-SECRET-VALUE-12345-not-real
+diff --git a/legacy.py b/legacy.py
+deleted file mode 100644
+index 1234567..0000000
+--- a/legacy.py
++++ /dev/null
+@@ -1,10 +0,0 @@
+-"""Old legacy module."""
+-
+-
+-def legacy_total(items):
+-    total = 0
+-    for item in items:
+-        total += item
+-    return total
+-
+-

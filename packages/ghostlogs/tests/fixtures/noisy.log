@@ -1,0 +1,70 @@
+2026-10-14T07:59:59Z INFO  service boot complete build=2214
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:00:01Z INFO  heartbeat ok worker=alpha
+2026-10-14T08:01:00Z WARN  cache miss rate above threshold shard=7
+2026-10-14T08:01:00Z WARN  cache miss rate above threshold shard=7
+2026-10-14T08:01:00Z WARN  cache miss rate above threshold shard=7
+2026-10-14T08:01:00Z WARN  cache miss rate above threshold shard=7
+2026-10-14T08:01:00Z WARN  cache miss rate above threshold shard=7
+2026-10-14T08:01:00Z WARN  cache miss rate above threshold shard=7
+2026-10-14T08:01:00Z WARN  cache miss rate above threshold shard=7
+2026-10-14T08:01:00Z WARN  cache miss rate above threshold shard=7
+2026-10-14T08:01:00Z WARN  cache miss rate above threshold shard=7
+2026-10-14T08:01:00Z WARN  cache miss rate above threshold shard=7
+2026-10-14T08:01:00Z WARN  cache miss rate above threshold shard=7
+2026-10-14T08:01:00Z WARN  cache miss rate above threshold shard=7
+2026-10-14T08:02:00Z INFO  deploy started version=1.4.2
+2026-10-14T08:03:10Z INFO  request received id=req-991
+2026-10-14T08:03:10Z INFO  handler begin route=/checkout
+2026-10-14T08:03:11Z ERROR db connection failed host=db1
+Traceback (most recent call last):
+  File "app/checkout.py", line 88, in handler
+    cur.execute(sql)
+psycopg2.OperationalError: connection refused
+2026-10-14T08:03:12Z INFO  request finished id=req-991 status=500
+2026-10-14T08:04:00Z ERROR db connection failed host=db1
+2026-10-14T08:04:00Z ERROR db connection failed host=db1
+2026-10-14T08:04:00Z ERROR db connection failed host=db1
+2026-10-14T08:04:00Z ERROR db connection failed host=db1
+2026-10-14T08:05:00Z INFO  upstream auth token=ghp_ZQXWZQXWZQXWZQXWZQXWZQXWZQXWZQXWZQXW accepted
+2026-10-14T08:07:00Z ERROR auth failed for key AKIAZQXW7EXAMPLEKEY1 rejected
+2026-10-14T08:07:01Z INFO  auth retry scheduled
+2026-10-14T08:08:00Z INFO  shutdown complete

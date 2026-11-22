@@ -1,0 +1,5 @@
+{"ts": "2026-03-01T09:00:00", "event": "login", "user_id": 101, "api_token": "[REDACTED]"}
+{"ts": "2026-03-01T09:02:00", "event": "export", "user_id": 102, "api_token": "[REDACTED]"}
+{"ts": "2026-03-01T09:05:00", "event": "login", "user_id": 101, "api_token": "[REDACTED]"}
+{"ts": "2026-03-01T09:11:00", "event": "delete", "user_id": 103, "api_token": "[REDACTED]"}
+{"ts": "2026-03-01T09:20:00", "event": "export", "user_id": 104, "api_token": "[REDACTED]"}

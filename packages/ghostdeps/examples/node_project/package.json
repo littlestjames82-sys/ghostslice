@@ -1,0 +1,13 @@
+{
+  "name": "example-node",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GhostDeps example: a small Node project with planted gaps.",
+  "dependencies": {
+    "express": "^4.18.2",
+    "lodash": "^4.17.21"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

@@ -1,0 +1,1 @@
+{"mcpServers":{"retired-server":{"args":["-m","example_retired_server"],"command":"python3","disabled":true,"env":{}}}}

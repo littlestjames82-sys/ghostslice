@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ghostdocs"
+version = "0.1.0"
+description = "GhostSlice for non-code corpora: scan, dedupe, slice and export business documents for agents and RAG."
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = []
+
+[project.scripts]
+ghostdocs = "ghostdocs.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

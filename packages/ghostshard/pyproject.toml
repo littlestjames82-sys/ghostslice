@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ghostshard"
+version = "0.1.0"
+description = "Planner-only multi-agent task sharder paired with GhostSlice: shards a large task into ordered per-shard Slice-style bundles. No dispatch, no execution."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "Ghost Developer Studio"}]
+keywords = ["ai-agents", "context-engineering", "task-planning", "ghostslice", "ghostbus"]
+dependencies = []
+
+[project.scripts]
+ghostshard = "ghostshard.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

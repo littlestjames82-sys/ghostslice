@@ -1,0 +1,17 @@
+{
+  "ledger_events": {
+    "planned": 2,
+    "bundled": 1,
+    "ported-claimed": 1,
+    "verified": 0
+  },
+  "status_counts_latest_state": {
+    "planned": 1,
+    "bundled": 0,
+    "ported-claimed": 1,
+    "verified": 0
+  },
+  "verified_units": 0,
+  "next_unit": "unit-pkg-app",
+  "rule": "Latest state wins per unit in status. Leaf's latest state is a ported-claimed CLAIM with no verify_report, app is planned. Verified can only come from a GhostVerify post report, so verified == 0 and the next unit is the planned app unit."
+}

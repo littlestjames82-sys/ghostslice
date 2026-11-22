@@ -1,0 +1,1 @@
+{"host":"api.example.test","info":{"title":"Harbour Pets API (legacy)","version":"1.0.0"},"paths":{"/pets":{"get":{"operationId":"listPets","responses":{"200":{"description":"A page of pets"}}}}},"swagger":"2.0"}

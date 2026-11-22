@@ -1,0 +1,13 @@
+{
+  "id": "watch-demo",
+  "version": "0.1.0",
+  "kind": "context",
+  "stack": [
+    "python"
+  ],
+  "ghostslice": ">=1.0,<2.0",
+  "author": "Ghost Developer Studio",
+  "date": "2026-10-14",
+  "profile_file": "profile.json",
+  "bundle": "../fixture-bundle"
+}

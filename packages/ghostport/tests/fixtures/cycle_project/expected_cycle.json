@@ -1,0 +1,7 @@
+{
+  "cycle_members": [
+    "cyc/x.py",
+    "cyc/y.py"
+  ],
+  "rule": "A cycle in the touched set ports together as ONE combined unit, and the plan names the cycle as a blocker/member list instead of ordering x before y or y before x."
+}

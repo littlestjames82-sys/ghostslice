@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GhostConsole board</title>
+<style>
+body { font-family: system-ui, sans-serif; margin: 2rem; background: #111; color: #eee; }
+header h1 { margin-bottom: 0.2rem; }
+header p, footer p { color: #aaa; }
+.board { display: flex; gap: 1rem; align-items: flex-start; flex-wrap: wrap; }
+.col { flex: 1 1 300px; background: #1b1b1b; border-radius: 8px; padding: 1rem; }
+.col h2 { margin-top: 0; }
+.col.verified h2 { color: #7dc47f; }
+.col.attention h2 { color: #e08a8a; }
+.col.stale h2 { color: #d8b25c; }
+.card { background: #242424; border-radius: 6px; padding: 0.8rem; margin-bottom: 1rem; }
+.card h3 { margin: 0 0 0.2rem 0; }
+.card .path, .card .why { color: #999; font-size: 0.85em; }
+.card ul { list-style: none; padding: 0; margin: 0.6rem 0 0 0; }
+.card li { padding: 0.25rem 0; border-top: 1px solid #333; font-size: 0.92em; }
+.chip { display: inline-block; min-width: 5.2em; text-align: center; border-radius: 4px; padding: 0 0.3em; margin-right: 0.5em; font-size: 0.82em; background: #444; }
+.chip.ok { background: #2e5d31; }
+.chip.attention, .chip.unreadable { background: #6e2f2f; }
+.chip.stale { background: #6e5a24; }
+.chip.absent { background: #333; color: #999; }
+.meta { color: #999; font-size: 0.85em; }
+</style>
+</head>
+<body>
+<header>
+<h1>GhostConsole board</h1>
+<p>Generated 2026-10-14T14:24:38.554445+00:00 from local report files only. 4 project(s). Stale window: 7 day(s). Read-only: this board was built by reading reports, no tool was run.</p>
+</header>
+<main class="board">
+<section class="col verified">
+<h2>Verified (1)</h2>
+<article class="card">
+<h3>verified-proj</h3>
+<div class="path">fixture_reports/verified-proj</div>
+<div class="why">Why here: latest reports ok and inside the 7 day stale window</div>
+<ul>
+<li><span class="chip ok">ok</span><strong>GhostSlice</strong>: latest export: 123,456 -&gt; 45,678 tokens (saved 77,778) <span class="meta">6h ago (reported) · .ghostslice-history.jsonl</span></li>
+<li><span class="chip ok">ok</span><strong>GhostVerify</strong>: verdict: sufficient <span class="meta">51m ago (mtime) · bundle/verify-report.json</span></li>
+<li><span class="chip ok">ok</span><strong>GhostBench</strong>: run fixture-run-1: 5 task(s) <span class="meta">51m ago (mtime) · runs/bench-report.json</span></li>
+<li><span class="chip ok">ok</span><strong>GhostScope</strong>: pack: 1 files <span class="meta">51m ago (mtime) · pack/scope.json</span></li>
+<li><span class="chip ok">ok</span><strong>GhostLedger</strong>: totals: 9 entries <span class="meta">6h ago (reported) · ledger-report.json</span></li>
+<li><span class="chip ok">ok</span><strong>GhostWatch</strong>: verdict: fresh <span class="meta">51m ago (mtime) · watch/watch-report.json</span></li>
+<li><span class="chip ok">ok</span><strong>GhostApprove</strong>: queue clear (1 request(s), all decided) <span class="meta">51m ago (mtime) · .ghostapprove</span></li>
+<li><span class="chip absent">no report</span><strong>GhostHandoff</strong>: no handoff pack found</li>
+<li><span class="chip absent">no report</span><strong>GhostLogs</strong>: no incident pack found</li>
+<li><span class="chip absent">no report</span><strong>GhostDeps</strong>: no deps pack found</li>
+<li><span class="chip absent">no report</span><strong>GhostData</strong>: no data pack found</li>
+</ul>
+</article>
+</section>
+<section class="col attention">
+<h2>Attention (1)</h2>
+<article class="card">
+<h3>attention-proj</h3>
+<div class="path">fixture_reports/attention-proj</div>
+<div class="why">Why here: Verify verdict: gaps_found</div>
+<ul>
+<li><span class="chip ok">ok</span><strong>GhostSlice</strong>: latest export: 123,456 -&gt; 45,678 tokens (saved 77,778) <span class="meta">6h ago (reported) · .ghostslice-history.jsonl</span></li>
+<li><span class="chip attention">attention</span><strong>GhostVerify</strong>: verdict: gaps_found, 3 gap(s) <span class="meta">51m ago (mtime) · bundle/verify-report.json</span></li>
+<li><span class="chip absent">no report</span><strong>GhostBench</strong>: no report found</li>
+<li><span class="chip absent">no report</span><strong>GhostScope</strong>: no report found</li>
+<li><span class="chip absent">no report</span><strong>GhostLedger</strong>: no report found</li>
+<li><span class="chip ok">ok</span><strong>GhostWatch</strong>: verdict: fresh <span class="meta">51m ago (mtime) · watch/watch-report.json</span></li>
+<li><span class="chip attention">attention</span><strong>GhostApprove</strong>: 2 pending of 3 request(s) <span class="meta">51m ago (mtime) · .ghostapprove</span></li>
+<li><span class="chip absent">no report</span><strong>GhostHandoff</strong>: no handoff pack found</li>
+<li><span class="chip absent">no report</span><strong>GhostLogs</strong>: no incident pack found</li>
+<li><span class="chip absent">no report</span><strong>GhostDeps</strong>: no deps pack found</li>
+<li><span class="chip absent">no report</span><strong>GhostData</strong>: no data pack found</li>
+</ul>
+</article>
+</section>
+<section class="col stale">
+<h2>Stale (2)</h2>
+<article class="card">
+<h3>empty-proj</h3>
+<div class="path">fixture_reports/empty-proj</div>
+<div class="why">Why here: no reports found</div>
+<ul>
+<li><span class="chip absent">no report</span><strong>GhostSlice</strong>: no report found</li>
+<li><span class="chip absent">no report</span><strong>GhostVerify</strong>: no report found</li>
+<li><span class="chip absent">no report</span><strong>GhostBench</strong>: no report found</li>
+<li><span class="chip absent">no report</span><strong>GhostScope</strong>: no report found</li>
+<li><span class="chip absent">no report</span><strong>GhostLedger</strong>: no report found</li>
+<li><span class="chip absent">no report</span><strong>GhostWatch</strong>: no report found</li>
+<li><span class="chip absent">no report</span><strong>GhostApprove</strong>: no report found</li>
+<li><span class="chip absent">no report</span><strong>GhostHandoff</strong>: no handoff pack found</li>
+<li><span class="chip absent">no report</span><strong>GhostLogs</strong>: no incident pack found</li>
+<li><span class="chip absent">no report</span><strong>GhostDeps</strong>: no deps pack found</li>
+<li><span class="chip absent">no report</span><strong>GhostData</strong>: no data pack found</li>
+</ul>
+</article>
+<article class="card">
+<h3>stale-proj</h3>
+<div class="path">fixture_reports/stale-proj</div>
+<div class="why">Why here: Watch verdict: stale</div>
+<ul>
+<li><span class="chip ok">ok</span><strong>GhostSlice</strong>: latest export: 123,456 -&gt; 45,678 tokens (saved 77,778) <span class="meta">6h ago (reported) · .ghostslice-history.jsonl</span></li>
+<li><span class="chip absent">no report</span><strong>GhostVerify</strong>: no report found</li>
+<li><span class="chip absent">no report</span><strong>GhostBench</strong>: no report found</li>
+<li><span class="chip absent">no report</span><strong>GhostScope</strong>: no report found</li>
+<li><span class="chip absent">no report</span><strong>GhostLedger</strong>: no report found</li>
+<li><span class="chip stale">stale</span><strong>GhostWatch</strong>: verdict: stale <span class="meta">51m ago (mtime) · watch/watch-report.json</span></li>
+<li><span class="chip absent">no report</span><strong>GhostApprove</strong>: no report found</li>
+<li><span class="chip absent">no report</span><strong>GhostHandoff</strong>: no handoff pack found</li>
+<li><span class="chip absent">no report</span><strong>GhostLogs</strong>: no incident pack found</li>
+<li><span class="chip absent">no report</span><strong>GhostDeps</strong>: no deps pack found</li>
+<li><span class="chip absent">no report</span><strong>GhostData</strong>: no data pack found</li>
+</ul>
+</article>
+</section>
+</main>
+<footer>
+<p>A card in Verified means the latest reports on disk say ok. It is a statement about saved reports, not a live guarantee about the project. Absent rows mean the tool has not reported for that project, or its report was not found in the bounded search.</p>
+</footer>
+</body>
+</html>

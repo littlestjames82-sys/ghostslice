@@ -1,0 +1,1 @@
+"""Adversarial fixture shop package."""

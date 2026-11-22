@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "shared-server": {
+      "command": "python3",
+      "args": ["-m", "example_shared_server"],
+      "env": {}
+    },
+    "cursor-only": {
+      "command": "node",
+      "args": ["example-cursor-server.js"],
+      "env": {}
+    }
+  }
+}

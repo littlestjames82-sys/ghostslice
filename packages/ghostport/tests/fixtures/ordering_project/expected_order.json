@@ -1,0 +1,13 @@
+{
+  "units_leaves_first": [
+    "pkg/leaf.py",
+    "pkg/mid.py",
+    "pkg/app.py"
+  ],
+  "rule": "No unit is sequenced before a touched dependency it calls/imports. leaf has no project imports, mid imports leaf, app imports mid.",
+  "covering_tests": {
+    "pkg/leaf.py": [
+      "tests/test_leaf.py"
+    ]
+  }
+}

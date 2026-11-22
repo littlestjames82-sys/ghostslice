@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "example-python"
+version = "0.1.0"
+description = "GhostDeps example: a small Python project with planted gaps."
+dependencies = [
+    "requests>=2.28",
+    "colorama==0.4.6",
+    "Pillow>=10.0",
+]

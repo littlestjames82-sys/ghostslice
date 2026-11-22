@@ -1,0 +1,33 @@
+2026-10-13T22:14:01Z INFO  billing-api boot build=1043
+2026-10-13T22:14:05Z INFO  poll ok queue=payments depth=0
+2026-10-13T22:14:05Z INFO  poll ok queue=payments depth=0
+2026-10-13T22:14:05Z INFO  poll ok queue=payments depth=0
+2026-10-13T22:14:05Z INFO  poll ok queue=payments depth=0
+2026-10-13T22:14:05Z INFO  poll ok queue=payments depth=0
+2026-10-13T22:14:05Z INFO  poll ok queue=payments depth=0
+2026-10-13T22:14:05Z INFO  poll ok queue=payments depth=0
+2026-10-13T22:14:05Z INFO  poll ok queue=payments depth=0
+2026-10-13T22:14:05Z INFO  poll ok queue=payments depth=0
+2026-10-13T22:14:05Z INFO  poll ok queue=payments depth=0
+2026-10-13T22:14:05Z INFO  poll ok queue=payments depth=0
+2026-10-13T22:14:05Z INFO  poll ok queue=payments depth=0
+2026-10-13T22:14:05Z INFO  poll ok queue=payments depth=0
+2026-10-13T22:14:05Z INFO  poll ok queue=payments depth=0
+2026-10-13T22:14:05Z INFO  poll ok queue=payments depth=0
+2026-10-13T22:15:00Z WARN  retry budget low for gateway stripe
+2026-10-13T22:15:00Z WARN  retry budget low for gateway stripe
+2026-10-13T22:15:00Z WARN  retry budget low for gateway stripe
+2026-10-13T22:15:00Z WARN  retry budget low for gateway stripe
+2026-10-13T22:15:00Z WARN  retry budget low for gateway stripe
+2026-10-13T22:15:00Z WARN  retry budget low for gateway stripe
+2026-10-13T22:16:40Z INFO  charge attempt id=ch_8812 amount=49.00
+2026-10-13T22:16:40Z INFO  gateway request sent
+2026-10-13T22:16:41Z ERROR gateway auth rejected key=AKIAEXAMPLEKEY000001
+Traceback (most recent call last):
+  File "billing/gateway.py", line 141, in charge
+    resp = client.post(url)
+billing.errors.GatewayAuthError: 401 from gateway
+2026-10-13T22:16:42Z INFO  charge attempt id=ch_8812 status=failed
+2026-10-13T22:17:00Z INFO  failover to secondary gateway
+2026-10-13T22:17:03Z INFO  charge attempt id=ch_8813 status=ok
+2026-10-13T22:18:00Z INFO  billing-api shutdown clean

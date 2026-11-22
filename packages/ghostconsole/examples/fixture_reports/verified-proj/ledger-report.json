@@ -1,0 +1,11 @@
+{
+  "tool": "ghostledger",
+  "version": "0.1.0",
+  "generated_at": "2026-10-14T08:15:00+00:00",
+  "entries": 9,
+  "loop_warnings": [],
+  "totals": {
+    "estimated_cost": 1.25,
+    "actual_cost": 1.31
+  }
+}

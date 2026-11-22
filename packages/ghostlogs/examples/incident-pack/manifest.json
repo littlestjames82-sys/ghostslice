@@ -1,0 +1,169 @@
+{
+  "tool": "ghostlogs",
+  "version": "0.1.0",
+  "generated_at": "2026-10-18T19:05:00.661610+00:00",
+  "source": {
+    "path": "examples/billing-api.log",
+    "bytes": 1894,
+    "sha256": "424c75b5f5bfa24684e62b1161c60e851ee14efa72701c9fe2d372951b9bedbf",
+    "lines": 33
+  },
+  "token_method": "estimates (BPE-like split v2, per-language calibrated, not exact tokenizer counts)",
+  "estimator_source": "ghostslice",
+  "budget_tokens": 2000,
+  "budget_tier": "full",
+  "budget_tier_meaning": "Every selected window and duplicate exemplar is shown in full.",
+  "pack_estimated_tokens": 708,
+  "over_budget": false,
+  "estimated_tokens_in": 678,
+  "counts": {
+    "total_lines": 33,
+    "kept": 15,
+    "collapsed": 18,
+    "dropped": 0,
+    "dropped_by_reason": {
+      "routine": 0,
+      "duplicate_not_emitted": 0,
+      "window_not_fitted": 0,
+      "window_store_cap": 0
+    },
+    "equation": "total_lines = kept + collapsed + dropped",
+    "reconciles": true
+  },
+  "anchors": {
+    "first_line": {
+      "line": 1,
+      "text": "2026-10-13T22:14:01Z INFO  billing-api boot build=1043"
+    },
+    "last_line": {
+      "line": 33,
+      "text": "2026-10-13T22:18:00Z INFO  billing-api shutdown clean"
+    },
+    "first_timestamp": {
+      "text": "2026-10-13T22:14:01Z",
+      "line": 1
+    },
+    "last_timestamp": {
+      "text": "2026-10-13T22:18:00Z",
+      "line": 33
+    }
+  },
+  "windows": {
+    "matched": 1,
+    "emitted": 1,
+    "suppressed_repeat_matches": 0,
+    "list_truncated": false,
+    "list": [
+      {
+        "start_line": 22,
+        "end_line": 33,
+        "match_line": 25,
+        "pattern": "error-level",
+        "severity": 2,
+        "matches": [
+          {
+            "line": 25,
+            "pattern": "error-level"
+          },
+          {
+            "line": 26,
+            "pattern": "traceback-start"
+          },
+          {
+            "line": 29,
+            "pattern": "exception-name"
+          }
+        ],
+        "stored_lines": 12,
+        "overflow_lines": 0,
+        "repeat_lines_collapsed_in_window": 0,
+        "emitted": true,
+        "trimmed_lines": 0
+      }
+    ]
+  },
+  "duplicates": {
+    "groups": 2,
+    "emitted_groups": 2,
+    "list_truncated": false,
+    "list": [
+      {
+        "signature": "<ts> INFO poll ok queue=payments depth=<n>",
+        "exemplar": "2026-10-13T22:14:05Z INFO  poll ok queue=payments depth=0",
+        "occurrences": 15,
+        "exact_copies": 15,
+        "first_line": 2,
+        "last_line": 16,
+        "emitted": true
+      },
+      {
+        "signature": "<ts> WARN retry budget low for gateway stripe",
+        "exemplar": "2026-10-13T22:15:00Z WARN  retry budget low for gateway stripe",
+        "occurrences": 5,
+        "exact_copies": 5,
+        "first_line": 17,
+        "last_line": 21,
+        "emitted": true
+      }
+    ],
+    "window_groups": 0,
+    "window_list_truncated": false,
+    "window_list": []
+  },
+  "patterns": [
+    {
+      "id": "fatal-level",
+      "regex": "\\b(FATAL|CRITICAL|CRIT)\\b",
+      "severity": 3,
+      "kind": "level"
+    },
+    {
+      "id": "panic",
+      "regex": "panic:|Segmentation fault|core dumped|OOMKilled|Killed process",
+      "severity": 3,
+      "kind": "panic"
+    },
+    {
+      "id": "error-level",
+      "regex": "\\b(ERROR|SEVERE)\\b",
+      "severity": 2,
+      "kind": "level"
+    },
+    {
+      "id": "traceback-start",
+      "regex": "Traceback \\(most recent call last\\):",
+      "severity": 2,
+      "kind": "trace"
+    },
+    {
+      "id": "exception-name",
+      "regex": "\\b(?:[a-z][\\w]*\\.)*[A-Z][\\w]*(?:Exception|Error)\\b|\\b\\w+(?:Exception|Error):|\\bCaused by:",
+      "severity": 2,
+      "kind": "exception"
+    },
+    {
+      "id": "unhandled",
+      "regex": "unhandled (?:exception|rejection)|uncaught exception",
+      "severity": 2,
+      "kind": "exception"
+    }
+  ],
+  "redaction": {
+    "enabled": true,
+    "counts": {
+      "aws-access-key": 1
+    },
+    "total": 1,
+    "scope": "redactions applied while writing pack outputs (INCIDENT.md and manifest.json); the same literal appearing in both files counts per file"
+  },
+  "limits": [
+    "Evidence only: this pack shows what matched, how often, and in what order. It offers no diagnosis and no root cause.",
+    "A failure written in words no pattern matches is invisible to this pack. 'No error windows matched' means no lines matched the pattern set, not that nothing went wrong.",
+    "Near-duplicate grouping masks timestamps, numbers, hex ids, UUIDs, IPs, and quoted strings. Two different errors that differ only in a masked part share one exemplar; the byte-identical count is reported beside the total.",
+    "Token figures are estimates from the stamped method, not a vendor tokenizer count.",
+    "Window line storage is capped per run; lines past the cap are counted as dropped (window store cap), never silently lost.",
+    "The first burst of an error is windowed in full context; later bursts of the same error collapse into duplicate exemplars, and consecutive repeats inside a window collapse in place. Either way the exact occurrence count is stated in the manifest and in the Repeated lines section.",
+    "If a pack had to descend the budget tiers to fit, the manifest records which tier shipped (budget_tier) and what the tier means (budget_tier_meaning), and INCIDENT.md states the tier on its face. Lines trimmed from a window to fit are counted under windows not fitted, never silently lost.",
+    "Secret-shape redaction is exact about lengths by design: the aws-access-key shape is AKIA or ASIA plus exactly 16 characters (20 in total, the same shape GhostSlice's guard uses), so a longer or shorter look-alike is not that shape. Other provider shapes are minimum-length, and a generic assignment needs a sensitive-looking name plus a value of at least 8 characters with at least 4 distinct characters. Redaction lowers risk; it is not a guarantee that every credential form is caught."
+  ]
+}

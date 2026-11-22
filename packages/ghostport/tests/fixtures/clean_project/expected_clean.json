@@ -1,0 +1,10 @@
+{
+  "hits": 0,
+  "not_covered_languages": [
+    "javascript"
+  ],
+  "forbidden_phrases": [],
+  "required_phrasing": "hits for pack",
+  "required_honesty_marker": "does not mean",
+  "note": "The scan note in core v1.0.0 reads 'Results are hits for pack X version Y only. Zero hits does NOT mean this project is ready to upgrade.' The readiness phrase appears only inside that negation, so the test pins the negation marker instead of banning the phrase."
+}

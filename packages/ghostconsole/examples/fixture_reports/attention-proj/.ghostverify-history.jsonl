@@ -1,0 +1,1 @@
+{"at": "2026-10-14T08:05:00+00:00", "tool": "ghostverify", "task": "fixture task", "bundle": "bundle", "bundle_manifest_sha256": "0000000000000000000000000000000000000000000000000000000000000000", "verdict": "gaps_found", "hard_gaps": 3, "soft_gaps": 0, "tokens_before": 45678, "tokens_after": 45678, "patch_result": null}

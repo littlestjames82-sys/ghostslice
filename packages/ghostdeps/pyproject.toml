@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ghostdeps"
+version = "0.1.0"
+description = "Dependency context pack paired with GhostSlice. Local manifests and lockfiles cross-referenced against actual imports. Evidence only: no network, no vulnerability verdicts, versions as recorded locally."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+ghostdeps = "ghostdeps.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

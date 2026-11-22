@@ -1,0 +1,6 @@
+name,trade,town,phone,email,has_website,website_status,google_profile,rating,notes,source
+Hilltop Quarry Hauling,Hauling,Exampleton,423-555-0142,,false,dead,unclaimed,3.7,FICTIONAL example business not a real business,fictional-example
+Cedar Sign Works,Signs,Exampleton,423-555-0173,,false,template,listing-only,4.8,FICTIONAL example business not a real business,fictional-example
+Riverbend Fictional HVAC,HVAC,Sampleville,423-555-0126,,false,none,claimed,4.0,FICTIONAL example business not a real business,fictional-example
+Maple Street Corner Bakery,Bakery,Sampleville,423-555-0119,hello@maplestreetbakery.example,true,live,claimed,4.2,FICTIONAL example business not a real business,fictional-example
+Mystery Works,,,,,,,,,FICTIONAL example business not a real business,fictional-example

@@ -1,0 +1,7 @@
+--- a/shop/helpers.py
++++ b/shop/helpers.py
+@@ -16,4 +16,4 @@
+ def dispatch(route_name):
+     table = dispatch_table()
+-    return table.get(route_name, "render_missing")
++    return table.get(route_name, "render_not_found")

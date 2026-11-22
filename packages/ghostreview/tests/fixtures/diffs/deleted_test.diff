@@ -1,0 +1,13 @@
+diff --git a/tests/test_pricing.py b/tests/test_pricing.py
+deleted file mode 100644
+index 3333333..0000000
+--- a/tests/test_pricing.py
++++ /dev/null
+@@ -1,7 +0,0 @@
+-"""Tests for the fixture project."""
+-
+-from pricing import compute_total
+-
+-
+-def test_compute_total():
+-    assert compute_total([10.0]) == 10.8

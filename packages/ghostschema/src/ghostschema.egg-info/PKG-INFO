@@ -1,0 +1,80 @@
+Metadata-Version: 2.4
+Name: ghostschema
+Version: 0.1.0
+Summary: GhostSchema: slice large API specifications (OpenAPI 3.x JSON, JSON Schema, GraphQL SDL outline) down to what a task touches, by $ref reachability. A GhostSlice companion.
+License: MIT
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+
+# GhostSchema
+
+GhostSchema cuts a large API specification down to the part your task actually touches.
+
+A real OpenAPI document can run to tens of thousands of tokens: hundreds of operations and component schemas, most of them irrelevant to the change you are making. Feeding all of it to a coding agent wastes budget and buries the endpoint that matters. GhostSchema follows the spec's own reference graph (`$ref` links) from the operations or schemas you select, keeps everything reachable, drops everything else, and writes a smaller spec plus a manifest that proves what was kept, what was dropped, and what could not be resolved.
+
+It is a GhostSlice companion. GhostSlice governs what an agent reads from a codebase; GhostSchema governs what it reads from an API contract. It runs entirely on your machine, with no network access and no dependencies beyond the Python standard library.
+
+## What it handles
+
+- **OpenAPI 3.x in JSON**: reduced to a valid smaller OpenAPI document by reachability.
+- **Standalone JSON Schema in JSON**: reduced the same way, with unreachable `$defs` pruned.
+- **GraphQL SDL** (`.graphql`, `.gql`, or SDL-looking text): outline only. See below.
+- **YAML specs: refused.** The Python standard library has no YAML parser, and GhostSchema does not fake one. A `.yaml` or `.yml` file, or YAML content saved under a `.json` name, is refused with a clear message and exit code 2. Convert the spec to JSON first with a tool you trust, then slice the JSON.
+- **Swagger / OpenAPI 2.0: refused**, with a message pointing you at converting to OpenAPI 3.x first. The reference layout differs and v0.1 does not guess at it.
+
+## Quick start
+
+```bash
+# See what a spec is and what it contains
+ghostschema inspect api.json
+
+# Keep one operation and everything it reaches
+ghostschema slice api.json --select getPet -o bundle/
+
+# Or pick by task wording (lexical matching, see Limits)
+ghostschema slice api.json --task "add a pet to the store" -o bundle/
+
+# Keep the whole document (baseline for token comparison)
+ghostschema slice api.json --all -o bundle/
+```
+
+`--select` accepts operationIds, `METHOD /path` pairs, bare paths, schema names, and JSON pointers such as `#/components/schemas/Pet` or `#/$defs/Order`. An unknown id fails loudly by name with exit code 2; nothing is silently ignored.
+
+## The bundle
+
+Slicing writes a bundle directory. The input file is never modified.
+
+- `spec.json`: the reduced spec (JSON formats only). It parses as the same kind of document you started with, and every local `$ref` inside it resolves inside it. GhostSchema checks this itself before writing; a closure failure is reported as an error, never shipped quietly.
+- `manifest.json`: the audit record. Source path, sha256, and byte size; the format detected; the treatment (`reduced` or `outline`); the token estimator method used; estimated tokens before and after; your selection echoed back; kept lists; dropped lists; unresolved remote references with the pointers that referenced them; warnings.
+- `SCHEMA.md`: the same record in plain words, for a human skimming the bundle.
+
+## Remote references are never fetched
+
+A `$ref` that points at an http(s) URL, a file path, or anything that does not start with `#/` is **never fetched or resolved**. There is no network code path in v0.1. Remote refs are left in place in the reduced spec so nothing dangles silently, and each one is recorded in the manifest as unresolved, with the place it was referenced from. If your reduced spec lists unresolved refs, the agent reading it knows the picture has holes, and where they are.
+
+## GraphQL SDL: outline only, on purpose
+
+SDL reachability by name cannot prove that a cut-down SDL document is still a valid, complete schema, so GhostSchema never emits one. For SDL input the bundle contains:
+
+- `outline.json` and `OUTLINE.md`: the types reachable from your selection, with their fields, types, enum values, and union members.
+- `manifest.json` with `treatment: outline`, and dropped type names listed.
+
+Every artifact is labelled outline in its content. Treat an outline as a map of the part of the schema your task touches, not as a schema you can run.
+
+## Limits, stated plainly
+
+
+- **A reduced spec is a reading aid, not a deployable contract.** Do not ship `spec.json` as your API's source of truth. Slice a copy for the agent; keep the original as the contract.
+- **Task selection is word matching.** `--task` scores operations and schemas by shared words in names, paths, summaries, tags, and property names. It will miss an operation whose wording shares nothing with your task. `--select` is the precise route; use it when you know the ids.
+- **Token numbers are estimates.** Counts come from GhostSlice's calibrated estimator when a GhostSlice install or checkout is reachable, and from a documented characters-per-4 fallback otherwise. The manifest stamps which method produced the numbers.
+- **Closure is proved, correctness is not.** GhostSchema guarantees every local `$ref` in the reduced output resolves inside that output. It does not validate your spec against the OpenAPI or JSON Schema meta-schemas, before or after slicing.
+- **SDL parsing is outline-grade.** It is static pattern matching, not a full GraphQL grammar. Unusual descriptions, directives, or extension blocks may parse imperfectly; the outline lists what it found and the manifest warns about the grade.
+- **Local files only.** One spec file in, one bundle directory out. No accounts, no telemetry, nothing leaves the machine.
+
+## MCP
+
+`ghostschema mcp` serves two tools over stdio for MCP clients: `schema_inspect` and `schema_slice`. Payloads are capped summaries (manifest fields and listings), with no spec bodies by default, the same discipline as GhostSlice's MCP server.
+
+## Examples
+
+See `examples/` for a mid-size fixture OpenAPI document and a GraphQL SDL sample, with a walkthrough of slicing each one.

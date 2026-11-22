@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "antigravity-docs": {
+      "command": "python3",
+      "args": ["-m", "example_docs_server"],
+      "env": {
+        "FAKE_TOKEN": "FAKE-EXAMPLE-TOKEN-not-a-real-secret"
+      }
+    }
+  }
+}

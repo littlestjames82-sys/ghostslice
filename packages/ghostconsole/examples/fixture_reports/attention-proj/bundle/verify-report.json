@@ -1,0 +1,27 @@
+{
+  "tool": "ghostverify",
+  "version": "0.1.0",
+  "task": "fixture task",
+  "bundle": "bundle",
+  "verdict": "gaps_found",
+  "exit_code": 0,
+  "gaps": [
+    {
+      "symbol": "missing_0",
+      "needed_by": "src/app.py:main"
+    },
+    {
+      "symbol": "missing_1",
+      "needed_by": "src/app.py:main"
+    },
+    {
+      "symbol": "missing_2",
+      "needed_by": "src/app.py:main"
+    }
+  ],
+  "soft_gaps": [],
+  "tokens": {
+    "bundle_sliced": 45678,
+    "expanded_sliced": 45678
+  }
+}

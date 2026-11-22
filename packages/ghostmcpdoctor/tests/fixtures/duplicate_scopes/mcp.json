@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "scoped-server": {
+      "command": "python3",
+      "args": ["-m", "example_scoped_server"],
+      "env": {}
+    }
+  },
+  "projects": {
+    "/tmp/example-project": {
+      "mcpServers": {
+        "scoped-server": {
+          "command": "python3",
+          "args": ["-m", "example_scoped_server"],
+          "env": {}
+        },
+        "project-only": {
+          "command": "python3",
+          "args": ["-m", "example_project_server"],
+          "env": {}
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ghostrecall"
+version = "0.1.0"
+description = "Project memory slicer paired with GhostSlice: decisions, docs and git history in a checkable bundle"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "Ghost Developer Studio" }]
+keywords = ["llm", "context", "memory", "agents", "ghostslice"]
+dependencies = []
+
+[project.scripts]
+ghostrecall = "ghostrecall.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+ghostrecall = ["dashboard_panel.html"]

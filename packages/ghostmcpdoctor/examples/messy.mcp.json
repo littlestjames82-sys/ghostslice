@@ -1,0 +1,27 @@
+{
+  "mcpServers": {
+    "filesystem-everywhere": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/"],
+      "env": {}
+    },
+    "filesystem-everywhere-again": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/"],
+      "env": {}
+    },
+    "gone-tool": {
+      "command": "ghostmcp-nonexistent-binary-9f3k",
+      "args": ["--serve"],
+      "env": {}
+    },
+    "key-holder": {
+      "command": "python3",
+      "args": ["-m", "example_secret_server"],
+      "env": {
+        "FAKE_API_KEY": "FAKE-EXAMPLE-KEY-not-a-real-secret",
+        "FAKE_TOKEN": "FAKE-EXAMPLE-TOKEN-not-a-real-secret"
+      }
+    }
+  }
+}

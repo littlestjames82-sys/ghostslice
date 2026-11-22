@@ -1,0 +1,11 @@
+{
+  "tool": "ghostwatch",
+  "version": "0.1.0",
+  "checked_at": "2026-10-14T08:20:00+00:00",
+  "bundle": "bundle",
+  "verdict": "stale",
+  "findings": {
+    "missing_bundle_file": [],
+    "stale_symbols": []
+  }
+}

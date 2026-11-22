@@ -1,0 +1,2 @@
+{"at": "2026-10-13T09:15:00+00:00", "kind": "export", "bundle": ".claude_context", "before_tokens": 129555, "after_tokens": 45770, "saved_tokens": 83785, "estimator": "v2"}
+{"at": "2026-10-14T09:10:00+00:00", "kind": "export", "bundle": ".claude_context", "before_tokens": 8200, "after_tokens": 3200, "saved_tokens": 5000, "estimator": "v2"}

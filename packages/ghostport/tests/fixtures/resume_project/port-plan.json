@@ -1,0 +1,23 @@
+{
+  "tool": "ghostport",
+  "version": "0.1.0",
+  "_fixture": "Minimal plan in the shape build_status consumes (units with id/order/estimated_tokens), so status can be tested against the seeded ledger without running plan first.",
+  "units": [
+    {
+      "id": "unit-pkg-leaf",
+      "order": 1,
+      "files": [
+        "pkg/leaf.py"
+      ],
+      "estimated_tokens": 50
+    },
+    {
+      "id": "unit-pkg-app",
+      "order": 2,
+      "files": [
+        "pkg/app.py"
+      ],
+      "estimated_tokens": 60
+    }
+  ]
+}

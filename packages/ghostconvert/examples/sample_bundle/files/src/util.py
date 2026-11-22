@@ -1,0 +1,3 @@
+"""Utility helpers."""
+
+def clamp(value, low, high): ...

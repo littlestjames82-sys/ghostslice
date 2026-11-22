@@ -1,0 +1,206 @@
+{
+  "corpus": {
+    "file": "sample",
+    "name": "adversarial",
+    "version": "0.1.0"
+  },
+  "cost_note": "Costs are ESTIMATES from a local dated price table, never billed amounts.",
+  "created_utc": "sample",
+  "estimator_source": "sample",
+  "estimator_version": "sample-estimator-1",
+  "failures_visible": [
+    {
+      "failures": [
+        "verify predicted 1 hard gap(s)"
+      ],
+      "project": "adversarial",
+      "task": "adv-002-broken-patch-missing-symbol"
+    }
+  ],
+  "honest_scope": {
+    "tasks_measured": 2,
+    "tier": "A (static, no model, no spend)",
+    "what_was_not_measured": [
+      "live agent task completion (Tier B, opt-in, not run)",
+      "answer quality (no LLM judge in v0.1)"
+    ]
+  },
+  "model_for_cost_estimates": null,
+  "price_table_date": "sample",
+  "price_table_source": "sample",
+  "provenance": "sample",
+  "run_id": "SAMPLE-run-b",
+  "run_tests": false,
+  "sample": true,
+  "sample_note": "SAMPLE format example only. Numbers are illustrative and were NOT produced by a bench run. Do not quote as results.",
+  "slice_version": "sample",
+  "subset": {
+    "labelled": false,
+    "task_ids": null
+  },
+  "suite": "slice",
+  "tasks": [
+    {
+      "budget_tokens": null,
+      "failures": [],
+      "files_touched_score": {
+        "expected_files": [
+          "shop/helpers.py"
+        ],
+        "extra_files": [],
+        "informational_only": true,
+        "matched_files": [
+          "shop/helpers.py"
+        ],
+        "missing_expected_files": [],
+        "touched_files": [
+          "shop/helpers.py"
+        ]
+      },
+      "flaky": false,
+      "full_tokens": 4200,
+      "hard_gaps_predicted": 0,
+      "patch": {
+        "files_touched": [
+          "shop/helpers.py"
+        ],
+        "is_empty": false,
+        "lines_added": 1,
+        "lines_removed": 1,
+        "patch_sha256": "sha256:21198084e68cf1118905c699c3b0a819b59029d4f026ed5f4b8d1eba5afc1dac"
+      },
+      "project": "adversarial",
+      "project_commit": null,
+      "project_tree_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "prompt": "sample",
+      "soft_gaps_predicted": 0,
+      "status": "pass",
+      "task": "adv-001-fix-missing-route",
+      "test": {
+        "ran": false,
+        "status": "not-run"
+      },
+      "variants": {
+        "full": {
+          "estimated_input_cost_usd": null,
+          "fit_success": null,
+          "manifest_sha256": null,
+          "saving_pct_vs_full": 0.0,
+          "source": "project-scan",
+          "tokens": 4200
+        },
+        "sliced": {
+          "estimated_input_cost_usd": null,
+          "fit_success": true,
+          "manifest_sha256": "sha256:21198084e68cf1118905c699c3b0a819b59029d4f026ed5f4b8d1eba5afc1dac",
+          "saving_pct_vs_full": 78.6,
+          "source": "provided",
+          "tokens": 900
+        }
+      },
+      "verification_level": "static-analysis",
+      "verify": {
+        "hard_gaps": [],
+        "present": false,
+        "report_sha256": null,
+        "soft_gaps": [],
+        "verdict": null
+      }
+    },
+    {
+      "budget_tokens": null,
+      "failures": [
+        "verify predicted 1 hard gap(s)"
+      ],
+      "files_touched_score": {
+        "expected_files": [
+          "shop/helpers.py"
+        ],
+        "extra_files": [],
+        "informational_only": true,
+        "matched_files": [
+          "shop/helpers.py"
+        ],
+        "missing_expected_files": [],
+        "touched_files": [
+          "shop/helpers.py"
+        ]
+      },
+      "flaky": false,
+      "full_tokens": 4200,
+      "hard_gaps_predicted": 1,
+      "patch": {
+        "files_touched": [
+          "shop/helpers.py"
+        ],
+        "is_empty": false,
+        "lines_added": 1,
+        "lines_removed": 1,
+        "patch_sha256": "sha256:21198084e68cf1118905c699c3b0a819b59029d4f026ed5f4b8d1eba5afc1dac"
+      },
+      "project": "adversarial",
+      "project_commit": null,
+      "project_tree_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "prompt": "sample",
+      "soft_gaps_predicted": 0,
+      "status": "fail",
+      "task": "adv-002-broken-patch-missing-symbol",
+      "test": {
+        "ran": false,
+        "status": "not-run"
+      },
+      "variants": {
+        "full": {
+          "estimated_input_cost_usd": null,
+          "fit_success": null,
+          "manifest_sha256": null,
+          "saving_pct_vs_full": 0.0,
+          "source": "project-scan",
+          "tokens": 4200
+        },
+        "sliced": {
+          "estimated_input_cost_usd": null,
+          "fit_success": true,
+          "manifest_sha256": "sha256:21198084e68cf1118905c699c3b0a819b59029d4f026ed5f4b8d1eba5afc1dac",
+          "saving_pct_vs_full": 78.6,
+          "source": "provided",
+          "tokens": 900
+        }
+      },
+      "verification_level": "static-analysis",
+      "verify": {
+        "hard_gaps": [
+          {
+            "file": "shop/helpers.py",
+            "reason": "recorded patch references missing symbol dispatch_v2",
+            "severity": "hard",
+            "symbol": "dispatch_v2"
+          }
+        ],
+        "present": true,
+        "report_sha256": null,
+        "soft_gaps": [],
+        "verdict": "insufficient"
+      }
+    }
+  ],
+  "tier": "A",
+  "tool": "ghostbench",
+  "tool_version": "0.1.0",
+  "totals": {
+    "fail": 1,
+    "full_tokens": 8400,
+    "hard_gaps_predicted": 1,
+    "pass": 1,
+    "tasks": 2,
+    "unknown": 0,
+    "variants": {
+      "sliced": {
+        "fit_success_rate": 100.0,
+        "saving_pct_vs_full": 78.6,
+        "tokens": 1800
+      }
+    }
+  },
+  "verification_level": "static-analysis"
+}
