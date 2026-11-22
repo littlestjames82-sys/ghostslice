@@ -11,3 +11,10 @@ src/*.egg-info/
 # scanner honours .gitignore, so local ci runs never count them.
 ghostslice-ci.json
 ghostslice-report.html
+
+# Monorepo: packages/ holds the 35 companion projects, each its own
+# package with its own tests and release gate. The core scanner honours
+# .gitignore, so core dogfood runs (ci checks, dead-code scan) scope to
+# the core tree, exactly as they did in the standalone repo. The
+# packages are tracked in git; this entry only scopes the scanner.
+packages/

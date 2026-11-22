@@ -61,6 +61,14 @@ former standalone repo, and the built wheel imports cleanly.
 | `packages/ghostworkflow/` | ghostworkflow | 0.1.0 | 26 |
 | `packages/ghostworktree/` | ghostworktree | 0.1.0 | 40 |
 
+## Core dogfood scope
+
+The core's dogfood checks (its CI checks, token budget, and dead-code
+scan) analyse this repo root. A `packages/` entry in the root
+`.gitignore` scopes those runs to the core tree, exactly as they ran in
+the standalone repo — the scanner honours `.gitignore`. The packages
+are tracked in git and unaffected; each keeps its own tests and gate.
+
 ## Original repos
 
 The former standalone repos for the packages above are archived on
